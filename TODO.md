@@ -60,7 +60,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 ## Implementation work
 
 - [x] **Phase 2: Architecture proposal** - APPROVED by Hannah 2026-08-18 (D-0017).
-- [ ] **Phase 3: Skeleton** (in progress) - DONE: solution layout (`Viegard.slnx`), `Directory.Build.props` with NuGetAudit enforcement, domain event/decision/audit/health model, application ports, broker-semantics `ChannelWorkQueue` with dead-lettering, `FileSecretProvider` + `ConfigurationSecretProvider`, in-memory stores, role-validated pipeline host, admin host `/healthz`, 33 passing tests.  REMAINING: queue telemetry publication (D-0012 wiring), health aggregation endpoints, prompt template assembler + AI output schema validation, Dockerfiles/compose examples, CI decision.
+- [ ] **Phase 3: Skeleton** (nearly complete) - DONE: solution layout (`Viegard.slnx`), `Directory.Build.props` with NuGetAudit enforcement, domain event/decision/audit/health model, application ports, broker-semantics `ChannelWorkQueue` with dead-lettering, `FileSecretProvider` + `ConfigurationSecretProvider`, in-memory stores, role-validated pipeline host, admin host `/healthz`, prompt assembler with random-boundary untrusted-data blocks, strict AI classification output validator, queue telemetry publication + traffic-light evaluator (D-0012; cross-process visibility arrives with the database, D-0004), Dockerfiles + sanitized compose example, 70 passing tests.  REMAINING: verify container builds on the Debian VM (no container tooling on the dev workstation; Hannah chose to defer, 2026-08-18), CI decision, admin GUI queue page (needs shared persistence).
 - [ ] **Phase 4: Data sources** - IMAP, then nginx/SWAG, then MDaemon logs (approved by Hannah 2026-08-18; ordering assumed, confirm if different).
 - [ ] **Phase 5: Deterministic analysis** - rules, correlation, policy evaluation.
 - [ ] **Phase 6: Local AI** - inference abstraction, llama.cpp adapter, local dev inference install.
@@ -80,5 +80,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 - [ ] Model retraining/fine-tuning workflows (feedback data is collected, but training requires explicit approval).
 
 ## Optional improvement
+
+- [ ] **Build the viegard.com website**: public project site for Viegard (branding assets exist in `docs/branding/`).  Scope, hosting, and content to be defined with Hannah.
 
 - [ ] Model evaluation framework (accuracy, precision/recall/F1, calibration, latency, throughput, token usage, VRAM) to compare models on the real workload.  Required eventually per requirements; scheduling TBD.

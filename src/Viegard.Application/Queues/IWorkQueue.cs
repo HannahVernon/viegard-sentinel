@@ -45,19 +45,27 @@ public interface IWorkLease<out T>
 }
 
 /// <summary>
+/// Anything that can report queue statistics for telemetry publication.
+/// Work queues implement this so the telemetry publisher can discover them
+/// without knowing their message types.
+/// </summary>
+public interface IQueueStatsSource
+{
+    string QueueName { get; }
+
+    WorkQueueStats GetStats();
+}
+
+/// <summary>
 /// Broker-semantics work queue port (see ARCHITECTURE.md assumption 3).
 /// Messages must be small, versioned, serializable records carrying entity
 /// IDs, and consumers must be idempotent, so a durable or brokered
 /// implementation can replace the in-process one without code changes.
 /// </summary>
-public interface IWorkQueue<T>
+public interface IWorkQueue<T> : IQueueStatsSource
 {
-    string QueueName { get; }
-
     ValueTask EnqueueAsync(T message, CancellationToken cancellationToken = default);
 
     /// <summary>Lease the next message, waiting until one is available or cancellation.</summary>
     ValueTask<IWorkLease<T>> LeaseAsync(CancellationToken cancellationToken = default);
-
-    WorkQueueStats GetStats();
 }

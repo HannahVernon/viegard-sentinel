@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+**/TestResults/
+.git/
+.github/
+docs/
+deploy/secrets/
+*.md

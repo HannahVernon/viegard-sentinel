@@ -1,0 +1,16 @@
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /source
+COPY . .
+RUN dotnet publish src/Viegard.PipelineHost/Viegard.PipelineHost.csproj \
+    --configuration Release --output /app
+
+# Runtime stage
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
+WORKDIR /app
+COPY --from=build /app .
+
+# Run as the non-root user provided by the base image.
+USER $APP_UID
+
+ENTRYPOINT ["dotnet", "Viegard.PipelineHost.dll"]

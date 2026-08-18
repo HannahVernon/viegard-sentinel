@@ -73,7 +73,7 @@ Configuration is externalized.  Never hard-code: email addresses, mailbox names,
 
 ## Current integrations
 
-None implemented yet.  Planned: Yahoo IMAP, SWAG/nginx logs, llama.cpp inference, MikroTik RouterOS address lists, Fail2Ban, notifications (mechanism TBD).
+None implemented yet.  Planned: Yahoo IMAP (and further IMAP accounts across providers), SWAG/nginx logs, MDaemon mail-server logs, llama.cpp inference, MikroTik RouterOS address lists, Fail2Ban, notifications (mechanism TBD).
 
 ## Current model/inference configuration
 

@@ -119,6 +119,8 @@ src/
   Viegard.Persistence/         Store implementations (in-memory/file first; DB when chosen)
   Viegard.Sources.Imap/        IMAP data source adapter (MailKit)
   Viegard.Sources.Nginx/       nginx/SWAG log source adapter (tailing, rotation, parsing)
+  Viegard.Sources.MDaemonLogs/ MDaemon mail-server log source adapter (SMTP/IMAP/POP
+                               session and screening logs; credential-attack evidence)
   Viegard.Inference.LlamaCpp/  llama-server adapter (OpenAI-compatible wire protocol lives
                                here only; never in Domain/Application)
   Viegard.Actions.Imap/        Email action provider
@@ -131,6 +133,7 @@ tests/
   Viegard.Application.Tests/   Policy, guardrails, schema validation, prompt injection
   Viegard.Sources.Imap.Tests/
   Viegard.Sources.Nginx.Tests/ Replayable log fixtures
+  Viegard.Sources.MDaemonLogs.Tests/  Replayable log fixtures
   Viegard.Integration.Tests/   Inference, ingestion, action providers (no real credentials)
   fixtures/                    nginx log corpora, representative emails, malformed AI output
 docs/

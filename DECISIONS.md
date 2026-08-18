@@ -109,5 +109,15 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Consequences:** Pipeline hosts publish per-queue telemetry and heartbeats to shared persistence; the queue port must expose depth/oldest-age/ack statistics; amber/red thresholds become configuration values (defaults need Hannah's input).
 - **Approval:** Requirement stated by Hannah; derivation design proposed by the agent within the pending ARCHITECTURE.md proposal.
 
+## D-0013: MDaemon log ingestion added to initial data-source scope
+
+- **Date:** 2026-08-18 (Phase 2: Architecture)
+- **Decision:** A `Viegard.Sources.MDaemonLogs` adapter joins the solution layout: ingestion of MDaemon mail-server logs (SMTP/IMAP/POP session and screening logs) as evidence of email credential attacks.  Implementation order assumed as third data source (after IMAP and nginx/SWAG) pending Hannah's confirmation.
+- **Alternatives considered:** Deferring all non-IMAP/nginx sources to a later phase (the prior default).
+- **Rationale:** Hannah hosts her own MDaemon server; its logs are a rich source of detail about who is attempting to compromise email accounts.
+- **Consequences:** Log selection, formats, paths, and the transport mechanism from the MDaemon server are new open questions (see TODO).
+- **Approval:** Explicitly requested by Hannah.
+
+
 
 

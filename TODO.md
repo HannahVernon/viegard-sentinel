@@ -28,6 +28,11 @@ When Hannah answers a question, remove or update the item here and record the ou
 - [ ] **Log transport mechanism** from the SWAG container (on the MikroTik container host) to the Viegard host: network bind mount (NFS/SMB), syslog forwarding, log shipper, or another mechanism.
 - [ ] **Log file paths and formats** (access log format string, error log handling, custom formats).
 
+### MDaemon logs
+
+- [ ] **Which MDaemon logs to ingest** (SMTP in/out, IMAP, POP, Dynamic Screening / security logs, ActiveSync) and their configured formats.
+- [ ] **Log transport mechanism** from the MDaemon server to the Viegard host (network share, syslog, shipper, or another mechanism), and log file paths/rotation behavior.
+
 ### Inference
 
 - [ ] **Dev model selection**: which small quantized Qwen-class model and quantization level for the CPU-only dev workstation.
@@ -54,7 +59,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 - [ ] **Phase 2: Architecture proposal** - drafted in [ARCHITECTURE.md](ARCHITECTURE.md) (status: PROPOSED); awaiting Hannah's approval before major implementation.
 - [ ] **Phase 3: Skeleton** - solution layout, configuration, logging, secrets abstraction, event model, plugin interfaces, health model, audit model, test infrastructure.  Includes NuGetAudit enforcement in `Directory.Build.props`.
-- [ ] **Phase 4: Data sources** - IMAP, then nginx/SWAG.
+- [ ] **Phase 4: Data sources** - IMAP, then nginx/SWAG, then MDaemon logs (approved by Hannah 2026-08-18; ordering assumed, confirm if different).
 - [ ] **Phase 5: Deterministic analysis** - rules, correlation, policy evaluation.
 - [ ] **Phase 6: Local AI** - inference abstraction, llama.cpp adapter, local dev inference install.
 - [ ] **Phase 7: Actions** - action providers, dry-run first; real actions only after explicit approval.

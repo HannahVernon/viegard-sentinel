@@ -91,3 +91,13 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Consequences:** The two services need a defined communication mechanism (see ARCHITECTURE.md proposal); deployment involves two containers.
 - **Approval:** Explicitly approved by Hannah.
 
+## D-0011: Process topology is extensible per service (role-configurable pipeline hosts)
+
+- **Date:** 2026-08-18 (Phase 2: Architecture)
+- **Decision:** The pipeline host is a role-configurable binary deployable N times, each instance running a configured subset of modules.  Data sources are multi-instance by configuration: Viegard must support many mail accounts across many providers (including self-hosted servers such as MDaemon), each as an isolated worker with its own credential, offsets, and health.  The correlator and the policy/action engine are singleton roles enforced by configuration validation.  Cross-process module communication uses a durable implementation of the same broker-semantics `IWorkQueue` port that in-process channels implement.
+- **Alternatives considered:** Fixed single pipeline process (insufficient per Hannah's requirement); per-domain fixed split (mail host vs. security host); per-integration microprocesses (highest isolation, highest operational cost).
+- **Rationale:** Hannah requires the number of processes to be extensible on a per-service basis; she monitors roughly ten mail accounts across four or five providers.
+- **Consequences:** A database-backed durable queue is the first cross-process transport; singleton-role validation is required; deployment topology becomes a configuration concern, not a code concern.
+- **Approval:** Requirement stated by Hannah; design shape (roles, singletons, transport) proposed by the agent within the pending ARCHITECTURE.md proposal.
+
+

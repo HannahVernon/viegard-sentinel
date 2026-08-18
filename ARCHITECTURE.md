@@ -13,7 +13,7 @@ Assumptions made in this proposal that Hannah should confirm or correct:
 2. **The pipeline host exposes no inbound network listener** except a local health endpoint; the admin API is the only administrative HTTP surface.  Communication between the two services flows through shared persistence (reads) and a persisted command queue (writes), not a direct API on the pipeline host.
 3. **In-process queues (bounded channels) are sufficient** for v1 throughput (home-scale mail volume and nginx logs).  The queue port is designed with **broker semantics from day one**: explicit acknowledge/abandon, small versioned serializable messages that carry entity IDs rather than payload object graphs, idempotent consumers, and a poison-message policy.  The in-process Channel implementation is the degenerate case, so an external broker (SQL Server Service Broker, Kafka, or another; see TODO) can replace it later without a rewrite.
 4. **MailKit** is the intended IMAP library, subject to a supply-chain review before installation.
-5. Correlation and policy evaluation for v1 can run **within the single pipeline process**; horizontal scaling is out of scope.
+5. Default v1 deployment runs all pipeline modules **in one process**, but process topology is **extensible per service**: the pipeline host is a role-configurable binary that can be deployed N times, each instance running a configured subset of modules (see "Host roles and process topology").  Data sources are also multi-instance by configuration (e.g., ten IMAP accounts across several mail hosts, each with its own worker, credential, offsets, and health).  Horizontal scaling of a *single* role beyond one process (other than sources) is out of scope for v1.
 
 ## Layered view
 
@@ -85,10 +85,23 @@ Key invariants:
 
 Deployable | Container | Responsibility
 -----------|-----------|---------------
-`viegard-pipeline` | Worker Service (Generic Host) | Ingestion, normalization, correlation, classification, policy, actions, audit.  Holds integration credentials.  No inbound listener except a bind-local health endpoint.
+`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
 `viegard-admin` | ASP.NET Core | Read access to incidents, classifications, decisions, audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections).  Holds no integration credentials.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
 Database | TBD (D-0004 deferred) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, feedback.
+
+### Host roles and process topology (proposal)
+
+The pipeline host executable is **role-configurable**: its configuration declares which modules the instance runs.  This makes the number of processes extensible per service without code changes.  Examples:
+
+- v1 default: one instance running every module.
+- Later: one instance per mail provider (each holding only that provider's credentials), one instance for nginx ingestion, one core instance for correlation + policy + actions.
+
+Rules:
+
+- **Singleton roles.**  The correlator (single writer over incident state) and the policy/action engine (guardrail counters, action rate caps, circuit breaker state must be globally consistent) run in exactly one instance.  Configuration validation rejects topologies that violate this.
+- **Multi-instance roles.**  Data-source and classification modules fan out freely.  Each configured data-source instance (e.g., each IMAP account) is an isolated worker with its own connection, credential, ingestion offsets, and health contributor, regardless of which process hosts it.
+- **Transport follows topology.**  Modules co-located in one process communicate over in-process bounded channels; modules split across processes use a durable queue implementation of the same `IWorkQueue` port (database-backed table queue first; an external broker can replace it later, see TODO).  Module code is identical in both topologies.
 
 ### Inter-service communication (proposal)
 

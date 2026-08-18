@@ -86,7 +86,7 @@ Key invariants:
 Deployable | Container | Responsibility
 -----------|-----------|---------------
 `viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
-`viegard-admin` | ASP.NET Core | Read access to incidents, classifications, decisions, audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections); queue health monitor with per-queue traffic-light status (see Observability).  Holds no integration credentials.
+`viegard-admin` | ASP.NET Core | Mobile-compatible (responsive, PWA) admin web GUI + API: read access to incidents, classifications, decisions, audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone; queue health monitor with per-queue traffic-light status (see Observability); Web Push notification delivery.  Holds no integration credentials.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
 Database | TBD (D-0004 deferred) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, feedback.
 
@@ -126,6 +126,8 @@ src/
   Viegard.Actions.Imap/        Email action provider
   Viegard.Actions.MikroTik/    RouterOS address-list action provider
   Viegard.Actions.Fail2Ban/    Fail2Ban integration (mode TBD)
+  Viegard.Notifications.Email/ Operator status/alert emails via SMTP (MailKit)
+  Viegard.Notifications.WebPush/ Web Push (RFC 8030/8291) delivery for the mobile admin GUI
   Viegard.PipelineHost/        Worker service executable
   Viegard.AdminApi/            Admin API executable
 tests/
@@ -154,7 +156,7 @@ Interface | Metaphor | Contract summary
 `IInferenceProvider` | Mind | Provider-neutral structured inference: domain request (template id + variables + output schema) -> schema-validated domain response.  No OpenAI types.
 `IPolicyEngine` | Judgment | (`Classification`, context, guardrail state) -> `Decision` (Permit / Deny / RequireApproval / DryRun) with matched-policy provenance
 `IActionProvider` | Talons | Executes a closed catalog of typed operations; validates inputs; returns `ActionResult` with rollback info
-`INotificationProvider` | Talons | Alert delivery (mechanism TBD)
+`INotificationProvider` | Talons | Operator notification delivery; initial implementations: operator email (SMTP) and Web Push to the mobile admin GUI (payloads minimal; content never includes secrets)
 `IAuditLedger` | Ledger | Append-only audit records covering every stage
 `ISecretProvider` | Roost | Named secret retrieval; file-mounted (prod) and user-secrets (dev) implementations
 `IHealthContributor` | - | Per-component health surfaced by both hosts

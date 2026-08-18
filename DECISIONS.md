@@ -118,6 +118,16 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Consequences:** Log selection, formats, paths, and the transport mechanism from the MDaemon server are new open questions (see TODO).
 - **Approval:** Explicitly requested by Hannah.
 
+## D-0014: Mobile-compatible admin GUI, Web Push, and operator status emails
+
+- **Date:** 2026-08-18 (Phase 2: Architecture)
+- **Decision:** The admin GUI is a mobile-compatible website so Hannah can monitor status and approve/deny actions from her phone.  The platform supports push notifications via the mobile website (Web Push) and operator status emails, both as `INotificationProvider` implementations (`Viegard.Notifications.WebPush`, `Viegard.Notifications.Email`).
+- **Alternatives considered:** Desktop-only admin UI; native mobile app (heavier build/maintenance); third-party notification services such as ntfy/Pushover (additional dependency and data path).
+- **Rationale:** Hannah's stated requirements for remote monitoring and approval.
+- **Consequences:** Frontend technology, Web Push privacy sign-off (third-party push relays with E2E-encrypted payloads), SMTP notification details, and phone-to-GUI network access are new open questions (see TODO).  Admin authentication becomes still more consequential since approvals can originate from a phone.
+- **Approval:** Requirements explicitly stated by Hannah; implementation shape pending her answers to the open questions.
+
+
 
 
 

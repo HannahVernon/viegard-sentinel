@@ -48,8 +48,11 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ### Operations
 
+- [ ] **Admin GUI frontend technology** (Blazor Server, Blazor WASM PWA, Razor Pages + progressive JS, or a JS SPA).  Web Push requires a service worker + HTTPS regardless of choice.
+- [ ] **Web Push authorization**: browser push transits third-party relays (FCM/Apple/Mozilla) with E2E-encrypted payloads; needs Hannah's explicit sign-off given the local-first privacy posture.
+- [ ] **Operator email notification details**: sending SMTP server/account, sender/recipient addresses, TLS settings, and which events warrant email vs. push.
+- [ ] **How the phone reaches the admin GUI** (VPN such as WireGuard vs. exposure through SWAG; affects Web Push subscription and admin auth threat model).
 - [ ] **Admin API authentication model.**
-- [ ] **Notification/alerting mechanism and destinations.**
 - [ ] **Retention periods** for raw events, normalized events, incidents, classifications, actions, audit records, and model prompts/responses.
 - [ ] **Observability/monitoring technology** if the choice materially affects deployment.
 - [ ] **Queue traffic-light thresholds**: amber/red values for oldest-message age, depth, and heartbeat staleness per queue (see D-0012); defaults need Hannah's approval.

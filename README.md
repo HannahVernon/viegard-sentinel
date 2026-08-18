@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/branding/wordmark-lockup.jpg" alt="Viegard: a raven sentinel beside the VIEGARD wordmark" width="600">
+</p>
+
 # Viegard
 
 Viegard is a modular, self-hosted autonomous monitoring and security platform with local AI inference.

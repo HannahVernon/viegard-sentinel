@@ -47,6 +47,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 - [ ] **Notification/alerting mechanism and destinations.**
 - [ ] **Retention periods** for raw events, normalized events, incidents, classifications, actions, audit records, and model prompts/responses.
 - [ ] **Observability/monitoring technology** if the choice materially affects deployment.
+- [ ] **Queue traffic-light thresholds**: amber/red values for oldest-message age, depth, and heartbeat staleness per queue (see D-0012); defaults need Hannah's approval.
 - [ ] **Forgejo branch protection** for `main` and `dev` (GitHub rulesets are applied on the mirror; decide whether to mirror the protection on Forgejo).
 
 ## Implementation work

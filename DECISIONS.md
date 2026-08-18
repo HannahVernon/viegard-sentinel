@@ -100,4 +100,14 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Consequences:** A database-backed durable queue is the first cross-process transport; singleton-role validation is required; deployment topology becomes a configuration concern, not a code concern.
 - **Approval:** Requirement stated by Hannah; design shape (roles, singletons, transport) proposed by the agent within the pending ARCHITECTURE.md proposal.
 
+## D-0012: Admin GUI must show per-queue traffic-light health status
+
+- **Date:** 2026-08-18 (Phase 2: Architecture)
+- **Decision:** The admin API/GUI includes a queue health monitor showing a traffic-light (green/amber/red) status per queue so that queues not being processed in a timely fashion are immediately visible.  Status derives from persisted telemetry (depth, oldest-unacknowledged-message age, consumer heartbeats, poison counts); stale telemetry is itself red.  Thresholds are configurable.
+- **Alternatives considered:** Metrics-only exposure (e.g., dashboards in an external monitoring stack) without a first-class admin view; admin API querying pipeline processes directly (rejected: the pipeline exposes no inbound API surface).
+- **Rationale:** Hannah requires immediate visibility of queue processing health as part of inter-service communication monitoring.
+- **Consequences:** Pipeline hosts publish per-queue telemetry and heartbeats to shared persistence; the queue port must expose depth/oldest-age/ack statistics; amber/red thresholds become configuration values (defaults need Hannah's input).
+- **Approval:** Requirement stated by Hannah; derivation design proposed by the agent within the pending ARCHITECTURE.md proposal.
+
+
 

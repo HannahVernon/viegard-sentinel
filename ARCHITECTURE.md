@@ -86,7 +86,7 @@ Key invariants:
 Deployable | Container | Responsibility
 -----------|-----------|---------------
 `viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
-`viegard-admin` | ASP.NET Core | Read access to incidents, classifications, decisions, audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections).  Holds no integration credentials.
+`viegard-admin` | ASP.NET Core | Read access to incidents, classifications, decisions, audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections); queue health monitor with per-queue traffic-light status (see Observability).  Holds no integration credentials.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
 Database | TBD (D-0004 deferred) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, feedback.
 
@@ -196,6 +196,14 @@ Secrets | `ISecretProvider` only.  Never in source, config in git, logs, prompts
 ## Observability
 
 Both hosts expose health endpoints (liveness + per-component readiness: IMAP connection, log ingestion, inference backend, queue depth, action providers).  Metrics (classification throughput, inference latency, action counts, failures, blocked-IP count, AI errors, policy decisions) via a mechanism to be chosen with Hannah if it materially affects deployment (open question).  Structured logging via `Microsoft.Extensions.Logging` abstractions; sink/format choices deferred.
+
+### Queue health monitor (traffic-light)
+
+The admin API/GUI displays a per-queue traffic-light status so stalled or lagging queues are immediately visible.  Requirement from Hannah (D-0012).
+
+- **Signals per queue:** depth (absolute and vs. capacity), age of the oldest unacknowledged message (the primary timeliness signal), consumer heartbeat/liveness, throughput trend, recent poison-message count.
+- **Status derivation (thresholds configurable):** green = consumers alive and oldest-message age below the amber threshold; amber = lag or depth above threshold, or recent poison messages; red = no live consumer heartbeat, oldest-message age above the red threshold, or circuit breaker open.
+- **Transport-independent:** pipeline instances publish per-queue telemetry and heartbeats to shared persistence on a short interval; the admin API computes status from those records and treats stale telemetry itself as red (detects a dead pipeline process even when a queue is empty).  For DB-backed queues the admin API can additionally measure depth and oldest-message age directly from the queue table, independent of the producer.
 
 ## Proposed initial dependencies (each requires supply-chain review before install)
 

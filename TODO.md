@@ -50,7 +50,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ## Implementation work
 
-- [ ] **Phase 2: Architecture proposal** - propose components, interfaces, data models, dependencies, deployment topology, and security boundaries; await Hannah's approval before major implementation.
+- [ ] **Phase 2: Architecture proposal** - drafted in [ARCHITECTURE.md](ARCHITECTURE.md) (status: PROPOSED); awaiting Hannah's approval before major implementation.
 - [ ] **Phase 3: Skeleton** - solution layout, configuration, logging, secrets abstraction, event model, plugin interfaces, health model, audit model, test infrastructure.  Includes NuGetAudit enforcement in `Directory.Build.props`.
 - [ ] **Phase 4: Data sources** - IMAP, then nginx/SWAG.
 - [ ] **Phase 5: Deterministic analysis** - rules, correlation, policy evaluation.

@@ -80,5 +80,14 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 
 - **Date:** 2026-08-18 (Phase 1: Discovery)
 - **Decision:** Commits in this repository use `hannah@mvct.com` (repo-local git config), not the work email in the global git config.
-- **Rationale:** Personal public repository; commits should link to Hannah's personal identity.
 - **Approval:** Explicitly approved by Hannah.
+
+## D-0010: Pipeline host and admin API are separate services
+
+- **Date:** 2026-08-18 (Phase 2: Architecture)
+- **Decision:** Viegard ships as two deployables: a pipeline host (workers: ingestion, correlation, classification, policy, actions) and a separate ASP.NET Core admin API host.
+- **Alternatives considered:** Single host process combining workers and admin API (simpler operations, one container).
+- **Rationale:** Stronger isolation between the security pipeline and the externally reachable admin surface.  A compromise or fault in the admin API does not run in the same process as credential-holding pipeline components.
+- **Consequences:** The two services need a defined communication mechanism (see ARCHITECTURE.md proposal); deployment involves two containers.
+- **Approval:** Explicitly approved by Hannah.
+

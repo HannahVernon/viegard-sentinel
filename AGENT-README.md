@@ -13,7 +13,7 @@ The conceptual identity is a raven acting as a vigilant sentinel (Eyes = ingesti
 
 ## Current development state
 
-**Phase 1 (Discovery) is complete for architecture-shaping questions; Phase 2 (Architecture proposal) is next.**  No application code exists yet.  The repository currently contains only documentation, licensing, and community health files.
+**Phase 1 (Discovery) is complete for architecture-shaping questions.  Phase 2 (Architecture) is in progress: the proposal is drafted in [ARCHITECTURE.md](ARCHITECTURE.md) and awaits Hannah's approval.**  No application code exists yet.  The repository currently contains only documentation, licensing, and community health files.
 
 ## Architecture (intended)
 

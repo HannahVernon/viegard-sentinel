@@ -110,7 +110,7 @@ The admin API never calls into the pipeline process.  It reads shared persistenc
 ## Solution layout (proposed)
 
 ```
-Viegard.sln
+Viegard.slnx                   Solution (XML solution format; .NET 10 SDK default)
 Directory.Build.props          NuGetAudit, nullable, warnings-as-errors, LangVersion
 src/
   Viegard.Domain/              Entities, value objects, enums; zero external dependencies

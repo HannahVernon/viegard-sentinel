@@ -13,7 +13,7 @@ The conceptual identity is a raven acting as a vigilant sentinel (Eyes = ingesti
 
 ## Current development state
 
-**Phase 2 (Architecture) is APPROVED (D-0017, 2026-08-18); the design in [ARCHITECTURE.md](ARCHITECTURE.md) is authoritative.  Phase 3 (Skeleton) is in progress.**
+**Phase 2 (Architecture) is APPROVED (D-0017, 2026-08-18); the design in [ARCHITECTURE.md](ARCHITECTURE.md) is authoritative.  Phase 3 (Skeleton) is substantially complete:** solution structure, domain event/decision model, application ports, broker-semantics channel work queue, secret providers (file + configuration), development-only in-memory stores, role-validated pipeline host, and admin host with a liveness endpoint all build and pass tests.  Remaining Phase 3 work is tracked in TODO.md.
 
 ## Architecture (intended)
 
@@ -32,14 +32,29 @@ Path | Purpose
 `DECISIONS.md`   | Authoritative architectural decision record (living)
 `TODO.md`        | Open questions and work queue (living)
 `AGENT-README.md`| This file (living)
+`ARCHITECTURE.md`| Approved architecture (D-0017)
+`Viegard.slnx`   | Solution file (XML solution format; use it for build/test commands)
+`Directory.Build.props` | Shared build settings incl. NuGetAudit enforcement (do not weaken)
+`src/Viegard.Domain/` | Core domain model (events, incidents, classifications, decisions, actions, audit, health, commands); zero external dependencies
+`src/Viegard.Application/` | Ports (interfaces) and core implementations (channel work queue, secret providers).  Note: classifier namespace is `Viegard.Application.Classifiers` to avoid colliding with the `Classification` domain type
+`src/Viegard.Persistence/` | Development-only in-memory store implementations (until D-0004 chooses a database)
+`src/Viegard.PipelineHost/` | Role-configurable worker host (roles validated at startup; invalid topology refuses to start)
+`src/Viegard.AdminApi/` | Blazor Web App admin host (D-0016); currently template shell + `/healthz`
+`tests/` | xUnit test projects (`Viegard.Domain.Tests`, `Viegard.Application.Tests`)
 `docs/`          | Project documentation and branding assets
 `.github/`       | PR/issue templates and community health files
 
-Source, test, and deployment directories will be documented here when they exist.
-
 ## Development workflow
 
-No build, test, or run commands exist yet.  **Only verified commands may be documented here.**  When the solution skeleton is created, record the exact commands after running them successfully.
+All commands below are verified working from the repository root:
+
+```
+dotnet build Viegard.slnx     # full build (0 warnings expected; warnings are errors)
+dotnet test Viegard.slnx      # all tests
+dotnet test tests/Viegard.Application.Tests   # one test project
+dotnet run --project src/Viegard.PipelineHost # run pipeline host (logs roles, heartbeats)
+dotnet run --project src/Viegard.AdminApi     # run admin host (/healthz liveness)
+```
 
 Git conventions:
 

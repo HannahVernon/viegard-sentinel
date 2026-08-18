@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Viegard.AdminApi/Viegard.AdminApi.csproj" />
+    <Project Path="src/Viegard.Application/Viegard.Application.csproj" />
+    <Project Path="src/Viegard.Domain/Viegard.Domain.csproj" />
+    <Project Path="src/Viegard.Persistence/Viegard.Persistence.csproj" />
+    <Project Path="src/Viegard.PipelineHost/Viegard.PipelineHost.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Viegard.Application.Tests/Viegard.Application.Tests.csproj" />
+    <Project Path="tests/Viegard.Domain.Tests/Viegard.Domain.Tests.csproj" />
+  </Folder>
+</Solution>

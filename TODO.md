@@ -48,7 +48,6 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ### Operations
 
-- [ ] **Admin GUI frontend technology** (Blazor Server, Blazor WASM PWA, Razor Pages + progressive JS, or a JS SPA).  A future push mechanism would require a service worker + HTTPS; keep the choice compatible.
 - [ ] **Operator email notification details**: sending SMTP server/account, sender/recipient addresses, TLS settings, and which events warrant email vs. push.
 - [ ] **How the phone reaches the admin GUI** (VPN such as WireGuard vs. exposure through SWAG; affects Web Push subscription and admin auth threat model).
 - [ ] **Admin API authentication model.**

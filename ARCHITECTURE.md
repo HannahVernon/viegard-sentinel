@@ -86,7 +86,7 @@ Key invariants:
 Deployable | Container | Responsibility
 -----------|-----------|---------------
 `viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
-`viegard-admin` | ASP.NET Core | Mobile-compatible (responsive, PWA) admin web GUI + API: read access to incidents, classifications, decisions, audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone; queue health monitor with per-queue traffic-light status (see Observability).  Mobile push deferred (D-0015).  Holds no integration credentials.
+`viegard-admin` | ASP.NET Core (Blazor Web App: static SSR + Interactive Server islands, D-0016) | Mobile-compatible admin GUI + API: read access to incidents, classifications, decisions, audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no integration credentials.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
 Database | TBD (D-0004 deferred) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, feedback.
 

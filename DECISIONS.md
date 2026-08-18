@@ -134,6 +134,16 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **What changed:** D-0014 originally included Web Push as the push mechanism; that portion is now an open, deferred decision.
 - **Approval:** Deferral explicitly chosen by Hannah.
 
+## D-0016: Admin GUI frontend: Blazor Web App (static SSR + Interactive Server islands) with automated staleness refresh
+
+- **Date:** 2026-08-18 (Phase 2: Architecture)
+- **Decision:** The admin GUI uses the .NET 10 Blazor Web App model: static server-side rendering by default, with Interactive Server components only where interactivity earns its keep (live queue traffic lights, approve/deny).  Approve/deny must also work as plain form posts.  The GUI must present an obvious UX hint whenever displayed data may be stale (dropped circuit, old telemetry, backgrounded tab) and automatically refresh, e.g., "Data is out of date, refreshing...".
+- **Alternatives considered:** Blazor WASM PWA (multi-MB mobile first load, offline capability that buys nothing for server-data dashboards, browser-side token handling); Razor Pages + htmx (third-party JS dependency, hand-rolled dynamics); JS SPA (npm supply-chain exposure, framework churn, second toolchain).
+- **Rationale:** Kilobyte-scale first paint for phone-first "glance and act" use; zero third-party frontend dependencies; server-side cookie auth; per-component WASM render modes remain available later, so this is not a one-way door.
+- **Consequences:** Interactive islands depend on a SignalR circuit; the staleness-refresh UX requirement mitigates circuit drops on mobile.  Monitoring pages may use polling instead of circuits where simpler.
+- **Approval:** Explicitly approved by Hannah, including the staleness-hint/auto-refresh requirement.
+
+
 
 
 

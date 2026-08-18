@@ -1,0 +1,38 @@
+# Viegard deployment example (sanitized).
+#
+# NOT VERIFIED YET: container builds have not been run; treat this file as a
+# starting point, not a tested artifact (see TODO.md).
+#
+# Secrets (D-0006): each secret is one file in ./secrets/ (never committed;
+# see .gitignore).  The directory is mounted read-only and the file name is
+# the secret name, e.g. ./secrets/yahoo-imap-password.
+
+services:
+  viegard-pipeline:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.pipeline
+    container_name: viegard-pipeline
+    restart: unless-stopped
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      Viegard__Secrets__Provider: file
+      Viegard__Secrets__Directory: /run/viegard/secrets
+      # Roles this instance runs (D-0011); all roles by default.
+      Viegard__Host__InstanceId: pipeline-1
+    volumes:
+      - ./secrets:/run/viegard/secrets:ro
+    # No inbound ports: the pipeline host exposes no network listener.
+
+  viegard-admin:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.admin
+    container_name: viegard-admin
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+    ports:
+      # Bind to localhost only; front with a reverse proxy + TLS for real use.
+      - "127.0.0.1:8080:8080"

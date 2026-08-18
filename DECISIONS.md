@@ -150,6 +150,14 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Consequences:** Phase 3 (Skeleton) may begin: solution structure, configuration, logging, secrets abstraction, event model, plugin interfaces, health model, audit model, and test infrastructure.
 - **Approval:** Explicitly approved by Hannah ("lets gooo").
 
+## D-0018: Prompt-injection and AI-output validation implementation approach
+
+- **Date:** 2026-08-18 (Phase 3: Skeleton)
+- **Decision:** Two security-relevant implementation details, chosen by the agent within the approved architecture: (1) `PromptAssembler` renders SYSTEM / APPLICATION / UNTRUSTED-OBSERVED-DATA sections where untrusted values are emitted only inside data blocks delimited by a per-assembly cryptographically random boundary token (observed content cannot forge a closing delimiter), untrusted values can never fill template placeholders (hard error), and oversized values are truncated with an explicit marker.  (2) `ClassificationOutputValidator` is a strict, fail-closed, hand-rolled validator on System.Text.Json: required fields and ranges enforced, unknown top-level properties rejected, oversized output rejected, failures never carry partial data.  No third-party JSON-schema library was added.
+- **Alternatives considered:** Third-party JSON Schema packages (JsonSchema.Net, NJsonSchema): rejected for now to keep the dependency surface minimal for a security-critical path; revisit if schema count grows.  Static delimiter strings: rejected because observed data could embed them.
+- **Approval:** Implementation detail chosen by the agent; does not change any Hannah-approved behavior.
+
+
 
 
 

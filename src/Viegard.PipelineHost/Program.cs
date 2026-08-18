@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using Viegard.Application.Audit;
 using Viegard.Application.Secrets;
 using Viegard.Application.Stores;
+using Viegard.Application.Telemetry;
 using Viegard.Persistence.InMemory;
 using Viegard.PipelineHost.Configuration;
 using Viegard.PipelineHost.Workers;
@@ -44,8 +45,10 @@ builder.Services.AddSingleton<IDecisionStore, InMemoryDecisionStore>();
 builder.Services.AddSingleton<IActionStore, InMemoryActionStore>();
 builder.Services.AddSingleton<ICorrectionStore, InMemoryCorrectionStore>();
 builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
+builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
 
 builder.Services.AddHostedService<PipelineStartupService>();
+builder.Services.AddHostedService<QueueTelemetryPublisher>();
 
 var host = builder.Build();
 host.Run();

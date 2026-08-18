@@ -1,6 +1,6 @@
 # Viegard Architecture
 
-> **Status: PROPOSED (Phase 2).  Awaiting Hannah's approval.  Nothing in this document is implemented yet.**
+> **Status: APPROVED by Hannah on 2026-08-18 (D-0017), including assumptions 1-5.**
 > Approved decisions live in [DECISIONS.md](DECISIONS.md).  Open questions live in [TODO.md](TODO.md).
 
 Viegard is a modular, self-hosted autonomous monitoring and security platform with local AI inference.  This document proposes the component architecture, solution layout, core interfaces, data model, deployment topology, and security boundaries.

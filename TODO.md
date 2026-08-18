@@ -58,8 +58,8 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ## Implementation work
 
-- [ ] **Phase 2: Architecture proposal** - drafted in [ARCHITECTURE.md](ARCHITECTURE.md) (status: PROPOSED); awaiting Hannah's approval before major implementation.
-- [ ] **Phase 3: Skeleton** - solution layout, configuration, logging, secrets abstraction, event model, plugin interfaces, health model, audit model, test infrastructure.  Includes NuGetAudit enforcement in `Directory.Build.props`.
+- [x] **Phase 2: Architecture proposal** - APPROVED by Hannah 2026-08-18 (D-0017).
+- [ ] **Phase 3: Skeleton** (in progress) - solution layout, configuration, logging, secrets abstraction, event model, plugin interfaces, health model, audit model, test infrastructure.  Includes NuGetAudit enforcement in `Directory.Build.props`.
 - [ ] **Phase 4: Data sources** - IMAP, then nginx/SWAG, then MDaemon logs (approved by Hannah 2026-08-18; ordering assumed, confirm if different).
 - [ ] **Phase 5: Deterministic analysis** - rules, correlation, policy evaluation.
 - [ ] **Phase 6: Local AI** - inference abstraction, llama.cpp adapter, local dev inference install.

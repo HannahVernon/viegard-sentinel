@@ -143,6 +143,14 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Consequences:** Interactive islands depend on a SignalR circuit; the staleness-refresh UX requirement mitigates circuit drops on mobile.  Monitoring pages may use polling instead of circuits where simpler.
 - **Approval:** Explicitly approved by Hannah, including the staleness-hint/auto-refresh requirement.
 
+## D-0017: Phase 2 architecture approved
+
+- **Date:** 2026-08-18 (Phase 2: Architecture)
+- **Decision:** Hannah approved the ARCHITECTURE.md proposal as amended through D-0016, including its five assumptions: (1) two-container-plus deployment; (2) no inbound listener on pipeline hosts, admin-to-pipeline communication via shared persistence and a durable command queue; (3) broker-semantics queue port with in-process channels first; (4) MailKit (supply-chain review completed 2026-08-18: version 4.17.0, MIT, low risk); (5) role-configurable process topology with singleton correlator and policy/action engine.
+- **Consequences:** Phase 3 (Skeleton) may begin: solution structure, configuration, logging, secrets abstraction, event model, plugin interfaces, health model, audit model, and test infrastructure.
+- **Approval:** Explicitly approved by Hannah ("lets gooo").
+
+
 
 
 

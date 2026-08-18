@@ -12,6 +12,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 - [ ] **Database technology** for events, incidents, classifications, and audit records.  Deferred by Hannah on 2026-08-18; persistence stays behind store interfaces until chosen.  Options: SQLite (agent recommendation), PostgreSQL container, SQL Server on Linux.
 - [ ] **Event architecture** details: if a meaningful choice arises between alternatives (e.g., event store vs. event bus, push vs. pull correlation), present options before implementing.
+- [ ] **Queue/broker technology**, if/when the in-process channels are outgrown.  The queue port is broker-ready by design (see ARCHITECTURE.md assumption 3).  Research needed: compare candidates on durability, ordering, ack/poison semantics, .NET client quality, and operational cost on a single Docker host.  Candidates raised so far: SQL Server Service Broker (natural fit only if the database decision lands on SQL Server), Apache Kafka including KIP-932 "Queues for Kafka" share groups.  Others to evaluate: RabbitMQ, NATS JetStream, Redis Streams, Postgres `SKIP LOCKED` table queues.
 - [ ] **CI/CD**: whether to use Forgejo Actions, GitHub Actions (on the mirror), both, or neither.
 
 ### Yahoo Mail / IMAP

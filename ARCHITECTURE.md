@@ -11,7 +11,7 @@ Assumptions made in this proposal that Hannah should confirm or correct:
 
 1. **Two-container deployment is acceptable** on the Debian 13 Docker host (pipeline host + admin API host), plus a llama.cpp container/process and, later, a database.
 2. **The pipeline host exposes no inbound network listener** except a local health endpoint; the admin API is the only administrative HTTP surface.  Communication between the two services flows through shared persistence (reads) and a persisted command queue (writes), not a direct API on the pipeline host.
-3. **In-process queues (bounded channels) are sufficient** for v1 throughput (home-scale mail volume and nginx logs); a message broker is not needed initially and the queue sits behind an interface so one could be added later.
+3. **In-process queues (bounded channels) are sufficient** for v1 throughput (home-scale mail volume and nginx logs).  The queue port is designed with **broker semantics from day one**: explicit acknowledge/abandon, small versioned serializable messages that carry entity IDs rather than payload object graphs, idempotent consumers, and a poison-message policy.  The in-process Channel implementation is the degenerate case, so an external broker (SQL Server Service Broker, Kafka, or another; see TODO) can replace it later without a rewrite.
 4. **MailKit** is the intended IMAP library, subject to a supply-chain review before installation.
 5. Correlation and policy evaluation for v1 can run **within the single pipeline process**; horizontal scaling is out of scope.
 
@@ -143,6 +143,7 @@ Interface | Metaphor | Contract summary
 `ISecretProvider` | Roost | Named secret retrieval; file-mounted (prod) and user-secrets (dev) implementations
 `IHealthContributor` | - | Per-component health surfaced by both hosts
 `ICommandQueue` | - | Durable admin-to-pipeline commands
+`IWorkQueue` | Flight | Broker-semantics work queue port (ack/abandon, serializable messages, idempotent consumers); in-process bounded-channel implementation first
 
 ## Event and decision model (proposed)
 

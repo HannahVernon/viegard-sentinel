@@ -1,0 +1,46 @@
+# .NET build artifacts
+bin/
+obj/
+artifacts/
+*.binlog
+
+# User-specific IDE files
+.vs/
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.user
+*.suo
+
+# Test results and coverage
+TestResults/
+coverage/
+*.coverage
+*.trx
+
+# NuGet
+*.nupkg
+packages/
+
+# Local development
+*.local.json
+appsettings.*.local.json
+.env
+.env.*
+
+# Local model files (never commit models)
+*.gguf
+models/
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+
+# OS cruft
+Thumbs.db
+.DS_Store

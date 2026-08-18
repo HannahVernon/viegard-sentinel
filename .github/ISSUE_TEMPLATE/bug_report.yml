@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a defect in Viegard
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps to reproduce the behavior.
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: OS and version where Viegard is running (e.g., Debian 13 in Docker).
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Viegard version
+      description: Version, tag, or commit hash.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Sanitize hostnames, IP addresses, email addresses, and credentials before pasting.
+      render: text
+    validations:
+      required: false

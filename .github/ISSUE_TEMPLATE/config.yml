@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Project overview
+    url: https://github.com/HannahVernon/viegard-sentinel#readme
+    about: Read the README for project goals and current status.
+  - name: Security vulnerabilities
+    url: https://github.com/HannahVernon/viegard-sentinel/security/advisories/new
+    about: Report vulnerabilities privately.  Do not open a public issue.

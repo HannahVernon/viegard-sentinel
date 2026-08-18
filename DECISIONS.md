@@ -127,6 +127,14 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Consequences:** Frontend technology, Web Push privacy sign-off (third-party push relays with E2E-encrypted payloads), SMTP notification details, and phone-to-GUI network access are new open questions (see TODO).  Admin authentication becomes still more consequential since approvals can originate from a phone.
 - **Approval:** Requirements explicitly stated by Hannah; implementation shape pending her answers to the open questions.
 
+## D-0015: Web Push technology decision deferred pending privacy review
+
+- **Date:** 2026-08-18 (Phase 2: Architecture)
+- **Decision:** The push-notification technology for the mobile admin GUI (part of D-0014) is deferred.  Browser Web Push routes deliveries through third-party relays (Google FCM, Apple, Mozilla); payloads are end-to-end encrypted (RFC 8291) but delivery timing/frequency metadata transits those clouds.  Hannah wants further consideration of the privacy implications before committing.  The mobile admin GUI and operator email notifications proceed unaffected; the notification port remains pluggable so a push mechanism (Web Push or an alternative such as a self-hosted ntfy/UnifiedPush server) can be added once decided.
+- **What changed:** D-0014 originally included Web Push as the push mechanism; that portion is now an open, deferred decision.
+- **Approval:** Deferral explicitly chosen by Hannah.
+
+
 
 
 

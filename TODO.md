@@ -48,8 +48,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ### Operations
 
-- [ ] **Admin GUI frontend technology** (Blazor Server, Blazor WASM PWA, Razor Pages + progressive JS, or a JS SPA).  Web Push requires a service worker + HTTPS regardless of choice.
-- [ ] **Web Push authorization**: browser push transits third-party relays (FCM/Apple/Mozilla) with E2E-encrypted payloads; needs Hannah's explicit sign-off given the local-first privacy posture.
+- [ ] **Admin GUI frontend technology** (Blazor Server, Blazor WASM PWA, Razor Pages + progressive JS, or a JS SPA).  A future push mechanism would require a service worker + HTTPS; keep the choice compatible.
 - [ ] **Operator email notification details**: sending SMTP server/account, sender/recipient addresses, TLS settings, and which events warrant email vs. push.
 - [ ] **How the phone reaches the admin GUI** (VPN such as WireGuard vs. exposure through SWAG; affects Web Push subscription and admin auth threat model).
 - [ ] **Admin API authentication model.**
@@ -74,6 +73,8 @@ When Hannah answers a question, remove or update the item here and record the ou
 - (none)
 
 ## Deferred
+
+- [ ] **Mobile push notification technology** (deferred by Hannah 2026-08-18, D-0015): further consideration of privacy implications needed.  Browser Web Push transits third-party relays (FCM/Apple/Mozilla) with E2E-encrypted payloads but cloud-visible delivery metadata; self-hosted alternatives (ntfy/UnifiedPush) exist.  The notification port stays pluggable for whichever mechanism is chosen.
 
 - [ ] Additional data sources (Windows Event Log, Docker logs, SSH logs, SQL Server logs, MikroTik logs, application logs) until explicitly approved.
 - [ ] Model retraining/fine-tuning workflows (feedback data is collected, but training requires explicit approval).

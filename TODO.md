@@ -81,4 +81,6 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ## Optional improvement
 
+- [ ] **Build the viegard.com website**: public project site for Viegard (branding assets exist in `docs/branding/`).  Scope, hosting, and content to be defined with Hannah.
+
 - [ ] Model evaluation framework (accuracy, precision/recall/F1, calibration, latency, throughput, token usage, VRAM) to compare models on the real workload.  Required eventually per requirements; scheduling TBD.

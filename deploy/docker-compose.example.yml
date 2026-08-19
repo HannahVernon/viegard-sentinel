@@ -6,23 +6,85 @@
 # Secrets (D-0006): each secret is one file in ./secrets/ (never committed;
 # see .gitignore).  The directory is mounted read-only and the file name is
 # the secret name, e.g. ./secrets/yahoo-imap-password.
+#
+# PostgreSQL (D-0024): dedicated container; data and nightly dumps live on
+# the VM disk under this directory, so both ride the weekly Hyper-V export.
+# Dumps give ~24h RPO; the data directory alone would be crash-consistent.
 
 services:
+  viegard-db:
+    image: postgres:17
+    container_name: viegard-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: viegard
+      POSTGRES_USER: viegard
+      POSTGRES_PASSWORD_FILE: /run/viegard/secrets/viegard-db-password
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./secrets:/run/viegard/secrets:ro
+    # No published ports: only containers on this compose network reach the
+    # database.  When a satellite pipeline instance on another host needs
+    # access, publish 5432 bound to the LAN interface and firewall it to
+    # that host explicitly.
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U viegard -d viegard" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Nightly logical backups (D-0024): custom-format pg_dump written to the
+  # VM disk; 14 days retained.  Runs once per ~24h in a simple loop.
+  viegard-db-backup:
+    image: postgres:17
+    container_name: viegard-db-backup
+    restart: unless-stopped
+    depends_on:
+      viegard-db:
+        condition: service_healthy
+    entrypoint: [ "/bin/sh", "-c" ]
+    command:
+      - |
+        export PGPASSWORD="$$(cat /run/viegard/secrets/viegard-db-password)"
+        while true; do
+          pg_dump -h viegard-db -U viegard -d viegard -F c \
+            -f "/backups/viegard-$$(date +%F-%H%M).dump" \
+            && echo "backup complete: $$(date -Iseconds)"
+          find /backups -name 'viegard-*.dump' -mtime +14 -delete
+          sleep 86400
+        done
+    volumes:
+      - ./backups/postgres:/backups
+      - ./secrets:/run/viegard/secrets:ro
+
   viegard-pipeline:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.pipeline
     container_name: viegard-pipeline
     restart: unless-stopped
+    depends_on:
+      viegard-db:
+        condition: service_healthy
     environment:
       DOTNET_ENVIRONMENT: Production
       Viegard__Secrets__Provider: file
       Viegard__Secrets__Directory: /run/viegard/secrets
       # Roles this instance runs (D-0011); all roles by default.
       Viegard__Host__InstanceId: pipeline-1
+      # Connection string components; the password is read via the secret
+      # file viegard-db-password, never placed here.
+      Viegard__Database__Host: viegard-db
+      Viegard__Database__Name: viegard
+      Viegard__Database__Username: viegard
     volumes:
       - ./secrets:/run/viegard/secrets:ro
-    # No inbound ports: the pipeline host exposes no network listener.
+    # Syslog listener (D-0023): enable and allowlist explicitly, then map
+    # the UDP port, e.g.:
+    #   Viegard__Sources__Syslog__Enabled: "true"
+    #   Viegard__Sources__Syslog__AllowedSources__0: "192.0.2.10"
+    # ports:
+    #   - "5514:5514/udp"
 
   viegard-admin:
     build:
@@ -30,9 +92,19 @@ services:
       dockerfile: deploy/Dockerfile.admin
     container_name: viegard-admin
     restart: unless-stopped
+    depends_on:
+      viegard-db:
+        condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
+      Viegard__Secrets__Provider: file
+      Viegard__Secrets__Directory: /run/viegard/secrets
+      Viegard__Database__Host: viegard-db
+      Viegard__Database__Name: viegard
+      Viegard__Database__Username: viegard
+    volumes:
+      - ./secrets:/run/viegard/secrets:ro
     ports:
       # Bind to localhost only; front with a reverse proxy + TLS for real use.
       - "127.0.0.1:8080:8080"

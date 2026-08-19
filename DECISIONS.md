@@ -196,6 +196,15 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Consequences:** UDP loss is possible (file logs remain source of truth; SFTP backfill remains a future option); LAN plaintext accepted by Hannah for the home network; nginx log format for the syslog target is Viegard-recommended configuration in SWAG.
 - **Approval:** Explicitly approved by Hannah, including the sequenced deployment.
 
+## D-0024: Database: PostgreSQL 17 in a dedicated container (resolves D-0004)
+
+- **Date:** 2026-08-19 (Phase 4)
+- **Decision:** Viegard's shared persistence is PostgreSQL 17, running as a dedicated container in the Viegard compose stack on the Debian VM (separate from the existing Forgejo PostgreSQL container: independent upgrade cadence, no blast-radius coupling).  Access via EF Core + Npgsql.  Durable work/command queues are implemented in-database using `FOR UPDATE SKIP LOCKED` table queues plus `LISTEN/NOTIFY`, behind the existing `IWorkQueue`/`ICommandQueue` ports; no external broker is needed at home scale.  Disaster recovery: a nightly `pg_dump` sidecar writes dumps to the VM disk (RPO ~24h), riding Hannah's existing weekly Hyper-V export of the VM (crash-consistent; Postgres recovers via WAL replay).  Store/queue implementations are provider-isolated and free to use native PostgreSQL features (JSONB, partition-drop retention); a SQL Server provider remains a documented possible future addition behind the same ports, deliberately not implemented now to avoid a permanent dual-provider maintenance tax and lowest-common-denominator SQL.
+- **Alternatives considered:** SQL Server Express container (T-SQL expertise, Service Broker; ~1.5-2.5 GB RAM floor, Express caps); existing SQL Server instance (cross-host coupling, licensing); SQLite (eliminated: single-writer, no network, incompatible with the approved multi-process topology); DuckDB (OLAP-embedded, wrong tool for the operational store; possible future analytics/model-evaluation role); dual PostgreSQL+SQL Server support from day one (rejected: doubled migrations/tests forever or LCD SQL).
+- **Consequences:** Unblocks cross-process topology consumers: admin GUI data visibility, listener-only instance split (D-0023), and the MDaemon satellite-instance transport option.  New dependencies (EF Core, Npgsql) require supply-chain review at installation.
+- **Approval:** Explicitly approved by Hannah.
+
+
 
 
 

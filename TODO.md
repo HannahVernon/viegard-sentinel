@@ -10,9 +10,9 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ### Architecture / platform
 
-- [ ] **Database technology** for events, incidents, classifications, and audit records.  Deferred by Hannah on 2026-08-18; persistence stays behind store interfaces until chosen.  Options: SQLite (agent recommendation), PostgreSQL container, SQL Server on Linux.
+- [x] **Database technology** - DECIDED (D-0024, 2026-08-19): PostgreSQL 17 dedicated container; EF Core + Npgsql; in-database durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar; SQL Server remains a possible future second provider behind the store/queue ports.
 - [ ] **Event architecture** details: if a meaningful choice arises between alternatives (e.g., event store vs. event bus, push vs. pull correlation), present options before implementing.
-- [ ] **Queue/broker technology**, if/when the in-process channels are outgrown.  The queue port is broker-ready by design (see ARCHITECTURE.md assumption 3).  Research needed: compare candidates on durability, ordering, ack/poison semantics, .NET client quality, and operational cost on a single Docker host.  Candidates raised so far: SQL Server Service Broker (natural fit only if the database decision lands on SQL Server), Apache Kafka including KIP-932 "Queues for Kafka" share groups.  Others to evaluate: RabbitMQ, NATS JetStream, Redis Streams, Postgres `SKIP LOCKED` table queues.
+- [ ] **Queue/broker technology beyond in-database queues**: D-0024 implements durable queues in PostgreSQL (`SKIP LOCKED` + `LISTEN/NOTIFY`); an external broker (Kafka KIP-932 share groups, RabbitMQ, NATS JetStream, Redis Streams) remains a speculative future option only if scale ever demands it.  The queue port stays broker-ready (ARCHITECTURE.md assumption 3).
 - [ ] **CI/CD**: whether to use Forgejo Actions, GitHub Actions (on the mirror), both, or neither.
 
 ### Yahoo Mail / IMAP
@@ -33,8 +33,8 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ### MDaemon logs
 
+- [ ] **MDaemon log transport**: MDaemon has no native syslog (verified 2026-08-19 against official docs).  Recommended approach: a Viegard satellite pipeline instance on the Windows host (file-source role) once PostgreSQL persistence lands (D-0024); interim alternatives: SFTP pull (Windows built-in OpenSSH) or Fluent Bit agent to the syslog listener.  Needs Hannah's confirmation after the Postgres work.
 - [ ] **Which MDaemon logs to ingest** (SMTP in/out, IMAP, POP, Dynamic Screening / security logs, ActiveSync) and their configured formats.
-- [ ] **Log transport mechanism** from the MDaemon server to the Viegard host (network share, syslog, shipper, or another mechanism), and log file paths/rotation behavior.
 
 ### Inference
 

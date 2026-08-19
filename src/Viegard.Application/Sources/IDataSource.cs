@@ -12,11 +12,14 @@ public interface IDataSource
     /// <summary>Unique identifier of this configured source instance.</summary>
     string SourceId { get; }
 
+    /// <summary>Source family (e.g., "imap", "nginx"); selects the matching normalizer.</summary>
+    string SourceType { get; }
+
     /// <summary>
-    /// Continuously produce raw observations until cancelled.  Implementations
+    /// Continuously produce observations until cancelled.  Implementations
     /// must persist ingestion offsets so a restart resumes without loss or
     /// duplication, and must surface malformed input as observations rather
     /// than throwing.
     /// </summary>
-    IAsyncEnumerable<RawObservation> ObserveAsync(CancellationToken cancellationToken);
+    IAsyncEnumerable<ObservedItem> ObserveAsync(CancellationToken cancellationToken);
 }

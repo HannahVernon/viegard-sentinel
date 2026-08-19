@@ -16,3 +16,8 @@ BouncyCastle.Cryptography | 2.6.2 | Legion of the Bouncy Castle Inc. | MIT | htt
 Microsoft.Extensions.Logging.Abstractions | 10.0.11 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT
 Microsoft.Extensions.Options | 10.0.11 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT
 Microsoft.Extensions.TimeProvider.Testing | 10.9.0 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT
+Npgsql | 10.0.3 (transitive) | Npgsql contributors (Shay Rojansky et al.) | PostgreSQL License | https://github.com/npgsql/npgsql/blob/main/LICENSE
+Npgsql.EntityFrameworkCore.PostgreSQL | 10.0.3 | Npgsql contributors | PostgreSQL License | https://github.com/npgsql/efcore.pg/blob/main/LICENSE
+Microsoft.EntityFrameworkCore (+ Relational, Design) | 10.0.11 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT
+Microsoft.Extensions.Options.ConfigurationExtensions | 10.0.11 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT
+dotnet-ef (local tool) | 10.0.11 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT

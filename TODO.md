@@ -62,6 +62,9 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ## Implementation work
 
+- [ ] **PostgreSQL integration verification**: run the 7 skipped integration tests (queue semantics, store round-trip) once local Docker exists (WSL reboot pending) or against the Debian VM; also verify AutoMigrate + the compose stack end-to-end.
+- [ ] **Admin API Postgres wiring**: register the read-side stores and command queue in `viegard-admin` when the admin features (Phase 8) land.
+
 - [x] **Phase 2: Architecture proposal** - APPROVED by Hannah 2026-08-18 (D-0017).
 - [ ] **Phase 3: Skeleton** (nearly complete) - DONE: solution layout (`Viegard.slnx`), `Directory.Build.props` with NuGetAudit enforcement, domain event/decision/audit/health model, application ports, broker-semantics `ChannelWorkQueue` with dead-lettering, `FileSecretProvider` + `ConfigurationSecretProvider`, in-memory stores, role-validated pipeline host, admin host `/healthz`, prompt assembler with random-boundary untrusted-data blocks, strict AI classification output validator, queue telemetry publication + traffic-light evaluator (D-0012; cross-process visibility arrives with the database, D-0004), Dockerfiles + sanitized compose example, 70 passing tests.  REMAINING: verify container builds on the Debian VM (no container tooling on the dev workstation; Hannah chose to defer, 2026-08-18), CI decision, admin GUI queue page (needs shared persistence).
 - [ ] **Phase 4: Data sources** - IMAP adapter DONE (live-account verification outstanding); syslog/nginx source DONE (PR pending; live SWAG configuration outstanding); MDaemon logs next (approved by Hannah 2026-08-18).

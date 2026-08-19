@@ -1,0 +1,233 @@
+using System.Text.Json;
+using Viegard.Domain.Actions;
+using Viegard.Domain.Audit;
+using Viegard.Domain.Classifications;
+using Viegard.Domain.Decisions;
+using Viegard.Domain.Events;
+using Viegard.Domain.Feedback;
+using Viegard.Domain.Health;
+using Viegard.Domain.Incidents;
+using Viegard.Persistence.Postgres.Model;
+
+namespace Viegard.Persistence.Postgres;
+
+/// <summary>Domain &lt;-&gt; row mapping.  JSON columns use web-default serializer options.</summary>
+internal static class Mapping
+{
+    internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    private static string ToJson<T>(T value) => JsonSerializer.Serialize(value, Json);
+
+    private static T FromJson<T>(string json) => JsonSerializer.Deserialize<T>(json, Json)
+        ?? throw new InvalidOperationException($"Persisted JSON deserialized to null for {typeof(T).Name}.");
+
+    public static RawObservationRow ToRow(this RawObservation observation, string rawPayload) => new()
+    {
+        Id = observation.Id,
+        SourceId = observation.SourceId,
+        ObservedAt = observation.ObservedAt,
+        PayloadReference = observation.PayloadReference,
+        IngestOffset = observation.IngestOffset,
+        RawPayload = rawPayload,
+    };
+
+    public static RawObservation ToDomain(this RawObservationRow row) => new()
+    {
+        Id = row.Id,
+        SourceId = row.SourceId,
+        ObservedAt = row.ObservedAt,
+        PayloadReference = row.PayloadReference,
+        IngestOffset = row.IngestOffset,
+    };
+
+    public static NormalizedEventRow ToRow(this NormalizedEvent normalizedEvent) => new()
+    {
+        Id = normalizedEvent.Id,
+        SourceId = normalizedEvent.SourceId,
+        SourceType = normalizedEvent.SourceType,
+        OccurredAt = normalizedEvent.OccurredAt,
+        EntitiesJson = ToJson(normalizedEvent.Entities),
+        PayloadJson = ToJson(normalizedEvent.Payload),
+        RawObservationId = normalizedEvent.RawObservationId,
+    };
+
+    public static NormalizedEvent ToDomain(this NormalizedEventRow row) => new()
+    {
+        Id = row.Id,
+        SourceId = row.SourceId,
+        SourceType = row.SourceType,
+        OccurredAt = row.OccurredAt,
+        Entities = FromJson<List<EntityRef>>(row.EntitiesJson),
+        Payload = FromJson<EventPayload>(row.PayloadJson),
+        RawObservationId = row.RawObservationId,
+    };
+
+    public static IncidentRow ToRow(this Incident incident) => new()
+    {
+        Id = incident.Id,
+        CorrelationKey = incident.CorrelationKey,
+        WindowStart = incident.WindowStart,
+        WindowEnd = incident.WindowEnd,
+        EventIdsJson = ToJson(incident.EventIds),
+        EvidenceJson = ToJson(incident.Evidence),
+        State = (int)incident.State,
+    };
+
+    public static Incident ToDomain(this IncidentRow row) => new()
+    {
+        Id = row.Id,
+        CorrelationKey = row.CorrelationKey,
+        WindowStart = row.WindowStart,
+        WindowEnd = row.WindowEnd,
+        EventIds = FromJson<List<Guid>>(row.EventIdsJson),
+        Evidence = FromJson<List<EvidenceItem>>(row.EvidenceJson),
+        State = (IncidentState)row.State,
+    };
+
+    public static ClassificationRow ToRow(this Classification classification) => new()
+    {
+        Id = classification.Id,
+        SubjectKind = (int)classification.SubjectKind,
+        SubjectId = classification.SubjectId,
+        ClassifierId = classification.ClassifierId,
+        ModelJson = classification.Model is null ? null : ToJson(classification.Model),
+        Category = classification.Category,
+        Confidence = classification.Confidence,
+        Severity = classification.Severity,
+        ReasonsJson = ToJson(classification.Reasons),
+        RecommendedAction = classification.RecommendedAction,
+        Uncertainty = classification.Uncertainty,
+        CreatedAt = classification.CreatedAt,
+    };
+
+    public static Classification ToDomain(this ClassificationRow row) => new()
+    {
+        Id = row.Id,
+        SubjectKind = (ClassificationSubjectKind)row.SubjectKind,
+        SubjectId = row.SubjectId,
+        ClassifierId = row.ClassifierId,
+        Model = row.ModelJson is null ? null : FromJson<ModelInfo>(row.ModelJson),
+        Category = row.Category,
+        Confidence = row.Confidence,
+        Severity = row.Severity,
+        Reasons = FromJson<List<string>>(row.ReasonsJson),
+        RecommendedAction = row.RecommendedAction,
+        Uncertainty = row.Uncertainty,
+        CreatedAt = row.CreatedAt,
+    };
+
+    public static DecisionRow ToRow(this Decision decision) => new()
+    {
+        Id = decision.Id,
+        ClassificationId = decision.ClassificationId,
+        PolicyId = decision.PolicyId,
+        PolicyVersion = decision.PolicyVersion,
+        Outcome = (int)decision.Outcome,
+        Rationale = decision.Rationale,
+        GuardrailsJson = ToJson(decision.Guardrails),
+        CreatedAt = decision.CreatedAt,
+    };
+
+    public static Decision ToDomain(this DecisionRow row) => new()
+    {
+        Id = row.Id,
+        ClassificationId = row.ClassificationId,
+        PolicyId = row.PolicyId,
+        PolicyVersion = row.PolicyVersion,
+        Outcome = (DecisionOutcome)row.Outcome,
+        Rationale = row.Rationale,
+        Guardrails = FromJson<List<GuardrailEvaluation>>(row.GuardrailsJson),
+        CreatedAt = row.CreatedAt,
+    };
+
+    public static ActionRecordRow ToRow(this ActionRecord action) => new()
+    {
+        Id = action.Id,
+        DecisionId = action.DecisionId,
+        ProviderId = action.ProviderId,
+        OperationId = action.OperationId,
+        ParametersJson = action.ParametersJson,
+        Status = (int)action.Status,
+        Error = action.Error,
+        RollbackJson = action.RollbackJson,
+        RequestedAt = action.RequestedAt,
+        CompletedAt = action.CompletedAt,
+    };
+
+    public static ActionRecord ToDomain(this ActionRecordRow row) => new()
+    {
+        Id = row.Id,
+        DecisionId = row.DecisionId,
+        ProviderId = row.ProviderId,
+        OperationId = row.OperationId,
+        ParametersJson = row.ParametersJson,
+        Status = (ActionStatus)row.Status,
+        Error = row.Error,
+        RollbackJson = row.RollbackJson,
+        RequestedAt = row.RequestedAt,
+        CompletedAt = row.CompletedAt,
+    };
+
+    public static AuditRecordRow ToRow(this AuditRecord record) => new()
+    {
+        Id = record.Id,
+        Timestamp = record.Timestamp,
+        Stage = (int)record.Stage,
+        Summary = record.Summary,
+        SourceId = record.SourceId,
+        EventId = record.EventId,
+        IncidentId = record.IncidentId,
+        ClassificationId = record.ClassificationId,
+        DecisionId = record.DecisionId,
+        ActionId = record.ActionId,
+        DetailJson = record.DetailJson,
+    };
+
+    public static CorrectionRow ToRow(this Correction correction) => new()
+    {
+        Id = correction.Id,
+        ClassificationId = correction.ClassificationId,
+        CorrectedCategory = correction.CorrectedCategory,
+        CorrectedBy = correction.CorrectedBy,
+        Note = correction.Note,
+        CreatedAt = correction.CreatedAt,
+    };
+
+    public static Correction ToDomain(this CorrectionRow row) => new()
+    {
+        Id = row.Id,
+        ClassificationId = row.ClassificationId,
+        CorrectedCategory = row.CorrectedCategory,
+        CorrectedBy = row.CorrectedBy,
+        Note = row.Note,
+        CreatedAt = row.CreatedAt,
+    };
+
+    public static QueueTelemetryRow ToRow(this QueueTelemetrySnapshot snapshot) => new()
+    {
+        InstanceId = snapshot.InstanceId,
+        QueueName = snapshot.QueueName,
+        Depth = snapshot.Depth,
+        InFlight = snapshot.InFlight,
+        OldestPendingEnqueuedAt = snapshot.OldestPendingEnqueuedAt,
+        TotalEnqueued = snapshot.TotalEnqueued,
+        TotalCompleted = snapshot.TotalCompleted,
+        TotalAbandoned = snapshot.TotalAbandoned,
+        DeadLetterCount = snapshot.DeadLetterCount,
+        CapturedAt = snapshot.CapturedAt,
+    };
+
+    public static QueueTelemetrySnapshot ToDomain(this QueueTelemetryRow row) => new()
+    {
+        InstanceId = row.InstanceId,
+        QueueName = row.QueueName,
+        Depth = row.Depth,
+        InFlight = row.InFlight,
+        OldestPendingEnqueuedAt = row.OldestPendingEnqueuedAt,
+        TotalEnqueued = row.TotalEnqueued,
+        TotalCompleted = row.TotalCompleted,
+        TotalAbandoned = row.TotalAbandoned,
+        DeadLetterCount = row.DeadLetterCount,
+        CapturedAt = row.CapturedAt,
+    };
+}

@@ -37,7 +37,8 @@ Path | Purpose
 `Directory.Build.props` | Shared build settings incl. NuGetAudit enforcement (do not weaken)
 `src/Viegard.Domain/` | Core domain model (events, incidents, classifications, decisions, actions, audit, health, commands); zero external dependencies
 `src/Viegard.Application/` | Ports (interfaces) and core implementations (channel work queue, secret providers).  Note: classifier namespace is `Viegard.Application.Classifiers` to avoid colliding with the `Classification` domain type
-`src/Viegard.Persistence/` | Development-only in-memory store implementations (until D-0004 chooses a database)
+`src/Viegard.Persistence/` | Development-only in-memory store implementations (default provider)
+`src/Viegard.Persistence.Postgres/` | PostgreSQL provider (D-0024): EF Core + Npgsql, `ViegardDbContext` + migrations (`dotnet dotnet-ef migrations add <Name> --project src/Viegard.Persistence.Postgres`), all store ports, durable `PostgresWorkQueue` (`SKIP LOCKED` visibility-timeout leases, dead-lettering at lease time, `LISTEN/NOTIFY` wakeups), `PostgresCommandQueue`.  Selected via `Viegard:Persistence:Provider` = `postgres`; DB password is the secret `viegard-db-password`
 `src/Viegard.Sources.Imap/` | IMAP source adapter (MailKit): per-account `ImapMailSource` (implicit TLS, read-only folders, IDLE with polling fallback, offset resume), `ImapEventNormalizer` (MailFetchDto JSON -> MailMessageEvent), `LinkExtractor`
 `src/Viegard.Sources.Syslog/` | Syslog UDP listener source (D-0023): guarded `SyslogDatagramHandler` (allowlist, size cap, per-source token bucket), RFC 3164/5424 envelope parser, nginx access-log parser, normalizer routing to `HttpRequestEvent` or generic `SyslogEvent`
 `src/Viegard.PipelineHost/` | Role-configurable worker host (roles validated at startup; invalid topology refuses to start).  `IngestionWorker` pumps all data sources through persist -> normalize -> store -> enqueue -> audit
@@ -53,11 +54,13 @@ All commands below are verified working from the repository root:
 
 ```
 dotnet build Viegard.slnx     # full build (0 warnings expected; warnings are errors)
-dotnet test Viegard.slnx      # all tests
+dotnet test Viegard.slnx      # all tests (PostgreSQL integration tests skip unless VIEGARD_TEST_POSTGRES is set)
 dotnet test tests/Viegard.Application.Tests   # one test project
 dotnet run --project src/Viegard.PipelineHost # run pipeline host (logs roles, heartbeats)
 dotnet run --project src/Viegard.AdminApi     # run admin host (/healthz liveness)
 ```
+
+PostgreSQL integration tests: set `VIEGARD_TEST_POSTGRES` to a connection string for a **disposable test database only** (they migrate the schema and truncate queue tables).  Never point it at a real instance.
 
 Git conventions:
 

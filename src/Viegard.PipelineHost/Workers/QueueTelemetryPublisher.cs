@@ -37,7 +37,7 @@ public sealed class QueueTelemetryPublisher(
             {
                 foreach (var queue in queues)
                 {
-                    var stats = queue.GetStats();
+                    var stats = await queue.GetStatsAsync(stoppingToken).ConfigureAwait(false);
                     await telemetryStore.PublishAsync(
                         new QueueTelemetrySnapshot
                         {

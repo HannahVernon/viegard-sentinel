@@ -15,7 +15,7 @@ public sealed class ChannelWorkQueueTests
         Assert.Equal(1, lease.DeliveryCount);
         await lease.CompleteAsync();
 
-        var stats = queue.GetStats();
+        var stats = queue.GetStatsCore();
         Assert.Equal(0, stats.Depth);
         Assert.Equal(0, stats.InFlight);
         Assert.Equal(1, stats.TotalEnqueued);
@@ -54,7 +54,7 @@ public sealed class ChannelWorkQueueTests
         var redelivery = await queue.LeaseAsync();
         Assert.Equal("retry-me", redelivery.Message);
         Assert.Equal(2, redelivery.DeliveryCount);
-        Assert.Equal(1, queue.GetStats().TotalAbandoned);
+        Assert.Equal(1, queue.GetStatsCore().TotalAbandoned);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public sealed class ChannelWorkQueueTests
         Assert.Equal(2, second.DeliveryCount);
         await second.AbandonAsync();
 
-        var stats = queue.GetStats();
+        var stats = queue.GetStatsCore();
         Assert.Equal(1, stats.DeadLetterCount);
         Assert.Equal(0, stats.Depth);
         Assert.Contains("poison", queue.DeadLetters);
@@ -82,7 +82,7 @@ public sealed class ChannelWorkQueueTests
         var before = DateTimeOffset.UtcNow;
         await queue.EnqueueAsync("waiting");
 
-        var stats = queue.GetStats();
+        var stats = queue.GetStatsCore();
         Assert.NotNull(stats.OldestPendingEnqueuedAt);
         Assert.InRange(stats.OldestPendingEnqueuedAt.Value, before.AddSeconds(-1), DateTimeOffset.UtcNow.AddSeconds(1));
     }
@@ -92,14 +92,14 @@ public sealed class ChannelWorkQueueTests
     {
         var queue = new ChannelWorkQueue<string>("test");
         await queue.EnqueueAsync("aging");
-        var originalOldest = queue.GetStats().OldestPendingEnqueuedAt;
+        var originalOldest = queue.GetStatsCore().OldestPendingEnqueuedAt;
         Assert.NotNull(originalOldest);
 
         var lease = await queue.LeaseAsync();
         await Task.Delay(20);
         await lease.AbandonAsync();
 
-        var stats = queue.GetStats();
+        var stats = queue.GetStatsCore();
         Assert.Equal(originalOldest, stats.OldestPendingEnqueuedAt);
     }
 

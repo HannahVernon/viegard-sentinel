@@ -14,5 +14,5 @@ public interface ICommandQueue
     /// <summary>Lease the next pending command for validation and execution.</summary>
     ValueTask<IWorkLease<AdminCommand>> LeaseAsync(CancellationToken cancellationToken = default);
 
-    WorkQueueStats GetStats();
+    ValueTask<WorkQueueStats> GetStatsAsync(CancellationToken cancellationToken = default);
 }

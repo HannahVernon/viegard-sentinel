@@ -188,6 +188,15 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Rationale:** Attachment parsing is a real attack surface for a security tool; defer until a concrete need exists.
 - **Approval:** Explicitly approved by Hannah.
 
+## D-0023: General syslog UDP ingestion source; assumption 2 revised
+
+- **Date:** 2026-08-19 (Phase 4: Data sources)
+- **Decision:** Viegard gains a general syslog ingestion source (`Viegard.Sources.Syslog`, UDP, RFC 3164/5424 envelopes) serving SWAG/nginx first (nginx logs natively to syslog over UDP; SWAG keeps file logging enabled as the durable record) and future senders such as MikroTik RouterOS remote logging.  This revises ARCHITECTURE.md assumption 2 (pipeline host previously had no inbound listener): the listener is permitted with mandatory guardrails: source-IP allowlist (fail-closed: no allowlist, no listener), per-source rate caps, datagram size cap, everything in the datagram (including claimed hostname/tag) treated as untrusted, origin identity keyed to peer IP.  Deployment is sequenced: the listener runs in the single pipeline instance now; after the database decision (D-0004) enables cross-process queues, it can be split into a credential-free listener-only instance by configuration alone (D-0011).
+- **Alternatives considered:** SFTP pull from RouterOS (no inbound listener, but polling latency and no generalization to other senders); shipper container beside SWAG (robust TCP/TLS but new software on the router); SMB/NFS mount tailing (fragile).
+- **Consequences:** UDP loss is possible (file logs remain source of truth; SFTP backfill remains a future option); LAN plaintext accepted by Hannah for the home network; nginx log format for the syslog target is Viegard-recommended configuration in SWAG.
+- **Approval:** Explicitly approved by Hannah, including the sequenced deployment.
+
+
 
 
 

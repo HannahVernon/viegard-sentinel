@@ -27,8 +27,9 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ### SWAG / nginx logs
 
-- [ ] **Log transport mechanism** from the SWAG container (on the MikroTik container host) to the Viegard host: network bind mount (NFS/SMB), syslog forwarding, log shipper, or another mechanism.
-- [ ] **Log file paths and formats** (access log format string, error log handling, custom formats).
+- [x] **Log transport mechanism** - DECIDED (D-0023): general syslog UDP source; SWAG's nginx adds syslog `access_log`/`error_log` targets while keeping file logs as the durable record.
+- [ ] **Syslog deployment values** (at configuration time): Viegard listener port, allowed source IPs, and the SWAG-side `log_format`/`access_log` directives applied to nginx config.
+- [ ] **nginx log format**: Viegard recommends an extended format (see `docs/swag-syslog-setup.md` once merged); confirm or adjust when configuring SWAG.
 
 ### MDaemon logs
 

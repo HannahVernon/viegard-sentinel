@@ -39,6 +39,7 @@ Path | Purpose
 `src/Viegard.Application/` | Ports (interfaces) and core implementations (channel work queue, secret providers).  Note: classifier namespace is `Viegard.Application.Classifiers` to avoid colliding with the `Classification` domain type
 `src/Viegard.Persistence/` | Development-only in-memory store implementations (until D-0004 chooses a database)
 `src/Viegard.Sources.Imap/` | IMAP source adapter (MailKit): per-account `ImapMailSource` (implicit TLS, read-only folders, IDLE with polling fallback, offset resume), `ImapEventNormalizer` (MailFetchDto JSON -> MailMessageEvent), `LinkExtractor`
+`src/Viegard.Sources.Syslog/` | Syslog UDP listener source (D-0023): guarded `SyslogDatagramHandler` (allowlist, size cap, per-source token bucket), RFC 3164/5424 envelope parser, nginx access-log parser, normalizer routing to `HttpRequestEvent` or generic `SyslogEvent`
 `src/Viegard.PipelineHost/` | Role-configurable worker host (roles validated at startup; invalid topology refuses to start).  `IngestionWorker` pumps all data sources through persist -> normalize -> store -> enqueue -> audit
 `src/Viegard.AdminApi/` | Blazor Web App admin host (D-0016); currently template shell + `/healthz`
 `tests/` | xUnit test projects (`Viegard.Domain.Tests`, `Viegard.Application.Tests`)
@@ -92,7 +93,9 @@ Configuration is externalized.  Never hard-code: email addresses, mailbox names,
 
 **Yahoo/generic IMAP (implemented, not yet run against a live account):** `Viegard.Sources.Imap` supports any IMAP server with implicit TLS on port 993 (Yahoo, personal Gmail with 2SV app passwords, MDaemon).  Per-account configuration binds at `Viegard:Sources:Imap:Accounts`; account hosts/usernames are environment-specific and must never be committed (in development, put the whole section in user-secrets; passwords are secrets named by `PasswordSecretName`).  OAuth2 is a validated-but-unimplemented seam (D-0019).  First run baselines to new-mail-only unless `IngestExistingOnFirstRun` is set (default pending Hannah's confirmation).
 
-Planned: SWAG/nginx logs, MDaemon mail-server logs, llama.cpp inference, MikroTik RouterOS address lists, Fail2Ban, notifications (email; push deferred per D-0015).
+**Syslog UDP listener (implemented and smoke-tested end-to-end):** `Viegard.Sources.Syslog` (D-0023) receives syslog datagrams over UDP, fail-closed: disabled by default, requires a non-empty source-IP allowlist, drops oversized and rate-exceeding datagrams.  nginx access-log lines (tag `nginx_access`) normalize to `HttpRequestEvent`; everything else becomes a generic `SyslogEvent`.  SWAG-side configuration instructions: `docs/swag-syslog-setup.md`.  Future senders: MikroTik RouterOS remote logging, other LAN hosts.
+
+Planned: MDaemon mail-server logs, llama.cpp inference, MikroTik RouterOS address lists, Fail2Ban, notifications (email; push deferred per D-0015).
 
 ## Current model/inference configuration
 

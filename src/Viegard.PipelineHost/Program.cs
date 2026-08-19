@@ -9,6 +9,7 @@ using Viegard.Persistence.InMemory;
 using Viegard.PipelineHost.Configuration;
 using Viegard.PipelineHost.Workers;
 using Viegard.Sources.Imap;
+using Viegard.Sources.Syslog;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -82,6 +83,28 @@ foreach (var configuredAccount in imapAccounts)
 }
 
 builder.Services.AddHostedService<PipelineStartupService>();
+
+// Syslog listener source (D-0023; off unless explicitly enabled with a
+// non-empty source allowlist).
+builder.Services
+    .AddOptions<SyslogSourceOptions>()
+    .Bind(builder.Configuration.GetSection(SyslogSourceOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<SyslogSourceOptions>, SyslogSourceOptionsValidator>();
+
+var syslogOptions = builder.Configuration.GetSection(SyslogSourceOptions.SectionName).Get<SyslogSourceOptions>();
+if (syslogOptions?.Enabled == true)
+{
+    SyslogUdpSource? syslogInstance = null;
+    SyslogUdpSource SyslogFactory(IServiceProvider sp) => syslogInstance ??= new SyslogUdpSource(
+        sp.GetRequiredService<IOptions<SyslogSourceOptions>>().Value,
+        sp.GetRequiredService<ILogger<SyslogUdpSource>>());
+
+    builder.Services.AddSingleton<IDataSource>(SyslogFactory);
+    builder.Services.AddSingleton<Viegard.Application.Health.IHealthContributor>(SyslogFactory);
+    builder.Services.AddSingleton<IEventNormalizer>(sp =>
+        new SyslogEventNormalizer(sp.GetRequiredService<IOptions<SyslogSourceOptions>>().Value));
+}
 builder.Services.AddHostedService<QueueTelemetryPublisher>();
 
 // The ingestion worker runs only in instances configured for the sources role (D-0011).

@@ -15,3 +15,4 @@ MimeKit | 4.17.0 | .NET Foundation and Contributors (Jeffrey Stedfast) | MIT | h
 BouncyCastle.Cryptography | 2.6.2 | Legion of the Bouncy Castle Inc. | MIT | https://github.com/bcgit/bc-csharp/blob/master/LICENSE.md
 Microsoft.Extensions.Logging.Abstractions | 10.0.11 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT
 Microsoft.Extensions.Options | 10.0.11 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT
+Microsoft.Extensions.TimeProvider.Testing | 10.9.0 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT

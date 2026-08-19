@@ -99,6 +99,9 @@ public sealed class IngestionWorker(
 
         await eventStore.AddAsync(result.Event, cancellationToken).ConfigureAwait(false);
         await eventQueue.EnqueueAsync(result.Event.Id, cancellationToken).ConfigureAwait(false);
+        logger.LogDebug(
+            "Event {EventId} ({PayloadType}) normalized from {SourceId} and queued for correlation.",
+            result.Event.Id, result.Event.Payload.GetType().Name, source.SourceId);
         await auditLedger.AppendAsync(new AuditRecord
         {
             Id = Guid.NewGuid(),

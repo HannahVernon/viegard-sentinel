@@ -157,6 +157,39 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Alternatives considered:** Third-party JSON Schema packages (JsonSchema.Net, NJsonSchema): rejected for now to keep the dependency surface minimal for a security-critical path; revisit if schema count grows.  Static delimiter strings: rejected because observed data could embed them.
 - **Approval:** Implementation detail chosen by the agent; does not change any Hannah-approved behavior.
 
+## D-0019: IMAP authentication: app passwords now, per-account mechanism seam for OAuth2 later
+
+- **Date:** 2026-08-19 (Phase 4: Data sources)
+- **Decision:** Each configured IMAP account declares its authentication mechanism.  `app-password` (SASL PLAIN/LOGIN over implicit TLS, credential via `ISecretProvider`) is implemented first and covers Yahoo, personal Gmail (2-Step Verification required), and self-hosted servers such as MDaemon.  The adapter exposes an authenticator seam so `oauth2` (XOAUTH2, e.g., MailKit `SaslMechanismOAuth2`) can be added per account later without changing the adapter core.
+- **Alternatives considered:** OAuth2-only (Yahoo's developer-app approval process makes personal IMAP use impractical; Gmail personal does not require it); app-password-only with no seam (would force rework if a Google Workspace account joins, since Workspace dropped password-based IMAP access in 2024).
+- **Rationale:** Hannah's requirement: use app passwords where they work (verified: Gmail personal accounts support them with 2SV), but build in the ability to support OAuth2 in the future.
+- **Consequences:** Account configuration includes an auth-mechanism field; OAuth2 token acquisition/refresh is deferred until a concrete account needs it.
+- **Approval:** Explicitly approved by Hannah.
+
+## D-0020: New-mail detection: per-account IDLE with polling fallback plus safety poll
+
+- **Date:** 2026-08-19 (Phase 4: Data sources)
+- **Decision:** Each account is configurable: IMAP IDLE (push) where the server behaves, automatic fallback to polling after repeated IDLE failures, and a low-frequency safety poll while idling to catch anything IDLE misses.  IDLE sessions re-issue periodically per RFC 2177 guidance.
+- **Alternatives considered:** IDLE-only (fragile against servers that drop idle connections); polling-only (adds latency and periodic load).
+- **Rationale:** Roughly ten accounts across four or five heterogeneous servers; some will inevitably misbehave under IDLE.
+- **Approval:** Explicitly approved by Hannah.
+
+## D-0021: Default monitored folder set: INBOX, configurable per account
+
+- **Date:** 2026-08-19 (Phase 4: Data sources)
+- **Decision:** Monitor INBOX by default; each account's folder list is configurable.  Provider spam-folder names (e.g., Yahoo "Bulk Mail", Gmail "[Gmail]/Spam") become relevant for move actions in Phase 7, not ingestion defaults.
+- **Alternatives considered:** INBOX + provider spam folder by default; fully explicit per-account lists with no default.
+- **Approval:** Explicitly approved by Hannah.
+
+## D-0022: Attachments: metadata only in Phase 4; content extraction deferred
+
+- **Date:** 2026-08-19 (Phase 4: Data sources)
+- **Decision:** Ingestion extracts attachment metadata only (filename, MIME type, size, disposition) and never downloads or opens attachment bodies.  Content extraction remains a separately controlled future subsystem.  Ingestion is strictly read-only: message retrieval uses IMAP PEEK so it never alters read/unread state.
+- **Rationale:** Attachment parsing is a real attack surface for a security tool; defer until a concrete need exists.
+- **Approval:** Explicitly approved by Hannah.
+
+
+
 
 
 

@@ -1,9 +1,11 @@
 namespace Viegard.Domain.Events;
 
 /// <summary>
-/// Base type for source-specific normalized event payloads.  Concrete payloads
-/// (e.g., HTTP request, mail message) are defined alongside their source
-/// adapters; the core pipeline treats payloads polymorphically.
+/// Base type for source-specific normalized event payloads (e.g.,
+/// <see cref="MailMessageEvent"/>).  Payload records live in the domain so
+/// core components can use them, but must remain plain data with no
+/// dependency on any source library.  The core pipeline treats payloads
+/// polymorphically.
 /// </summary>
 public abstract record EventPayload;
 

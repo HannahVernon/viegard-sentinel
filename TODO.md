@@ -17,11 +17,13 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ### Yahoo Mail / IMAP
 
-- [ ] **Yahoo authentication method** (app password vs. OAuth2).
-- [ ] **IMAP polling vs. IMAP IDLE** (or both, configurable).
-- [ ] **Exact mailbox/folder names** to monitor and the configured spam folder name.
-- [ ] **Permitted email actions** and their default enablement (move, copy, mark read, flag, quarantine; delete requires separate explicit enablement).
-- [ ] **Attachment content extraction**: whether the separately controlled subsystem is in scope initially.
+- [x] **Yahoo authentication method** - DECIDED (D-0019): app passwords now, per-account mechanism seam for OAuth2 later.
+- [x] **IMAP polling vs. IMAP IDLE** - DECIDED (D-0020): per-account IDLE with polling fallback + safety poll.
+- [x] **Default monitored folders** - DECIDED (D-0021): INBOX by default, configurable per account.  Exact per-account folder lists and provider spam-folder names still needed at configuration time.
+- [ ] **Permitted email actions** and their default enablement (move, copy, mark read, flag, quarantine; delete requires separate explicit enablement).  Needed for Phase 7.
+- [x] **Attachment content extraction** - DECIDED (D-0022): metadata only in Phase 4; content subsystem deferred.
+- [ ] **First-run ingestion baseline**: adapter defaults to new-mail-only on first run (`IngestExistingOnFirstRun` = false); confirm or change before live use.
+- [ ] **Live IMAP verification**: needs Hannah to create an app password for a test account and add the account section to user-secrets; adapter has not yet run against a real server.
 
 ### SWAG / nginx logs
 
@@ -61,7 +63,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 - [x] **Phase 2: Architecture proposal** - APPROVED by Hannah 2026-08-18 (D-0017).
 - [ ] **Phase 3: Skeleton** (nearly complete) - DONE: solution layout (`Viegard.slnx`), `Directory.Build.props` with NuGetAudit enforcement, domain event/decision/audit/health model, application ports, broker-semantics `ChannelWorkQueue` with dead-lettering, `FileSecretProvider` + `ConfigurationSecretProvider`, in-memory stores, role-validated pipeline host, admin host `/healthz`, prompt assembler with random-boundary untrusted-data blocks, strict AI classification output validator, queue telemetry publication + traffic-light evaluator (D-0012; cross-process visibility arrives with the database, D-0004), Dockerfiles + sanitized compose example, 70 passing tests.  REMAINING: verify container builds on the Debian VM (no container tooling on the dev workstation; Hannah chose to defer, 2026-08-18), CI decision, admin GUI queue page (needs shared persistence).
-- [ ] **Phase 4: Data sources** - IMAP, then nginx/SWAG, then MDaemon logs (approved by Hannah 2026-08-18; ordering assumed, confirm if different).
+- [ ] **Phase 4: Data sources** - IMAP adapter DONE (PR pending; live-account verification outstanding), then nginx/SWAG, then MDaemon logs (approved by Hannah 2026-08-18; ordering assumed, confirm if different).
 - [ ] **Phase 5: Deterministic analysis** - rules, correlation, policy evaluation.
 - [ ] **Phase 6: Local AI** - inference abstraction, llama.cpp adapter, local dev inference install.
 - [ ] **Phase 7: Actions** - action providers, dry-run first; real actions only after explicit approval.

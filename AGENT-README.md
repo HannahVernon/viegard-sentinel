@@ -38,7 +38,8 @@ Path | Purpose
 `src/Viegard.Domain/` | Core domain model (events, incidents, classifications, decisions, actions, audit, health, commands); zero external dependencies
 `src/Viegard.Application/` | Ports (interfaces) and core implementations (channel work queue, secret providers).  Note: classifier namespace is `Viegard.Application.Classifiers` to avoid colliding with the `Classification` domain type
 `src/Viegard.Persistence/` | Development-only in-memory store implementations (until D-0004 chooses a database)
-`src/Viegard.PipelineHost/` | Role-configurable worker host (roles validated at startup; invalid topology refuses to start)
+`src/Viegard.Sources.Imap/` | IMAP source adapter (MailKit): per-account `ImapMailSource` (implicit TLS, read-only folders, IDLE with polling fallback, offset resume), `ImapEventNormalizer` (MailFetchDto JSON -> MailMessageEvent), `LinkExtractor`
+`src/Viegard.PipelineHost/` | Role-configurable worker host (roles validated at startup; invalid topology refuses to start).  `IngestionWorker` pumps all data sources through persist -> normalize -> store -> enqueue -> audit
 `src/Viegard.AdminApi/` | Blazor Web App admin host (D-0016); currently template shell + `/healthz`
 `tests/` | xUnit test projects (`Viegard.Domain.Tests`, `Viegard.Application.Tests`)
 `deploy/` | Dockerfiles + sanitized compose example.  **Not yet verified**: no container tooling on the dev workstation; verification happens on the Debian Docker host
@@ -89,7 +90,9 @@ Configuration is externalized.  Never hard-code: email addresses, mailbox names,
 
 ## Current integrations
 
-None implemented yet.  Planned: Yahoo IMAP (and further IMAP accounts across providers), SWAG/nginx logs, MDaemon mail-server logs, llama.cpp inference, MikroTik RouterOS address lists, Fail2Ban, notifications (mechanism TBD).
+**Yahoo/generic IMAP (implemented, not yet run against a live account):** `Viegard.Sources.Imap` supports any IMAP server with implicit TLS on port 993 (Yahoo, personal Gmail with 2SV app passwords, MDaemon).  Per-account configuration binds at `Viegard:Sources:Imap:Accounts`; account hosts/usernames are environment-specific and must never be committed (in development, put the whole section in user-secrets; passwords are secrets named by `PasswordSecretName`).  OAuth2 is a validated-but-unimplemented seam (D-0019).  First run baselines to new-mail-only unless `IngestExistingOnFirstRun` is set (default pending Hannah's confirmation).
+
+Planned: SWAG/nginx logs, MDaemon mail-server logs, llama.cpp inference, MikroTik RouterOS address lists, Fail2Ban, notifications (email; push deferred per D-0015).
 
 ## Current model/inference configuration
 

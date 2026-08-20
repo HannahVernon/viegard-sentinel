@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using Viegard.Application.Audit;
 using Viegard.Application.Correlation;
 using Viegard.Application.Detection;
+using Viegard.Application.Policy;
 using Viegard.Application.Queues;
 using Viegard.Application.Secrets;
 using Viegard.Application.Sources;
@@ -38,6 +39,15 @@ builder.Services
     .Validate(o => o.MaxEventIdsPerIncident > 0, "Correlation MaxEventIdsPerIncident must be positive.")
     .Validate(o => o.MaxEvidenceItemsPerIncident > 0, "Correlation MaxEvidenceItemsPerIncident must be positive.")
     .ValidateOnStart();
+
+builder.Services
+    .AddOptions<PolicyOptions>()
+    .Bind(builder.Configuration.GetSection(PolicyOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<PolicyOptions>, PolicyOptionsValidator>();
+builder.Services.AddSingleton(sp =>
+    new ProtectedAddressList(sp.GetRequiredService<IOptions<PolicyOptions>>().Value.ProtectedCidrs));
+builder.Services.AddSingleton<IGuardrailStateStore, InMemoryGuardrailStateStore>();
 
 // Secrets (D-0006): mounted secret files in production, user-secrets-backed
 // configuration in development.  Selection is configuration, never code.
@@ -204,6 +214,13 @@ if (configuredRoles.Contains(RoleNames.Correlation, StringComparer.OrdinalIgnore
             sp.GetRequiredService<IIncidentStore>(),
             sp.GetRequiredService<IOptions<CorrelationOptions>>().Value));
     builder.Services.AddHostedService<CorrelationWorker>();
+}
+
+// The policy worker runs only in the singleton policy role (D-0011, D-0027).
+if (configuredRoles.Contains(RoleNames.Policy, StringComparer.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IPolicyEngine, DefaultPolicyEngine>();
+    builder.Services.AddHostedService<PolicyWorker>();
 }
 
 var host = builder.Build();

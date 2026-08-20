@@ -63,7 +63,7 @@ public sealed class ChannelWorkQueue<T> : IWorkQueue<T>
         return new Lease(this, item);
     }
 
-    public WorkQueueStats GetStats()
+    public WorkQueueStats GetStatsCore()
     {
         var pendingSnapshot = _pending.Values;
         return new WorkQueueStats
@@ -78,6 +78,9 @@ public sealed class ChannelWorkQueue<T> : IWorkQueue<T>
             DeadLetterCount = Volatile.Read(ref _deadLetterCount),
         };
     }
+
+    public ValueTask<WorkQueueStats> GetStatsAsync(CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(GetStatsCore());
 
     private async ValueTask WriteAsync(WorkItem item, CancellationToken cancellationToken)
     {

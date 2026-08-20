@@ -47,13 +47,14 @@ public interface IWorkLease<out T>
 /// <summary>
 /// Anything that can report queue statistics for telemetry publication.
 /// Work queues implement this so the telemetry publisher can discover them
-/// without knowing their message types.
+/// without knowing their message types.  Async because durable
+/// implementations compute stats in the database.
 /// </summary>
 public interface IQueueStatsSource
 {
     string QueueName { get; }
 
-    WorkQueueStats GetStats();
+    ValueTask<WorkQueueStats> GetStatsAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>

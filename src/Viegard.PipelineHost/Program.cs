@@ -6,6 +6,7 @@ using Viegard.Application.Sources;
 using Viegard.Application.Stores;
 using Viegard.Application.Telemetry;
 using Viegard.Persistence.InMemory;
+using Viegard.Persistence.Postgres;
 using Viegard.PipelineHost.Configuration;
 using Viegard.PipelineHost.Workers;
 using Viegard.Sources.Imap;
@@ -40,22 +41,36 @@ switch (secretProviderKind)
             $"Unknown secret provider '{secretProviderKind}'.  Supported: file, configuration.");
 }
 
-// Development-only in-memory persistence until the database is chosen (D-0004).
-builder.Services.AddSingleton<IRawObservationStore, InMemoryRawObservationStore>();
-builder.Services.AddSingleton<IEventStore, InMemoryEventStore>();
-builder.Services.AddSingleton<IIncidentStore, InMemoryIncidentStore>();
-builder.Services.AddSingleton<IClassificationStore, InMemoryClassificationStore>();
-builder.Services.AddSingleton<IDecisionStore, InMemoryDecisionStore>();
-builder.Services.AddSingleton<IActionStore, InMemoryActionStore>();
-builder.Services.AddSingleton<ICorrectionStore, InMemoryCorrectionStore>();
-builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
-builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
-builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
+// Persistence provider (D-0024): "postgres" for durable shared persistence,
+// "inmemory" for development without a database.
+var persistenceProvider = builder.Configuration["Viegard:Persistence:Provider"] ?? "inmemory";
+switch (persistenceProvider)
+{
+    case "postgres":
+        builder.Services.AddViegardPostgresPersistence(builder.Configuration);
+        break;
 
-// Pipeline queues (in-process for now; broker-ready port per assumption 3).
-var eventsQueue = new ChannelWorkQueue<Guid>("events");
-builder.Services.AddSingleton<IWorkQueue<Guid>>(eventsQueue);
-builder.Services.AddSingleton<IQueueStatsSource>(eventsQueue);
+    case "inmemory":
+        builder.Services.AddSingleton<IRawObservationStore, InMemoryRawObservationStore>();
+        builder.Services.AddSingleton<IEventStore, InMemoryEventStore>();
+        builder.Services.AddSingleton<IIncidentStore, InMemoryIncidentStore>();
+        builder.Services.AddSingleton<IClassificationStore, InMemoryClassificationStore>();
+        builder.Services.AddSingleton<IDecisionStore, InMemoryDecisionStore>();
+        builder.Services.AddSingleton<IActionStore, InMemoryActionStore>();
+        builder.Services.AddSingleton<ICorrectionStore, InMemoryCorrectionStore>();
+        builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
+        builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
+        builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
+
+        var eventsQueue = new ChannelWorkQueue<Guid>("events");
+        builder.Services.AddSingleton<IWorkQueue<Guid>>(eventsQueue);
+        builder.Services.AddSingleton<IQueueStatsSource>(eventsQueue);
+        break;
+
+    default:
+        throw new InvalidOperationException(
+            $"Unknown persistence provider '{persistenceProvider}'.  Supported: inmemory, postgres.");
+}
 
 // IMAP source module (Phase 4; D-0019..D-0022).  Account configuration
 // (hosts, usernames) is environment-specific: in development it lives in
@@ -115,4 +130,10 @@ if (configuredRoles.Contains(RoleNames.Sources, StringComparer.OrdinalIgnoreCase
 }
 
 var host = builder.Build();
+
+if (persistenceProvider == "postgres")
+{
+    await host.Services.MigrateViegardDatabaseAsync();
+}
+
 host.Run();

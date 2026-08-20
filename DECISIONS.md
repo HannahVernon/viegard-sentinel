@@ -225,3 +225,11 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Rationale:** Research (2026-08-19, official docs) confirmed MDaemon has no native syslog in any version through v26; logs are local flat files.  The satellite preserves full file fidelity (multi-line session transcripts), uses TCP-durable transport, and exercises the multi-process topology the architecture was designed for.
 - **Consequences:** Postgres must be reachable from the MDaemon host (publish 5432 bound to the LAN, firewalled to that host; per-instance least-privilege DB credentials).  Open questions remain: which logs to ingest, log formats/samples for parser fixtures, Windows service deployment of the satellite (see TODO).
 - **Approval:** Explicitly approved by Hannah.
+
+## D-0026: Default protected-address list (never auto-blocked)
+
+- **Date:** 2026-08-20 (Phase 5: Policy)
+- **Decision:** Viegard ships with a configured-default protected list that automatic blocking can never target: IPv4 `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10` (RFC 6598 CGNAT/overlay), `127.0.0.0/8`, `169.254.0.0/16`, `0.0.0.0/8`, `255.255.255.255/32`; IPv6 `::1/128`, `fe80::/10`, `fc00::/7`, `ff00::/8`.  Operators add their own ranges (e.g., their public statics) at setup time and later through the admin UI; operator-specific addresses are deployment configuration and are never baked into the package or repository.  The list gates automatic actions only: manual operator-approved blocks remain possible for any address.
+- **Alternatives considered:** Narrower defaults (e.g., single /24s): rejected because protected lists fail safe when wide and dangerous when narrow; no defaults (all operator-supplied): rejected because forgetting loopback or RFC 1918 must not be possible.
+- **Rationale:** Asymmetric failure modes: an over-wide list degrades to alert-and-ask for internal threats, while an under-wide list enables self-inflicted lockout via a single misclassification or forged log line.  CGNAT space is unroutable publicly and therefore never a legitimate auto-block target.
+- **Approval:** Explicitly approved by Hannah (ranges as listed; operator-extensible at setup and via UI).

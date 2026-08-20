@@ -48,7 +48,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 - [ ] **MikroTik RouterOS API version and authentication method**; address-list names; expiration/timeout defaults.
 - [ ] **Fail2Ban integration mode**: adds entries, consumes events, manages jails, or input/output only.
 - [ ] **Automatic-action thresholds**, maximum ban durations, cooldowns, and escalation rules.
-- [ ] **Protected IP ranges, trusted networks, management addresses, and protected hosts** (never auto-blocked; must be configured by Hannah, never guessed).
+- [x] **Protected IP ranges** - DECIDED (D-0026, 2026-08-20): default list of all RFC 1918 + CGNAT + loopback + link-local + ULA + artifact guards (IPv4 and IPv6); operator-extensible at setup and via the admin UI.  Hannah's own public statics are deployment configuration (recorded privately, never in this repo); the admin UI protected-list editor is Phase 8 work.
 
 ### Operations
 

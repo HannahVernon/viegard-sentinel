@@ -13,7 +13,7 @@ The conceptual identity is a raven acting as a vigilant sentinel (Eyes = ingesti
 
 ## Current development state
 
-**Phase 2 (Architecture) is APPROVED (D-0017, 2026-08-18); the design in [ARCHITECTURE.md](ARCHITECTURE.md) is authoritative.  Phase 5 deterministic rules and correlation are partially implemented:** HTTP and mail detection rules, time-window incident correlation, and the role-gated correlation worker now consume queued event IDs and write incidents/audit records.  Policy evaluation remains open and is tracked in TODO.md with the threshold decisions Hannah still needs to make.
+**Phase 2 (Architecture) is APPROVED (D-0017, 2026-08-18); the design in [ARCHITECTURE.md](ARCHITECTURE.md) is authoritative.  Phase 4 data sources now include IMAP, syslog/nginx, and MDaemon flat-file logs.  Phase 5 deterministic rules and correlation are partially implemented:** HTTP, mail, and MDaemon detection rules, time-window incident correlation, and the role-gated correlation worker now consume queued event IDs and write incidents/audit records.  Policy evaluation remains open and is tracked in TODO.md with the threshold decisions Hannah still needs to make.
 
 ## Architecture (intended)
 
@@ -43,9 +43,10 @@ Path | Purpose
 `src/Viegard.Persistence.Postgres/` | PostgreSQL provider (D-0024): EF Core + Npgsql, `ViegardDbContext` + migrations (`dotnet dotnet-ef migrations add <Name> --project src/Viegard.Persistence.Postgres`), all store ports, durable `PostgresWorkQueue` (`SKIP LOCKED` visibility-timeout leases, dead-lettering at lease time, `LISTEN/NOTIFY` wakeups), `PostgresCommandQueue`.  Selected via `Viegard:Persistence:Provider` = `postgres`; DB password is the secret `viegard-db-password`
 `src/Viegard.Sources.Imap/` | IMAP source adapter (MailKit): per-account `ImapMailSource` (implicit TLS, read-only folders, IDLE with polling fallback, offset resume), `ImapEventNormalizer` (MailFetchDto JSON -> MailMessageEvent), `LinkExtractor`
 `src/Viegard.Sources.Syslog/` | Syslog UDP listener source (D-0023): guarded `SyslogDatagramHandler` (allowlist, size cap, per-source token bucket), RFC 3164/5424 envelope parser, nginx access-log parser, normalizer routing to `HttpRequestEvent` or generic `SyslogEvent`
+`src/Viegard.Sources.MDaemonLogs/` | MDaemon flat-file log source (D-0013, D-0025): satellite-host file tailer, session-transcript and Dynamic Screening parsers, `MDaemonEventNormalizer`, and disabled-by-default configuration at `Viegard:Sources:MDaemon`
 `src/Viegard.PipelineHost/` | Role-configurable worker host (roles validated at startup; invalid topology refuses to start).  `IngestionWorker` pumps all data sources through persist -> normalize -> store -> enqueue -> audit
 `src/Viegard.AdminApi/` | Blazor Web App admin host (D-0016); currently template shell + `/healthz`
-`tests/` | xUnit test projects (`Viegard.Domain.Tests`, `Viegard.Application.Tests`)
+`tests/` | xUnit test projects (`Viegard.Domain.Tests`, `Viegard.Application.Tests`, source adapter tests, and persistence tests)
 `deploy/` | Dockerfiles + sanitized compose example.  **Not yet verified**: no container tooling on the dev workstation; verification happens on the Debian Docker host
 `docs/`          | Project documentation and branding assets
 `.github/`       | PR/issue templates and community health files
@@ -100,7 +101,9 @@ Configuration is externalized.  Never hard-code: email addresses, mailbox names,
 
 **Syslog UDP listener (implemented and smoke-tested end-to-end):** `Viegard.Sources.Syslog` (D-0023) receives syslog datagrams over UDP, fail-closed: disabled by default, requires a non-empty source-IP allowlist, drops oversized and rate-exceeding datagrams.  nginx access-log lines (tag `nginx_access`) normalize to `HttpRequestEvent`; everything else becomes a generic `SyslogEvent`.  SWAG-side configuration instructions: `docs/swag-syslog-setup.md`.  Future senders: MikroTik RouterOS remote logging, other LAN hosts.
 
-Planned: MDaemon mail-server logs, llama.cpp inference, MikroTik RouterOS address lists, Fail2Ban, notifications (email; push deferred per D-0015).
+**MDaemon flat-file logs (implemented, not yet deployed live):** `Viegard.Sources.MDaemonLogs` tails MDaemon per-day logs on the future Windows satellite instance (D-0025).  It supports SMTP in/out, IMAP, POP3, Screening, and Dynamic Screening logs.  Dynamic Screening block decisions normalize to strong `MDaemonLogEvent` evidence; TrustedIP and AccessRefused chatter are dropped unless `IncludeNoise` is enabled.  Committed fixtures are sanitized only; real log samples must never be committed.
+
+Planned: llama.cpp inference, MikroTik RouterOS address lists, Fail2Ban, notifications (email; push deferred per D-0015).
 
 ## Current model/inference configuration
 
@@ -108,7 +111,7 @@ No inference stack is installed yet.  Dev target: small quantized Qwen-class mod
 
 ## Testing
 
-No tests exist yet.  Planned: unit tests (parsers, classifiers, policy, action validation, protected-IP handling, malformed AI output, timeouts, retries, IMAP handling), integration tests (log ingestion, inference, action providers), replayable nginx log fixtures, representative email fixtures, and explicit security tests (prompt injection via email/User-Agent/URLs, forged logs, IPv6 edge cases, self-blocking prevention).  Never use real credentials in tests.
+Unit tests exist for the domain model, application rules/correlation, IMAP source, syslog source, MDaemon source, and PostgreSQL provider.  PostgreSQL integration tests skip unless `VIEGARD_TEST_POSTGRES` is set.  Never use real credentials or raw production logs in tests; MDaemon fixtures must remain sanitized.
 
 ## Known limitations
 

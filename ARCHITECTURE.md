@@ -40,7 +40,7 @@ Assumptions made in this proposal that Hannah should confirm or correct:
 Pipeline data flow:
 
 ```
-Data Sources (IMAP, nginx/SWAG, future)
+Data Sources (IMAP, syslog/nginx, MDaemon, future)
      |
      v
 Ingestion (per-source workers)                 EYES
@@ -118,9 +118,11 @@ src/
                                prompt assembly, schema validation, guardrails
   Viegard.Persistence/         Store implementations (in-memory/file first; DB when chosen)
   Viegard.Sources.Imap/        IMAP data source adapter (MailKit)
-  Viegard.Sources.Nginx/       nginx/SWAG log source adapter (tailing, rotation, parsing)
-  Viegard.Sources.MDaemonLogs/ MDaemon mail-server log source adapter (SMTP/IMAP/POP
-                               session and screening logs; credential-attack evidence)
+  Viegard.Sources.Syslog/      Syslog UDP source adapter; nginx/SWAG access logs normalize
+                               to HTTP request events, other tags remain generic syslog
+  Viegard.Sources.MDaemonLogs/ MDaemon flat-file log source adapter; SMTP/IMAP/POP session
+                               transcripts, Screening, and Dynamic Screening logs normalize
+                               to MDaemon credential-attack and IP-block evidence
   Viegard.Inference.LlamaCpp/  llama-server adapter (OpenAI-compatible wire protocol lives
                                here only; never in Domain/Application)
   Viegard.Actions.Imap/        Email action provider
@@ -133,8 +135,8 @@ tests/
   Viegard.Domain.Tests/
   Viegard.Application.Tests/   Policy, guardrails, schema validation, prompt injection
   Viegard.Sources.Imap.Tests/
-  Viegard.Sources.Nginx.Tests/ Replayable log fixtures
-  Viegard.Sources.MDaemonLogs.Tests/  Replayable log fixtures
+  Viegard.Sources.Syslog.Tests/       Syslog and nginx parser tests
+  Viegard.Sources.MDaemonLogs.Tests/  Sanitized MDaemon parser fixtures
   Viegard.Integration.Tests/   Inference, ingestion, action providers (no real credentials)
   fixtures/                    nginx log corpora, representative emails, malformed AI output
 docs/
@@ -142,6 +144,12 @@ deploy/                        Dockerfiles, sanitized compose examples
 ```
 
 Adapters are separate projects so integrations stay optional, independently testable, and additive: new sources/actions never modify the core.  Project count is higher, but each project is small.
+
+Implemented source integrations:
+
+- IMAP mail source, using per-account configuration and read-only folder access.
+- Syslog UDP source, with source allowlist, size cap, rate cap, RFC 3164/5424 parsing, and nginx access-log normalization.
+- MDaemon flat-file log source, intended for the Windows satellite pipeline instance on the MDaemon host.  It tails configured per-day log patterns, stores byte offsets per file, baselines existing files by default, skips session-log banners, drops Dynamic Screening noise by default, and normalizes SMTP/IMAP/POP, Screening, and Dynamic Screening lines into shared IP-correlatable events.
 
 ## Core interfaces (ports; final shapes at implementation)
 

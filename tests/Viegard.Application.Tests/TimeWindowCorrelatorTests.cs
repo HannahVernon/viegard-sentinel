@@ -89,6 +89,20 @@ public sealed class TimeWindowCorrelatorTests
     }
 
     [Fact]
+    public async Task Mdaemon_event_correlates_by_ip_entity()
+    {
+        var store = new InMemoryIncidentStore();
+        var correlator = new TimeWindowCorrelator([new MDaemonDetectionRule()], store, new CorrelationOptions());
+        var normalizedEvent = MDaemonEvent("203.0.113.20", Start);
+
+        var incidents = await correlator.CorrelateAsync(normalizedEvent);
+
+        var incident = Assert.Single(incidents);
+        Assert.Equal("ip=203.0.113.20", incident.CorrelationKey);
+        Assert.Equal(normalizedEvent.Id, Assert.Single(incident.EventIds));
+    }
+
+    [Fact]
     public async Task Window_expiry_creates_new_incident_for_same_ip()
     {
         var store = new InMemoryIncidentStore();
@@ -150,6 +164,30 @@ public sealed class TimeWindowCorrelatorTests
                 Protocol = "HTTP/1.1",
                 StatusCode = 200,
                 UserAgent = "Mozilla/5.0",
+            },
+            RawObservationId = Guid.NewGuid(),
+        };
+    }
+
+    private static NormalizedEvent MDaemonEvent(string remoteIp, DateTimeOffset occurredAt)
+    {
+        var id = Guid.NewGuid();
+        return new NormalizedEvent
+        {
+            Id = id,
+            SourceId = "mdaemon-test",
+            SourceType = "mdaemon",
+            OccurredAt = occurredAt,
+            Entities =
+            [
+                new EntityRef(EntityKind.IpAddress, remoteIp),
+            ],
+            Payload = new MDaemonLogEvent
+            {
+                LogKind = MDaemonLogKind.DynamicScreening,
+                EventKind = MDaemonEventKind.IpBlocked,
+                RemoteIp = remoteIp,
+                Message = "sanitized MDaemon log line",
             },
             RawObservationId = Guid.NewGuid(),
         };

@@ -15,6 +15,7 @@ namespace Viegard.Domain.Events;
 [JsonDerivedType(typeof(MailMessageEvent), "mail-message")]
 [JsonDerivedType(typeof(HttpRequestEvent), "http-request")]
 [JsonDerivedType(typeof(SyslogEvent), "syslog")]
+[JsonDerivedType(typeof(MDaemonLogEvent), "mdaemon-log")]
 public abstract record EventPayload;
 
 /// <summary>

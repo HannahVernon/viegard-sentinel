@@ -84,6 +84,23 @@ public sealed class PayloadSerializationTests
     }
 
     [Fact]
+    public void Mdaemon_payload_round_trips()
+    {
+        var payload = new MDaemonLogEvent
+        {
+            LogKind = MDaemonLogKind.DynamicScreening,
+            EventKind = MDaemonEventKind.IpBlocked,
+            RemoteIp = "203.0.113.20",
+            Reason = "connected 16 times within 6 minutes",
+            SessionId = "1002FA89",
+            Message = "sanitized MDaemon log line",
+        };
+
+        var restored = Assert.IsType<MDaemonLogEvent>(RoundTrip(payload));
+        Assert.Equal(payload, restored);
+    }
+
+    [Fact]
     public void Malformed_record_payload_round_trips()
     {
         var payload = new MalformedRecordPayload { Reason = "bad", RawSample = "x" };

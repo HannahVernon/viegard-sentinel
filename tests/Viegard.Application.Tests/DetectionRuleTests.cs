@@ -144,6 +144,28 @@ public sealed class DetectionRuleTests
         }
     }
 
+    [Theory]
+    [InlineData(MDaemonEventKind.AuthenticationFailed, 0.4)]
+    [InlineData(MDaemonEventKind.IpBlocked, 0.9)]
+    [InlineData(MDaemonEventKind.ScreeningBlocked, 0.6)]
+    [InlineData(MDaemonEventKind.AccessRefused, 0.2)]
+    public void Mdaemon_rule_scores_security_event_kinds(MDaemonEventKind eventKind, double expectedScore)
+    {
+        var normalizedEvent = MDaemonEvent(eventKind);
+        var evidence = new MDaemonDetectionRule().Evaluate(normalizedEvent);
+
+        var item = Assert.Single(evidence);
+        Assert.Equal(expectedScore, item.Score);
+        Assert.Equal(normalizedEvent.Id, item.EventId);
+        Assert.Contains("mdaemon.security-event", item.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Mdaemon_rule_ignores_other_events()
+    {
+        Assert.Empty(new MDaemonDetectionRule().Evaluate(MDaemonEvent(MDaemonEventKind.Other)));
+    }
+
     private IReadOnlyList<IDetectionRule> HttpRules() =>
     [
         new SensitivePathHttpDetectionRule(_options),
@@ -224,6 +246,30 @@ public sealed class DetectionRuleTests
                 ReplyTo = [new MailAddressInfo { Address = replyTo }],
                 Links = links,
                 Attachments = attachments,
+            },
+            RawObservationId = Guid.NewGuid(),
+        };
+    }
+
+    private static NormalizedEvent MDaemonEvent(MDaemonEventKind eventKind)
+    {
+        var id = Guid.NewGuid();
+        return new NormalizedEvent
+        {
+            Id = id,
+            SourceId = "mdaemon-test",
+            SourceType = "mdaemon",
+            OccurredAt = DateTimeOffset.UtcNow,
+            Entities =
+            [
+                new EntityRef(EntityKind.IpAddress, "203.0.113.20"),
+            ],
+            Payload = new MDaemonLogEvent
+            {
+                LogKind = MDaemonLogKind.DynamicScreening,
+                EventKind = eventKind,
+                RemoteIp = "203.0.113.20",
+                Message = "sanitized MDaemon log line",
             },
             RawObservationId = Guid.NewGuid(),
         };

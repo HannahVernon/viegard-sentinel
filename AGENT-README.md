@@ -44,7 +44,7 @@ Preferences:
 - Raven metaphor (Eyes/Flight/Mind/Judgment/Talons/Roost/Ledger) only where it clarifies.
 
 ## Current state
-Phases 1-4 complete; Phase 5 partially complete.  Working today: IMAP source (per-account, IDLE+fallback, read-only), syslog UDP listener (fail-closed allowlist) with nginx parsing, MDaemon file-tailing source (satellite-ready per D-0025), detection rules + `TimeWindowCorrelator` + `CorrelationWorker`, PostgreSQL persistence + durable queues (verified against live Postgres), queue telemetry with traffic-light evaluator.  In flight: policy engine (awaiting threshold decisions), admin GUI features, llama.cpp inference (Phase 6, nothing installed yet).  Not yet deployed anywhere; deploy/ artifacts are unverified.  Authoritative queues: TODO.md (open questions), DECISIONS.md (D-0001..D-0026).
+Phases 1-5 complete with provisional policy thresholds from D-0027.  Working today: IMAP source (per-account, IDLE+fallback, read-only), syslog UDP listener (fail-closed allowlist) with nginx parsing, MDaemon file-tailing source (satellite-ready per D-0025), detection rules + `TimeWindowCorrelator` + `CorrelationWorker`, D-0027 policy engine with D-0026 protected-address guardrail, in-memory guardrail state, placeholder `PolicyWorker`, PostgreSQL persistence + durable queues (verified against live Postgres), queue telemetry with traffic-light evaluator.  In flight: admin GUI features, llama.cpp inference (Phase 6, nothing installed yet), classification stage to feed `PolicyWorker`, PostgreSQL guardrail-state persistence, and dry-run threshold calibration.  Not yet deployed anywhere; deploy/ artifacts are unverified.  Authoritative queues: TODO.md (open questions), DECISIONS.md (D-0001..D-0027).
 
 ## Surprises
 - The pipeline host is one binary that can run as many role-configured instances (D-0011); the correlator and policy/action engine are singleton roles enforced at startup.
@@ -63,3 +63,4 @@ Phases 1-4 complete; Phase 5 partially complete.  Working today: IMAP source (pe
 
 ## Changes
 - 2026-08-20: Restructured to the agent-readme.md draft v0.1 spec (sections, metadata header, facts/preferences split); content previously accreted per-phase.
+- 2026-08-20: Implemented Judgment policy engine per D-0027 with provisional thresholds, D-0026 protected-address defaults, in-memory guardrail state, and a placeholder `PolicyWorker` for the future classification stage.

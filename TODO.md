@@ -41,13 +41,13 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 - [ ] **Dev model selection**: which small quantized Qwen-class model and quantization level for the CPU-only dev workstation.
 - [ ] **Production model selection** for the V100 inference server.
-- [ ] **Classification thresholds** (confidence/severity) for email and security classification.
+- [x] **Classification thresholds** - DECIDED provisionally by D-0027, 2026-08-20: AI action at confidence >= 0.9 and severity >= 7, review at confidence >= 0.7, with deterministic evidence using the normalized confidence band.  Calibrate after dry-run deployment before enabling unattended action.
 
 ### Actions / integrations
 
 - [ ] **MikroTik RouterOS API version and authentication method**; address-list names; expiration/timeout defaults.
 - [ ] **Fail2Ban integration mode**: adds entries, consumes events, manages jails, or input/output only.
-- [ ] **Automatic-action thresholds**, maximum ban durations, cooldowns, and escalation rules.
+- [x] **Automatic-action thresholds**, maximum ban durations, cooldowns, and escalation rules - DECIDED provisionally by D-0027, 2026-08-20: temp ban 24h, repeat offender 7d after 3 incidents in 7d, max auto ban 30d, caps 20/hour and 100/day, circuit breaker after 5 consecutive action failures or cap breach.  Calibrate after dry-run deployment.
 - [x] **Protected IP ranges** - DECIDED (D-0026, 2026-08-20): default list of all RFC 1918 + CGNAT + loopback + link-local + ULA + artifact guards (IPv4 and IPv6); operator-extensible at setup and via the admin UI.  Hannah's own public statics are deployment configuration (recorded privately, never in this repo); the admin UI protected-list editor is Phase 8 work.
 
 ### Operations
@@ -69,7 +69,10 @@ When Hannah answers a question, remove or update the item here and record the ou
 - [x] **Phase 2: Architecture proposal** - APPROVED by Hannah 2026-08-18 (D-0017).
 - [ ] **Phase 3: Skeleton** (nearly complete) - DONE: solution layout (`Viegard.slnx`), `Directory.Build.props` with NuGetAudit enforcement, domain event/decision/audit/health model, application ports, broker-semantics `ChannelWorkQueue` with dead-lettering, `FileSecretProvider` + `ConfigurationSecretProvider`, in-memory stores, role-validated pipeline host, admin host `/healthz`, prompt assembler with random-boundary untrusted-data blocks, strict AI classification output validator, queue telemetry publication + traffic-light evaluator (D-0012; cross-process visibility arrives with the database, D-0004), Dockerfiles + sanitized compose example, 70 passing tests.  REMAINING: verify container builds on the Debian VM (no container tooling on the dev workstation; Hannah chose to defer, 2026-08-18), CI decision, admin GUI queue page (needs shared persistence).
 - [ ] **Phase 4: Data sources** - IMAP adapter DONE (live-account verification outstanding); syslog/nginx source DONE (live SWAG configuration outstanding); MDaemon log source DONE in code with sanitized parser fixtures.  REMAINING: live MDaemon satellite deployment and Windows service configuration.
-- [ ] **Phase 5: Deterministic analysis** - PARTIALLY DONE: deterministic HTTP/mail/MDaemon rules, time-window correlation, and the correlation worker are implemented.  REMAINING: policy evaluation, automatic-action thresholds, and confidence/severity thresholds awaiting Hannah's decisions.
+- [x] **Phase 5: Deterministic analysis and policy** - DONE 2026-08-20: deterministic HTTP/mail/MDaemon rules, time-window correlation, correlation worker, D-0027 policy engine, protected-address guardrail, in-memory guardrail state, provisional thresholds, and placeholder PolicyWorker are implemented.  Remaining follow-up work is tracked separately below.
+- [ ] **PostgreSQL guardrail-state store**: replace the current in-memory guardrail state with durable shared PostgreSQL state before unattended policy/action instances are split across processes or hosts.
+- [ ] **Classification stage to feed PolicyWorker**: Phase 6 must add classification production and intake.  The current PolicyWorker intentionally consumes no queue.
+- [ ] **Policy threshold calibration after deployment**: review dry-run decisions against real traffic, then adjust provisional D-0027 thresholds and durations before any unattended action is approved.
 - [ ] **Phase 6: Local AI** - inference abstraction, llama.cpp adapter, local dev inference install.
 - [ ] **Phase 7: Actions** - action providers, dry-run first; real actions only after explicit approval.
 - [ ] **Phase 8: Administration** - admin interface/API.

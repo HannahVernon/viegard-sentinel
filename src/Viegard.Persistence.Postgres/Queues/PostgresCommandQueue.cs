@@ -8,7 +8,7 @@ namespace Viegard.Persistence.Postgres.Queues;
 /// Durable admin command queue (the only write path from the admin service
 /// to pipeline hosts) implemented on the shared PostgreSQL queue mechanics.
 /// </summary>
-public sealed class PostgresCommandQueue(NpgsqlDataSource dataSource) : ICommandQueue, IAsyncDisposable
+public sealed class PostgresCommandQueue(NpgsqlDataSource dataSource) : ICommandQueue
 {
     public const string CommandQueueName = "admin-commands";
 
@@ -22,6 +22,4 @@ public sealed class PostgresCommandQueue(NpgsqlDataSource dataSource) : ICommand
 
     public ValueTask<WorkQueueStats> GetStatsAsync(CancellationToken cancellationToken = default) =>
         _inner.GetStatsAsync(cancellationToken);
-
-    public ValueTask DisposeAsync() => _inner.DisposeAsync();
 }

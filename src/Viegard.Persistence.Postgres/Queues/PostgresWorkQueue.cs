@@ -12,7 +12,7 @@ namespace Viegard.Persistence.Postgres.Queues;
 /// <c>LISTEN/NOTIFY</c> wakeups with a fallback poll.  Safe for concurrent
 /// consumers across processes and hosts.
 /// </summary>
-public sealed partial class PostgresWorkQueue<T> : IWorkQueue<T>, IAsyncDisposable
+public sealed partial class PostgresWorkQueue<T> : IWorkQueue<T>
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan FallbackPollInterval = TimeSpan.FromSeconds(5);
@@ -21,9 +21,6 @@ public sealed partial class PostgresWorkQueue<T> : IWorkQueue<T>, IAsyncDisposab
     private readonly int _maxDeliveryCount;
     private readonly TimeSpan _leaseDuration;
     private readonly string _channelName;
-    private readonly SemaphoreSlim _listenerGate = new(1, 1);
-
-    private NpgsqlConnection? _listenerConnection;
 
     public PostgresWorkQueue(NpgsqlDataSource dataSource, string queueName, int maxDeliveryCount = 5, TimeSpan? leaseDuration = null)
     {
@@ -48,8 +45,8 @@ public sealed partial class PostgresWorkQueue<T> : IWorkQueue<T>, IAsyncDisposab
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO queue_messages (queue_name, payload_json, delivery_count, enqueued_at)
-            VALUES (@queue, CAST(@payload AS jsonb), 0, now());
+            INSERT INTO queue_messages (queue_name, payload_json, delivery_count, enqueued_at, dead_lettered)
+            VALUES (@queue, CAST(@payload AS jsonb), 0, now(), false);
             INSERT INTO queue_counters (queue_name, enqueued, completed, abandoned)
             VALUES (@queue, 1, 0, 0)
             ON CONFLICT (queue_name) DO UPDATE SET enqueued = queue_counters.enqueued + 1;
@@ -83,16 +80,20 @@ public sealed partial class PostgresWorkQueue<T> : IWorkQueue<T>, IAsyncDisposab
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT
-              count(*) FILTER (WHERE NOT m.dead_lettered AND (m.leased_until IS NULL OR m.leased_until < now())) AS depth,
-              count(*) FILTER (WHERE NOT m.dead_lettered AND m.leased_until IS NOT NULL AND m.leased_until >= now()) AS in_flight,
-              min(m.enqueued_at) FILTER (WHERE NOT m.dead_lettered AND (m.leased_until IS NULL OR m.leased_until < now())) AS oldest,
-              count(*) FILTER (WHERE m.dead_lettered) AS dead,
-              COALESCE(max(c.enqueued), 0) AS enqueued,
-              COALESCE(max(c.completed), 0) AS completed,
-              COALESCE(max(c.abandoned), 0) AS abandoned
-            FROM queue_messages m
-            FULL OUTER JOIN queue_counters c ON c.queue_name = @queue
-            WHERE m.queue_name = @queue OR m.queue_name IS NULL;
+              (SELECT count(*) FROM queue_messages
+                WHERE queue_name = @queue AND NOT dead_lettered
+                  AND (leased_until IS NULL OR leased_until < now())) AS depth,
+              (SELECT count(*) FROM queue_messages
+                WHERE queue_name = @queue AND NOT dead_lettered
+                  AND leased_until IS NOT NULL AND leased_until >= now()) AS in_flight,
+              (SELECT min(enqueued_at) FROM queue_messages
+                WHERE queue_name = @queue AND NOT dead_lettered
+                  AND (leased_until IS NULL OR leased_until < now())) AS oldest,
+              (SELECT count(*) FROM queue_messages
+                WHERE queue_name = @queue AND dead_lettered) AS dead,
+              COALESCE((SELECT enqueued FROM queue_counters WHERE queue_name = @queue), 0) AS enqueued,
+              COALESCE((SELECT completed FROM queue_counters WHERE queue_name = @queue), 0) AS completed,
+              COALESCE((SELECT abandoned FROM queue_counters WHERE queue_name = @queue), 0) AS abandoned;
             """;
         command.Parameters.AddWithValue("queue", QueueName);
 
@@ -110,17 +111,6 @@ public sealed partial class PostgresWorkQueue<T> : IWorkQueue<T>, IAsyncDisposab
             TotalCompleted = reader.GetInt64(5),
             TotalAbandoned = reader.GetInt64(6),
         };
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_listenerConnection is not null)
-        {
-            await _listenerConnection.DisposeAsync().ConfigureAwait(false);
-            _listenerConnection = null;
-        }
-
-        _listenerGate.Dispose();
     }
 
     private async Task<IWorkLease<T>?> TryLeaseOnceAsync(CancellationToken cancellationToken)
@@ -178,34 +168,27 @@ public sealed partial class PostgresWorkQueue<T> : IWorkQueue<T>, IAsyncDisposab
 
     private async Task WaitForSignalAsync(CancellationToken cancellationToken)
     {
-        await _listenerGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // A dedicated short-lived connection per wait: sharing a listener
+        // connection risks commands hitting it while it is in the Waiting
+        // state.  Npgsql resets LISTEN state when the connection returns to
+        // the pool.
         try
         {
-            if (_listenerConnection is null || _listenerConnection.State != System.Data.ConnectionState.Open)
+            await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+            await using (var listen = connection.CreateCommand())
             {
-                if (_listenerConnection is not null)
-                {
-                    await _listenerConnection.DisposeAsync().ConfigureAwait(false);
-                }
-
-                _listenerConnection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-                await using var listen = _listenerConnection.CreateCommand();
                 listen.CommandText = $"LISTEN {_channelName};";
                 await listen.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
 
             // Wake on NOTIFY or fall back to a periodic poll (also re-checks
             // expired leases, which produce no NOTIFY).
-            await _listenerConnection.WaitAsync(FallbackPollInterval, cancellationToken).ConfigureAwait(false);
+            await connection.WaitAsync(FallbackPollInterval, cancellationToken).ConfigureAwait(false);
         }
         catch (NpgsqlException)
         {
-            // Listener connection failure degrades to polling cadence.
+            // Connection failure degrades to polling cadence.
             await Task.Delay(FallbackPollInterval, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _listenerGate.Release();
         }
     }
 

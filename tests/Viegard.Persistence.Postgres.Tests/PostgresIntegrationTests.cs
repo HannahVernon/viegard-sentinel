@@ -48,7 +48,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     [PostgresFact]
     public async Task Enqueue_lease_complete_roundtrip()
     {
-        await using var queue = CreateQueue("it-basic");
+        var queue = CreateQueue("it-basic");
         var message = Guid.NewGuid();
 
         await queue.EnqueueAsync(message);
@@ -68,7 +68,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     [PostgresFact]
     public async Task Abandon_redelivers_with_incremented_count()
     {
-        await using var queue = CreateQueue("it-abandon");
+        var queue = CreateQueue("it-abandon");
         await queue.EnqueueAsync(Guid.NewGuid());
 
         var first = await queue.LeaseAsync(CancellationToken.None);
@@ -82,7 +82,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     [PostgresFact]
     public async Task Message_exceeding_max_deliveries_is_dead_lettered()
     {
-        await using var queue = CreateQueue("it-poison", maxDeliveries: 2);
+        var queue = CreateQueue("it-poison", maxDeliveries: 2);
         await queue.EnqueueAsync(Guid.NewGuid());
 
         var first = await queue.LeaseAsync(CancellationToken.None);
@@ -98,7 +98,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     [PostgresFact]
     public async Task Expired_lease_is_redelivered_for_crash_recovery()
     {
-        await using var queue = CreateQueue("it-expiry", lease: TimeSpan.FromMilliseconds(200));
+        var queue = CreateQueue("it-expiry", lease: TimeSpan.FromMilliseconds(200));
         await queue.EnqueueAsync(Guid.NewGuid());
 
         // Lease and never settle: simulates a crashed consumer.
@@ -113,7 +113,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     [PostgresFact]
     public async Task Concurrent_consumers_never_double_lease()
     {
-        await using var queue = CreateQueue("it-concurrent");
+        var queue = CreateQueue("it-concurrent");
         var messages = Enumerable.Range(0, 50).Select(_ => Guid.NewGuid()).ToHashSet();
         foreach (var message in messages)
         {
@@ -139,7 +139,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     [PostgresFact]
     public async Task Listen_notify_wakes_a_waiting_consumer()
     {
-        await using var queue = CreateQueue("it-notify");
+        var queue = CreateQueue("it-notify");
 
         var leaseTask = queue.LeaseAsync(CancellationToken.None).AsTask();
         await Task.Delay(300);

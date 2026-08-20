@@ -1,10 +1,11 @@
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Viegard.Persistence.Postgres.Model;
 
 namespace Viegard.Persistence.Postgres;
 
 /// <summary>EF Core context for Viegard's PostgreSQL persistence (D-0024).</summary>
-public sealed class ViegardDbContext(DbContextOptions<ViegardDbContext> options) : DbContext(options)
+public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> options) : DbContext(options)
 {
     public DbSet<RawObservationRow> RawObservations => Set<RawObservationRow>();
 
@@ -127,5 +128,21 @@ public sealed class ViegardDbContext(DbContextOptions<ViegardDbContext> options)
             entity.ToTable("queue_counters");
             entity.HasKey(e => e.QueueName);
         });
+
+        // snake_case column names everywhere: PostgreSQL convention, and the
+        // durable queue's raw SQL depends on it.
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entity.GetProperties())
+            {
+                property.SetColumnName(ToSnakeCase(property.Name));
+            }
+        }
     }
+
+    private static string ToSnakeCase(string name) =>
+        SnakeCasePattern().Replace(name, "$1_$2").ToLowerInvariant();
+
+    [GeneratedRegex("([a-z0-9])([A-Z])")]
+    private static partial Regex SnakeCasePattern();
 }

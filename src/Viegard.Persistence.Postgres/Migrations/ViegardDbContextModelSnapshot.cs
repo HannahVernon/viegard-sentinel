@@ -26,36 +26,46 @@ namespace Viegard.Persistence.Postgres.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
 
                     b.Property<Guid>("DecisionId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("decision_id");
 
                     b.Property<string>("Error")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("error");
 
                     b.Property<string>("OperationId")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("operation_id");
 
                     b.Property<string>("ParametersJson")
-                        .HasColumnType("jsonb");
+                        .HasColumnType("jsonb")
+                        .HasColumnName("parameters_json");
 
                     b.Property<string>("ProviderId")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("provider_id");
 
                     b.Property<DateTimeOffset>("RequestedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at");
 
                     b.Property<string>("RollbackJson")
-                        .HasColumnType("jsonb");
+                        .HasColumnType("jsonb")
+                        .HasColumnName("rollback_json");
 
                     b.Property<int>("Status")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("status");
 
                     b.HasKey("Id");
 
@@ -68,38 +78,49 @@ namespace Viegard.Persistence.Postgres.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<Guid?>("ActionId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("action_id");
 
                     b.Property<Guid?>("ClassificationId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("classification_id");
 
                     b.Property<Guid?>("DecisionId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("decision_id");
 
                     b.Property<string>("DetailJson")
-                        .HasColumnType("jsonb");
+                        .HasColumnType("jsonb")
+                        .HasColumnName("detail_json");
 
                     b.Property<Guid?>("EventId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
 
                     b.Property<Guid?>("IncidentId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("incident_id");
 
                     b.Property<string>("SourceId")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("source_id");
 
                     b.Property<int>("Stage")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("stage");
 
                     b.Property<string>("Summary")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("summary");
 
                     b.Property<DateTimeOffset>("Timestamp")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("timestamp");
 
                     b.HasKey("Id");
 
@@ -112,43 +133,55 @@ namespace Viegard.Persistence.Postgres.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<string>("Category")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("category");
 
                     b.Property<string>("ClassifierId")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("classifier_id");
 
                     b.Property<double>("Confidence")
-                        .HasColumnType("double precision");
+                        .HasColumnType("double precision")
+                        .HasColumnName("confidence");
 
                     b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
 
                     b.Property<string>("ModelJson")
-                        .HasColumnType("jsonb");
+                        .HasColumnType("jsonb")
+                        .HasColumnName("model_json");
 
                     b.Property<string>("ReasonsJson")
                         .IsRequired()
-                        .HasColumnType("jsonb");
+                        .HasColumnType("jsonb")
+                        .HasColumnName("reasons_json");
 
                     b.Property<string>("RecommendedAction")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("recommended_action");
 
                     b.Property<int>("Severity")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("severity");
 
                     b.Property<Guid>("SubjectId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("subject_id");
 
                     b.Property<int>("SubjectKind")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("subject_kind");
 
                     b.Property<double?>("Uncertainty")
-                        .HasColumnType("double precision");
+                        .HasColumnType("double precision")
+                        .HasColumnName("uncertainty");
 
                     b.HasKey("Id");
 
@@ -163,24 +196,30 @@ namespace Viegard.Persistence.Postgres.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<Guid>("ClassificationId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("classification_id");
 
                     b.Property<string>("CorrectedBy")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("corrected_by");
 
                     b.Property<string>("CorrectedCategory")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("corrected_category");
 
                     b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
 
                     b.Property<string>("Note")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("note");
 
                     b.HasKey("Id");
 
@@ -193,32 +232,40 @@ namespace Viegard.Persistence.Postgres.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<Guid>("ClassificationId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("classification_id");
 
                     b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
 
                     b.Property<string>("GuardrailsJson")
                         .IsRequired()
-                        .HasColumnType("jsonb");
+                        .HasColumnType("jsonb")
+                        .HasColumnName("guardrails_json");
 
                     b.Property<int>("Outcome")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("outcome");
 
                     b.Property<string>("PolicyId")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("policy_id");
 
                     b.Property<string>("PolicyVersion")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("policy_version");
 
                     b.Property<string>("Rationale")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("rationale");
 
                     b.HasKey("Id");
 
@@ -231,28 +278,35 @@ namespace Viegard.Persistence.Postgres.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<string>("CorrelationKey")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("correlation_key");
 
                     b.Property<string>("EventIdsJson")
                         .IsRequired()
-                        .HasColumnType("jsonb");
+                        .HasColumnType("jsonb")
+                        .HasColumnName("event_ids_json");
 
                     b.Property<string>("EvidenceJson")
                         .IsRequired()
-                        .HasColumnType("jsonb");
+                        .HasColumnType("jsonb")
+                        .HasColumnName("evidence_json");
 
                     b.Property<int>("State")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("state");
 
                     b.Property<DateTimeOffset>("WindowEnd")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("window_end");
 
                     b.Property<DateTimeOffset>("WindowStart")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("window_start");
 
                     b.HasKey("Id");
 
@@ -265,29 +319,36 @@ namespace Viegard.Persistence.Postgres.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<string>("EntitiesJson")
                         .IsRequired()
-                        .HasColumnType("jsonb");
+                        .HasColumnType("jsonb")
+                        .HasColumnName("entities_json");
 
                     b.Property<DateTimeOffset>("OccurredAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
 
                     b.Property<string>("PayloadJson")
                         .IsRequired()
-                        .HasColumnType("jsonb");
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload_json");
 
                     b.Property<Guid>("RawObservationId")
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("raw_observation_id");
 
                     b.Property<string>("SourceId")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("source_id");
 
                     b.Property<string>("SourceType")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("source_type");
 
                     b.HasKey("Id");
 
@@ -301,16 +362,20 @@ namespace Viegard.Persistence.Postgres.Migrations
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.QueueCounterRow", b =>
                 {
                     b.Property<string>("QueueName")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("queue_name");
 
                     b.Property<long>("Abandoned")
-                        .HasColumnType("bigint");
+                        .HasColumnType("bigint")
+                        .HasColumnName("abandoned");
 
                     b.Property<long>("Completed")
-                        .HasColumnType("bigint");
+                        .HasColumnType("bigint")
+                        .HasColumnName("completed");
 
                     b.Property<long>("Enqueued")
-                        .HasColumnType("bigint");
+                        .HasColumnType("bigint")
+                        .HasColumnName("enqueued");
 
                     b.HasKey("QueueName");
 
@@ -321,29 +386,36 @@ namespace Viegard.Persistence.Postgres.Migrations
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("Id"));
 
                     b.Property<bool>("DeadLettered")
-                        .HasColumnType("boolean");
+                        .HasColumnType("boolean")
+                        .HasColumnName("dead_lettered");
 
                     b.Property<int>("DeliveryCount")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("delivery_count");
 
                     b.Property<DateTimeOffset>("EnqueuedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("enqueued_at");
 
                     b.Property<DateTimeOffset?>("LeasedUntil")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("leased_until");
 
                     b.Property<string>("PayloadJson")
                         .IsRequired()
-                        .HasColumnType("jsonb");
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload_json");
 
                     b.Property<string>("QueueName")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("queue_name");
 
                     b.HasKey("Id");
 
@@ -355,34 +427,44 @@ namespace Viegard.Persistence.Postgres.Migrations
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.QueueTelemetryRow", b =>
                 {
                     b.Property<string>("InstanceId")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("instance_id");
 
                     b.Property<string>("QueueName")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("queue_name");
 
                     b.Property<DateTimeOffset>("CapturedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("captured_at");
 
                     b.Property<int>("DeadLetterCount")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("dead_letter_count");
 
                     b.Property<int>("Depth")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("depth");
 
                     b.Property<int>("InFlight")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("in_flight");
 
                     b.Property<DateTimeOffset?>("OldestPendingEnqueuedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("oldest_pending_enqueued_at");
 
                     b.Property<long>("TotalAbandoned")
-                        .HasColumnType("bigint");
+                        .HasColumnType("bigint")
+                        .HasColumnName("total_abandoned");
 
                     b.Property<long>("TotalCompleted")
-                        .HasColumnType("bigint");
+                        .HasColumnType("bigint")
+                        .HasColumnName("total_completed");
 
                     b.Property<long>("TotalEnqueued")
-                        .HasColumnType("bigint");
+                        .HasColumnType("bigint")
+                        .HasColumnName("total_enqueued");
 
                     b.HasKey("InstanceId", "QueueName");
 
@@ -393,25 +475,31 @@ namespace Viegard.Persistence.Postgres.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
 
                     b.Property<string>("IngestOffset")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("ingest_offset");
 
                     b.Property<DateTimeOffset>("ObservedAt")
-                        .HasColumnType("timestamp with time zone");
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("observed_at");
 
                     b.Property<string>("PayloadReference")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("payload_reference");
 
                     b.Property<string>("RawPayload")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("raw_payload");
 
                     b.Property<string>("SourceId")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("source_id");
 
                     b.HasKey("Id");
 
@@ -426,14 +514,17 @@ namespace Viegard.Persistence.Postgres.Migrations
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.SourceOffsetRow", b =>
                 {
                     b.Property<string>("SourceId")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("source_id");
 
                     b.Property<string>("Key")
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("key");
 
                     b.Property<string>("Value")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasColumnType("text")
+                        .HasColumnName("value");
 
                     b.HasKey("SourceId", "Key");
 

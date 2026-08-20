@@ -60,7 +60,7 @@ dotnet run --project src/Viegard.PipelineHost # run pipeline host (logs roles, h
 dotnet run --project src/Viegard.AdminApi     # run admin host (/healthz liveness)
 ```
 
-PostgreSQL integration tests: set `VIEGARD_TEST_POSTGRES` to a connection string for a **disposable test database only** (they migrate the schema and truncate queue tables).  Never point it at a real instance.
+PostgreSQL integration tests: set `VIEGARD_TEST_POSTGRES` to a connection string for a **disposable test database only** (they migrate the schema and truncate queue tables).  Never point it at a real instance.  On this workstation: Docker CE runs inside WSL2 Debian; start the disposable container with `wsl -d Debian -u root -- docker start viegard-test-pg` (publishes 5433; WSL only forwards IPv4, so use `Host=127.0.0.1`, not `localhost`).  Note the WSL VM idle-terminates and takes Docker with it; keep a WSL session alive during test runs.
 
 Git conventions:
 

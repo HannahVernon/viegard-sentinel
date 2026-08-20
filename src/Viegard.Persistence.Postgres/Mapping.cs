@@ -14,7 +14,15 @@ namespace Viegard.Persistence.Postgres;
 /// <summary>Domain &lt;-&gt; row mapping.  JSON columns use web-default serializer options.</summary>
 internal static class Mapping
 {
-    internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    /// <summary>
+    /// AllowOutOfOrderMetadataProperties is required because PostgreSQL
+    /// jsonb does not preserve key order: the $payloadType discriminator is
+    /// not guaranteed to arrive first when payloads are read back.
+    /// </summary>
+    internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        AllowOutOfOrderMetadataProperties = true,
+    };
 
     private static string ToJson<T>(T value) => JsonSerializer.Serialize(value, Json);
 

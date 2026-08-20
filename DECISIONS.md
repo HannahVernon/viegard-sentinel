@@ -216,3 +216,12 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 
 
 
+
+## D-0025: MDaemon log transport: Viegard satellite pipeline instance on the MDaemon host
+
+- **Date:** 2026-08-20 (Phase 4)
+- **Decision:** MDaemon logs are ingested by a Viegard satellite pipeline instance running on the MDaemon Windows host itself: the role-configurable host binary (D-0011) running only the sources role with a future `Viegard.Sources.MDaemonLogs` file-tailing adapter, publishing into the shared PostgreSQL persistence/queues (D-0024) over the LAN.  First-party code end to end: no third-party shipping agent on the mail server.
+- **Alternatives considered:** SFTP pull via Windows built-in OpenSSH (polling latency, rotation-aware remote offsets, SSH.NET dependency); Fluent Bit agent to the syslog listener (third-party agent on the mail server, UDP loss, session transcripts flattened line-by-line); SMB mount tailing (fragile).
+- **Rationale:** Research (2026-08-19, official docs) confirmed MDaemon has no native syslog in any version through v26; logs are local flat files.  The satellite preserves full file fidelity (multi-line session transcripts), uses TCP-durable transport, and exercises the multi-process topology the architecture was designed for.
+- **Consequences:** Postgres must be reachable from the MDaemon host (publish 5432 bound to the LAN, firewalled to that host; per-instance least-privilege DB credentials).  Open questions remain: which logs to ingest, log formats/samples for parser fixtures, Windows service deployment of the satellite (see TODO).
+- **Approval:** Explicitly approved by Hannah.

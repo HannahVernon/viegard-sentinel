@@ -33,8 +33,9 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ### MDaemon logs
 
-- [ ] **MDaemon log transport**: MDaemon has no native syslog (verified 2026-08-19 against official docs).  Recommended approach: a Viegard satellite pipeline instance on the Windows host (file-source role) once PostgreSQL persistence lands (D-0024); interim alternatives: SFTP pull (Windows built-in OpenSSH) or Fluent Bit agent to the syslog listener.  Needs Hannah's confirmation after the Postgres work.
-- [ ] **Which MDaemon logs to ingest** (SMTP in/out, IMAP, POP, Dynamic Screening / security logs, ActiveSync) and their configured formats.
+- [x] **MDaemon log transport** - DECIDED (D-0025, 2026-08-20): Viegard satellite pipeline instance on the MDaemon Windows host (sources role only) writing to shared Postgres over the LAN.
+- [ ] **MDaemon satellite prerequisites**: publish Postgres 5432 bound to the LAN and firewall it to the MDaemon host; per-instance least-privilege DB credentials; Windows service deployment of the satellite host.
+- [ ] **Which MDaemon logs to ingest** (SMTP in/out, IMAP, POP, Dynamic Screening / security logs, ActiveSync) and their configured formats.  Needs log samples from Hannah's server for parser fixtures.
 
 ### Inference
 

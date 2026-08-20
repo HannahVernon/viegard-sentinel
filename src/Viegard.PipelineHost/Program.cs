@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Options;
 using Viegard.Application.Audit;
+using Viegard.Application.Correlation;
+using Viegard.Application.Detection;
 using Viegard.Application.Queues;
 using Viegard.Application.Secrets;
 using Viegard.Application.Sources;
@@ -20,6 +22,21 @@ builder.Services
     .Bind(builder.Configuration.GetSection(ViegardHostOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<ViegardHostOptions>, ViegardHostOptionsValidator>();
+
+builder.Services
+    .AddOptions<DetectionOptions>()
+    .Bind(builder.Configuration.GetSection(DetectionOptions.SectionName))
+    .Validate(o => o.MaxInputCharsToScan > 0, "Detection MaxInputCharsToScan must be positive.")
+    .Validate(o => o.MaxEvidencePerRule > 0, "Detection MaxEvidencePerRule must be positive.")
+    .ValidateOnStart();
+
+builder.Services
+    .AddOptions<CorrelationOptions>()
+    .Bind(builder.Configuration.GetSection(CorrelationOptions.SectionName))
+    .Validate(o => o.WindowDuration > TimeSpan.Zero, "Correlation WindowDuration must be positive.")
+    .Validate(o => o.MaxEventIdsPerIncident > 0, "Correlation MaxEventIdsPerIncident must be positive.")
+    .Validate(o => o.MaxEvidenceItemsPerIncident > 0, "Correlation MaxEvidenceItemsPerIncident must be positive.")
+    .ValidateOnStart();
 
 // Secrets (D-0006): mounted secret files in production, user-secrets-backed
 // configuration in development.  Selection is configuration, never code.
@@ -127,6 +144,42 @@ var configuredRoles = builder.Configuration.GetSection($"{ViegardHostOptions.Sec
 if (configuredRoles.Contains(RoleNames.Sources, StringComparer.OrdinalIgnoreCase))
 {
     builder.Services.AddHostedService<IngestionWorker>();
+}
+
+// The correlation worker runs only in the singleton correlation role (D-0011).
+if (configuredRoles.Contains(RoleNames.Correlation, StringComparer.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new SensitivePathHttpDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new PathTraversalHttpDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new SqlInjectionHttpDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new CommandInjectionHttpDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new XssHttpDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new SuspiciousUserAgentHttpDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new UnusualHttpMethodDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new ErrorStatusHttpDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new ExcessiveLinksMailDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new FromLinkDomainMismatchMailDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule, ReplyToDomainMismatchMailDetectionRule>();
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new AttachmentDoubleExtensionMailDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule>(sp =>
+        new ExecutableAttachmentMailDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<ICorrelator>(sp =>
+        new TimeWindowCorrelator(
+            sp.GetRequiredService<IEnumerable<IDetectionRule>>(),
+            sp.GetRequiredService<IIncidentStore>(),
+            sp.GetRequiredService<IOptions<CorrelationOptions>>().Value));
+    builder.Services.AddHostedService<CorrelationWorker>();
 }
 
 var host = builder.Build();

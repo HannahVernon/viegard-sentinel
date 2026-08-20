@@ -66,8 +66,10 @@ public sealed class InMemoryIncidentStore : IIncidentStore
         ValueTask.FromResult(_incidents.GetValueOrDefault(id));
 
     public ValueTask<Incident?> FindOpenByCorrelationKeyAsync(string correlationKey, CancellationToken cancellationToken = default) =>
-        ValueTask.FromResult(_incidents.Values.FirstOrDefault(i =>
-            i.State == IncidentState.Open && i.CorrelationKey == correlationKey));
+        ValueTask.FromResult(_incidents.Values
+            .Where(i => i.State == IncidentState.Open && i.CorrelationKey == correlationKey)
+            .OrderByDescending(i => i.WindowEnd)
+            .FirstOrDefault());
 }
 
 public sealed class InMemoryClassificationStore : IClassificationStore

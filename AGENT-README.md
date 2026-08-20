@@ -13,7 +13,7 @@ The conceptual identity is a raven acting as a vigilant sentinel (Eyes = ingesti
 
 ## Current development state
 
-**Phase 2 (Architecture) is APPROVED (D-0017, 2026-08-18); the design in [ARCHITECTURE.md](ARCHITECTURE.md) is authoritative.  Phase 3 (Skeleton) is nearly complete:** solution structure, domain model, application ports, broker-semantics channel work queue, secret providers, in-memory stores, role-validated pipeline host, admin host with liveness endpoint, prompt assembler with trust boundaries, strict AI output validation, and queue telemetry with traffic-light evaluation all build and pass tests (70/70).  Remaining Phase 3 work is tracked in TODO.md.
+**Phase 2 (Architecture) is APPROVED (D-0017, 2026-08-18); the design in [ARCHITECTURE.md](ARCHITECTURE.md) is authoritative.  Phase 5 deterministic rules and correlation are partially implemented:** HTTP and mail detection rules, time-window incident correlation, and the role-gated correlation worker now consume queued event IDs and write incidents/audit records.  Policy evaluation remains open and is tracked in TODO.md with the threshold decisions Hannah still needs to make.
 
 ## Architecture (intended)
 
@@ -37,6 +37,8 @@ Path | Purpose
 `Directory.Build.props` | Shared build settings incl. NuGetAudit enforcement (do not weaken)
 `src/Viegard.Domain/` | Core domain model (events, incidents, classifications, decisions, actions, audit, health, commands); zero external dependencies
 `src/Viegard.Application/` | Ports (interfaces) and core implementations (channel work queue, secret providers).  Note: classifier namespace is `Viegard.Application.Classifiers` to avoid colliding with the `Classification` domain type
+`src/Viegard.Application/Detection/` | Deterministic detection rules and options for HTTP and mail evidence
+`src/Viegard.Application/Correlation/` | Time-window correlator folding normalized events into incidents
 `src/Viegard.Persistence/` | Development-only in-memory store implementations (default provider)
 `src/Viegard.Persistence.Postgres/` | PostgreSQL provider (D-0024): EF Core + Npgsql, `ViegardDbContext` + migrations (`dotnet dotnet-ef migrations add <Name> --project src/Viegard.Persistence.Postgres`), all store ports, durable `PostgresWorkQueue` (`SKIP LOCKED` visibility-timeout leases, dead-lettering at lease time, `LISTEN/NOTIFY` wakeups), `PostgresCommandQueue`.  Selected via `Viegard:Persistence:Provider` = `postgres`; DB password is the secret `viegard-db-password`
 `src/Viegard.Sources.Imap/` | IMAP source adapter (MailKit): per-account `ImapMailSource` (implicit TLS, read-only folders, IDLE with polling fallback, offset resume), `ImapEventNormalizer` (MailFetchDto JSON -> MailMessageEvent), `LinkExtractor`

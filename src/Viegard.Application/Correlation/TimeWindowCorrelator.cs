@@ -157,6 +157,7 @@ public sealed class TimeWindowCorrelator(
         {
             HttpRequestEvent http => IpKey(PrimaryIp(normalizedEvent) ?? http.RemoteAddress),
             SyslogEvent syslog => IpKey(PrimaryIp(normalizedEvent) ?? syslog.PeerIp),
+            MDaemonLogEvent mdaemon => IpKey(PrimaryIp(normalizedEvent) ?? mdaemon.RemoteIp),
             MailMessageEvent mail => MailKey(mail.From.FirstOrDefault()?.Address),
             _ => null,
         };

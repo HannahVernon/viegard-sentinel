@@ -15,6 +15,7 @@
     <ProjectReference Include="..\Viegard.Application\Viegard.Application.csproj" />
     <ProjectReference Include="..\Viegard.Persistence\Viegard.Persistence.csproj" />
     <ProjectReference Include="..\Viegard.Sources.Imap\Viegard.Sources.Imap.csproj" />
+    <ProjectReference Include="..\Viegard.Sources.MDaemonLogs\Viegard.Sources.MDaemonLogs.csproj" />
     <ProjectReference Include="..\Viegard.Sources.Syslog\Viegard.Sources.Syslog.csproj" />
     <ProjectReference Include="..\Viegard.Persistence.Postgres\Viegard.Persistence.Postgres.csproj" />
   </ItemGroup>

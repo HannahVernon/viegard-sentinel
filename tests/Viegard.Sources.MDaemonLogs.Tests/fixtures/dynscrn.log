@@ -1,0 +1,5 @@
+260818 005841591 I [1002FA89] 0x415041A1 Block List: IMAP: Blocking IP:203.0.113.20 (connected 16 times within 6 minutes)
+260818 005841591 I [1002FA89] 0x41502010 Mgmt Add: Blocked Item: IP:203.0.113.20 Comment:"connected 16 times within 6 minutes"
+260818 005841615 I [00000041] 0x415040C1 Block List: Refusing IMAP access: IP:203.0.113.20 VIA:198.51.100.21
+260818 000408427 I [00000045] 0x41507015 TrustedIP: AS: found IP:192.168.0.20 VIA:192.168.*.*
+

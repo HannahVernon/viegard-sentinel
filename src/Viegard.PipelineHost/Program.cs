@@ -12,6 +12,7 @@ using Viegard.Persistence.Postgres;
 using Viegard.PipelineHost.Configuration;
 using Viegard.PipelineHost.Workers;
 using Viegard.Sources.Imap;
+using Viegard.Sources.MDaemonLogs;
 using Viegard.Sources.Syslog;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -137,6 +138,28 @@ if (syslogOptions?.Enabled == true)
     builder.Services.AddSingleton<IEventNormalizer>(sp =>
         new SyslogEventNormalizer(sp.GetRequiredService<IOptions<SyslogSourceOptions>>().Value));
 }
+
+// MDaemon flat-file source (D-0013, D-0025; off unless explicitly enabled).
+builder.Services
+    .AddOptions<MDaemonSourceOptions>()
+    .Bind(builder.Configuration.GetSection(MDaemonSourceOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<MDaemonSourceOptions>, MDaemonSourceOptionsValidator>();
+
+var mdaemonOptions = builder.Configuration.GetSection(MDaemonSourceOptions.SectionName).Get<MDaemonSourceOptions>();
+if (mdaemonOptions?.Enabled == true)
+{
+    MDaemonLogSource? mdaemonInstance = null;
+    MDaemonLogSource MDaemonFactory(IServiceProvider sp) => mdaemonInstance ??= new MDaemonLogSource(
+        sp.GetRequiredService<IOptions<MDaemonSourceOptions>>().Value,
+        sp.GetRequiredService<ISourceOffsetStore>(),
+        sp.GetRequiredService<ILogger<MDaemonLogSource>>());
+
+    builder.Services.AddSingleton<IDataSource>(MDaemonFactory);
+    builder.Services.AddSingleton<Viegard.Application.Health.IHealthContributor>(MDaemonFactory);
+    builder.Services.AddSingleton<IEventNormalizer>(sp =>
+        new MDaemonEventNormalizer(sp.GetRequiredService<IOptions<MDaemonSourceOptions>>().Value));
+}
 builder.Services.AddHostedService<QueueTelemetryPublisher>();
 
 // The ingestion worker runs only in instances configured for the sources role (D-0011).
@@ -174,6 +197,7 @@ if (configuredRoles.Contains(RoleNames.Correlation, StringComparer.OrdinalIgnore
         new AttachmentDoubleExtensionMailDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
     builder.Services.AddSingleton<IDetectionRule>(sp =>
         new ExecutableAttachmentMailDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
+    builder.Services.AddSingleton<IDetectionRule, MDaemonDetectionRule>();
     builder.Services.AddSingleton<ICorrelator>(sp =>
         new TimeWindowCorrelator(
             sp.GetRequiredService<IEnumerable<IDetectionRule>>(),

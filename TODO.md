@@ -35,7 +35,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 - [x] **MDaemon log transport** - DECIDED (D-0025, 2026-08-20): Viegard satellite pipeline instance on the MDaemon Windows host (sources role only) writing to shared Postgres over the LAN.
 - [ ] **MDaemon satellite prerequisites**: publish Postgres 5432 bound to the LAN and firewall it to the MDaemon host; per-instance least-privilege DB credentials; Windows service deployment of the satellite host.
-- [ ] **Which MDaemon logs to ingest** (SMTP in/out, IMAP, POP, Dynamic Screening / security logs, ActiveSync) and their configured formats.  Needs log samples from Hannah's server for parser fixtures.
+- [x] **Which MDaemon logs to ingest and their formats** - RESOLVED 2026-08-20 via real-log analysis and sanitized fixtures: ingest per-service MDaemon logs for SMTP in/out, IMAP, POP3, Screening, and `DynScrn-*.log` Dynamic Screening.  Prefer per-service files over the combined `-all.log` to avoid duplicate ingestion.  ActiveSync is not in the initial parser set.
 
 ### Inference
 
@@ -68,8 +68,8 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 - [x] **Phase 2: Architecture proposal** - APPROVED by Hannah 2026-08-18 (D-0017).
 - [ ] **Phase 3: Skeleton** (nearly complete) - DONE: solution layout (`Viegard.slnx`), `Directory.Build.props` with NuGetAudit enforcement, domain event/decision/audit/health model, application ports, broker-semantics `ChannelWorkQueue` with dead-lettering, `FileSecretProvider` + `ConfigurationSecretProvider`, in-memory stores, role-validated pipeline host, admin host `/healthz`, prompt assembler with random-boundary untrusted-data blocks, strict AI classification output validator, queue telemetry publication + traffic-light evaluator (D-0012; cross-process visibility arrives with the database, D-0004), Dockerfiles + sanitized compose example, 70 passing tests.  REMAINING: verify container builds on the Debian VM (no container tooling on the dev workstation; Hannah chose to defer, 2026-08-18), CI decision, admin GUI queue page (needs shared persistence).
-- [ ] **Phase 4: Data sources** - IMAP adapter DONE (live-account verification outstanding); syslog/nginx source DONE (PR pending; live SWAG configuration outstanding); MDaemon logs next (approved by Hannah 2026-08-18).
-- [ ] **Phase 5: Deterministic analysis** - PARTIALLY DONE: deterministic HTTP/mail rules, time-window correlation, and the correlation worker are implemented.  REMAINING: policy evaluation, automatic-action thresholds, and confidence/severity thresholds awaiting Hannah's decisions.
+- [ ] **Phase 4: Data sources** - IMAP adapter DONE (live-account verification outstanding); syslog/nginx source DONE (live SWAG configuration outstanding); MDaemon log source DONE in code with sanitized parser fixtures.  REMAINING: live MDaemon satellite deployment and Windows service configuration.
+- [ ] **Phase 5: Deterministic analysis** - PARTIALLY DONE: deterministic HTTP/mail/MDaemon rules, time-window correlation, and the correlation worker are implemented.  REMAINING: policy evaluation, automatic-action thresholds, and confidence/severity thresholds awaiting Hannah's decisions.
 - [ ] **Phase 6: Local AI** - inference abstraction, llama.cpp adapter, local dev inference install.
 - [ ] **Phase 7: Actions** - action providers, dry-run first; real actions only after explicit approval.
 - [ ] **Phase 8: Administration** - admin interface/API.

@@ -1,0 +1,7 @@
+START Event Log / MDaemon PRO v26.0.3, Screening log information
+-------------------------------------------------------------------------------
+Event Time/Date             Event Description
+-------------------------------------------------------------------------------
+Tue 2026-08-18 00:08:52.564: Host screening refused connection to 192.168.0.10:465 from localhost [203.0.113.11:44056] (matched to line "all localhost refuse")
+Tue 2026-08-18 00:09:45.644: Location Screening: IP 198.51.100.12 matched to country Hong Kong, Asia; connection blocked; port 995
+

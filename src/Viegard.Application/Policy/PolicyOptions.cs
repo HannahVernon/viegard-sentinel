@@ -51,6 +51,18 @@ public sealed class PolicyOptions
     public IList<string> AllowedSenders { get; set; } = [];
 
     public IList<string> AllowedDomains { get; set; } = [];
+
+    public PolicyPostureOptions Posture { get; set; } = new();
+}
+
+/// <summary>Global posture overlay for policy evaluation.</summary>
+public sealed class PolicyPostureOptions
+{
+    public bool DryRun { get; set; } = true;
+
+    public bool ManualApprovalMode { get; set; } = true;
+
+    public bool EmergencyStop { get; set; }
 }
 
 /// <summary>Startup validation for policy configuration.</summary>

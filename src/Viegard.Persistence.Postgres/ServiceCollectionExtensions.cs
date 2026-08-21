@@ -69,6 +69,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IWorkQueue<Guid>>(sp =>
             new PostgresWorkQueue<Guid>(sp.GetRequiredService<NpgsqlDataSource>(), "events"));
         services.AddSingleton<IQueueStatsSource>(sp => (PostgresWorkQueue<Guid>)sp.GetRequiredService<IWorkQueue<Guid>>());
+        services.AddSingleton<IWorkQueue<IncidentWorkItem>>(sp =>
+            new PostgresWorkQueue<IncidentWorkItem>(sp.GetRequiredService<NpgsqlDataSource>(), "incidents"));
+        services.AddSingleton<IQueueStatsSource>(sp =>
+            (PostgresWorkQueue<IncidentWorkItem>)sp.GetRequiredService<IWorkQueue<IncidentWorkItem>>());
+        services.AddSingleton<IWorkQueue<ClassificationWorkItem>>(sp =>
+            new PostgresWorkQueue<ClassificationWorkItem>(sp.GetRequiredService<NpgsqlDataSource>(), "classifications"));
+        services.AddSingleton<IQueueStatsSource>(sp =>
+            (PostgresWorkQueue<ClassificationWorkItem>)sp.GetRequiredService<IWorkQueue<ClassificationWorkItem>>());
         services.AddSingleton<ICommandQueue>(sp =>
             new PostgresCommandQueue(sp.GetRequiredService<NpgsqlDataSource>()));
 

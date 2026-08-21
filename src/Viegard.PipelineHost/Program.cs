@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Viegard.Application.Audit;
+using Viegard.Application.Classifiers;
 using Viegard.Application.Correlation;
 using Viegard.Application.Detection;
 using Viegard.Application.Policy;
@@ -49,6 +50,12 @@ builder.Services.AddSingleton(sp =>
     new ProtectedAddressList(sp.GetRequiredService<IOptions<PolicyOptions>>().Value.ProtectedCidrs));
 builder.Services.AddSingleton<IGuardrailStateStore, InMemoryGuardrailStateStore>();
 
+builder.Services
+    .AddOptions<ClassifierOptions>()
+    .Bind(builder.Configuration.GetSection(ClassifierOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<ClassifierOptions>, ClassifierOptionsValidator>();
+
 // Secrets (D-0006): mounted secret files in production, user-secrets-backed
 // configuration in development.  Selection is configuration, never code.
 var secretProviderKind = builder.Configuration["Viegard:Secrets:Provider"] ?? "configuration";
@@ -91,8 +98,14 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
+        var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");
+        var classificationsQueue = new ChannelWorkQueue<ClassificationWorkItem>("classifications");
         builder.Services.AddSingleton<IWorkQueue<Guid>>(eventsQueue);
         builder.Services.AddSingleton<IQueueStatsSource>(eventsQueue);
+        builder.Services.AddSingleton<IWorkQueue<IncidentWorkItem>>(incidentsQueue);
+        builder.Services.AddSingleton<IQueueStatsSource>(incidentsQueue);
+        builder.Services.AddSingleton<IWorkQueue<ClassificationWorkItem>>(classificationsQueue);
+        builder.Services.AddSingleton<IQueueStatsSource>(classificationsQueue);
         break;
 
     default:
@@ -214,6 +227,13 @@ if (configuredRoles.Contains(RoleNames.Correlation, StringComparer.OrdinalIgnore
             sp.GetRequiredService<IIncidentStore>(),
             sp.GetRequiredService<IOptions<CorrelationOptions>>().Value));
     builder.Services.AddHostedService<CorrelationWorker>();
+}
+
+// The classification worker runs only in the singleton classification role (D-0011, D-0028).
+if (configuredRoles.Contains(RoleNames.Classification, StringComparer.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IClassifier, DeterministicIncidentClassifier>();
+    builder.Services.AddHostedService<ClassificationWorker>();
 }
 
 // The policy worker runs only in the singleton policy role (D-0011, D-0027).

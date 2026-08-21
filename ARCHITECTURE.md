@@ -49,20 +49,24 @@ Ingestion (per-source workers)                 EYES
 Parsing / Normalization -> NormalizedEvent     EYES
      |
      v
-Event Store + bounded event queue              FLIGHT / ROOST
+Event Store + events queue                     FLIGHT / ROOST
      |
      v
 Correlation -> Incident (episodes)             FLIGHT
      |
-     +---------------------------+
-     |                           |
-     v                           v
-Deterministic Rules        AI Classification   MIND
-(always available)         (optional, async,
-     |                      schema-validated)
-     +------------+--------------+
-                  |
-                  v
+     v
+Incidents queue                                FLIGHT
+     |
+     v
+Deterministic Incident Classification          MIND
+(always available; no inference dependency)
+     |
+     v
+Classifications queue                          FLIGHT
+     |                           Optional AI enrichment later may add
+     |                           schema-validated context without blocking
+     |                           deterministic flow.
+     v
             Policy Engine -> Decision          JUDGMENT
                   |
                   v
@@ -114,8 +118,9 @@ Viegard.slnx                   Solution (XML solution format; .NET 10 SDK defaul
 Directory.Build.props          NuGetAudit, nullable, warnings-as-errors, LangVersion
 src/
   Viegard.Domain/              Entities, value objects, enums; zero external dependencies
-  Viegard.Application/         Ports (interfaces), pipeline orchestration, policy engine,
-                               prompt assembly, schema validation, guardrails
+  Viegard.Application/         Ports (interfaces), deterministic classification,
+                               pipeline orchestration, policy engine, prompt assembly,
+                               schema validation, guardrails
   Viegard.Persistence/         Store implementations (in-memory/file first; DB when chosen)
   Viegard.Sources.Imap/        IMAP data source adapter (MailKit)
   Viegard.Sources.Syslog/      Syslog UDP source adapter; nginx/SWAG access logs normalize
@@ -129,11 +134,13 @@ src/
   Viegard.Actions.MikroTik/    RouterOS address-list action provider
   Viegard.Actions.Fail2Ban/    Fail2Ban integration (mode TBD)
   Viegard.Notifications.Email/ Operator status/alert emails via SMTP (MailKit)
-  Viegard.PipelineHost/        Worker service executable
+  Viegard.PipelineHost/        Worker service executable, including ingestion,
+                               correlation, classification, and policy workers
   Viegard.AdminApi/            Admin API executable
 tests/
   Viegard.Domain.Tests/
-  Viegard.Application.Tests/   Policy, guardrails, schema validation, prompt injection
+  Viegard.Application.Tests/   Policy, guardrails, deterministic classification,
+                               schema validation, prompt injection
   Viegard.Sources.Imap.Tests/
   Viegard.Sources.Syslog.Tests/       Syslog and nginx parser tests
   Viegard.Sources.MDaemonLogs.Tests/  Sanitized MDaemon parser fixtures

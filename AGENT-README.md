@@ -1,7 +1,7 @@
 ---
 Agent-Readme: 0.1
 Name: Viegard
-Description: Modular, self-hosted autonomous monitoring and security platform with local AI inference.
+Description: Modular, self-hosted autonomous monitoring and security platform with deterministic classification and optional local AI enrichment.
 Updated: 2026-08-20
 Languages: csharp
 Docs: ARCHITECTURE.md
@@ -11,7 +11,7 @@ Contacts: Hannah Vernon
 # AGENT-README
 
 ## Purpose
-Viegard monitors mail accounts (IMAP) and infrastructure logs (SWAG/nginx syslog, MDaemon), correlates events into incidents, classifies them deterministically and with a local LLM, and takes carefully controlled defensive actions.  "Done" = builds with zero warnings, all tests pass, and documentation (this file, TODO.md, DECISIONS.md) reflects the change.
+Viegard monitors mail accounts (IMAP) and infrastructure logs (SWAG/nginx syslog, MDaemon), correlates events into incidents, classifies them deterministically, optionally enriches with a local LLM later, and takes carefully controlled defensive actions.  "Done" = builds with zero warnings, all tests pass, and documentation (this file, TODO.md, DECISIONS.md) reflects the change.
 
 ## Setup & commands
 - Build: `dotnet build Viegard.slnx`  (warnings are errors; expect 0 warnings)
@@ -44,7 +44,7 @@ Preferences:
 - Raven metaphor (Eyes/Flight/Mind/Judgment/Talons/Roost/Ledger) only where it clarifies.
 
 ## Current state
-Phases 1-5 complete with provisional policy thresholds from D-0027.  Working today: IMAP source (per-account, IDLE+fallback, read-only), syslog UDP listener (fail-closed allowlist) with nginx parsing, MDaemon file-tailing source (satellite-ready per D-0025), detection rules + `TimeWindowCorrelator` + `CorrelationWorker`, D-0027 policy engine with D-0026 protected-address guardrail, in-memory guardrail state, placeholder `PolicyWorker`, PostgreSQL persistence + durable queues (verified against live Postgres), queue telemetry with traffic-light evaluator.  In flight: admin GUI features, llama.cpp inference (Phase 6, nothing installed yet), classification stage to feed `PolicyWorker`, PostgreSQL guardrail-state persistence, and dry-run threshold calibration.  Not yet deployed anywhere; deploy/ artifacts are unverified.  Authoritative queues: TODO.md (open questions), DECISIONS.md (D-0001..D-0027).
+Phases 1-5 complete with provisional policy thresholds from D-0027 and deterministic-only classification from D-0028.  Working today: IMAP source (per-account, IDLE+fallback, read-only), syslog UDP listener (fail-closed allowlist) with nginx parsing, MDaemon file-tailing source (satellite-ready per D-0025), detection rules + `TimeWindowCorrelator` + `CorrelationWorker`, `DeterministicIncidentClassifier` + `ClassificationWorker`, D-0027 policy engine + `PolicyWorker`, D-0026 protected-address guardrail, in-memory guardrail state, PostgreSQL persistence + durable events/incidents/classifications queues, and queue telemetry with traffic-light evaluator.  In flight: admin GUI features, optional llama.cpp inference enrichment (Phase 6, nothing installed yet), PostgreSQL guardrail-state persistence, and dry-run threshold calibration.  Not yet deployed anywhere; deploy/ artifacts are unverified.  Authoritative queues: TODO.md (open questions), DECISIONS.md (D-0001..D-0028).
 
 ## Surprises
 - The pipeline host is one binary that can run as many role-configured instances (D-0011); the correlator and policy/action engine are singleton roles enforced at startup.
@@ -62,5 +62,6 @@ Phases 1-5 complete with provisional policy thresholds from D-0027.  Working tod
 - Primary repo: Forgejo `hannah-vernon/viegard-sentinel`; GitHub mirror `HannahVernon/viegard-sentinel`.  Vulnerabilities: see SECURITY.md.
 
 ## Changes
+- 2026-08-20: Implemented deterministic-only classification spine per D-0028: incidents queue, deterministic evidence classifier, classification queue, real `PolicyWorker`, dry-run posture binding, and end-to-end deterministic decision test.
 - 2026-08-20: Restructured to the agent-readme.md draft v0.1 spec (sections, metadata header, facts/preferences split); content previously accreted per-phase.
 - 2026-08-20: Implemented Judgment policy engine per D-0027 with provisional thresholds, D-0026 protected-address defaults, in-memory guardrail state, and a placeholder `PolicyWorker` for the future classification stage.

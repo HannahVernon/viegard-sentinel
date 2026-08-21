@@ -9,6 +9,7 @@ namespace Viegard.PipelineHost.Workers;
 
 public sealed class CorrelationWorker(
     IWorkQueue<Guid> eventQueue,
+    IWorkQueue<IncidentWorkItem> incidentQueue,
     IEventStore eventStore,
     ICorrelator correlator,
     IAuditLedger auditLedger,
@@ -47,6 +48,9 @@ public sealed class CorrelationWorker(
                         IncidentId = incident.Id,
                         DetailJson = CorrelationDetailJson(incident.Evidence, eventId),
                     }, stoppingToken).ConfigureAwait(false);
+                    await incidentQueue
+                        .EnqueueAsync(new IncidentWorkItem(incident.Id), stoppingToken)
+                        .ConfigureAwait(false);
                 }
 
                 await lease.CompleteAsync(stoppingToken).ConfigureAwait(false);

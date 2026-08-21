@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Viegard.AdminApi/Viegard.AdminApi.csproj" />
+    <Project Path="src/Viegard.Application/Viegard.Application.csproj" />
+    <Project Path="src/Viegard.Domain/Viegard.Domain.csproj" />
+    <Project Path="src/Viegard.Persistence.Postgres/Viegard.Persistence.Postgres.csproj" />
+    <Project Path="src/Viegard.Persistence/Viegard.Persistence.csproj" />
+    <Project Path="src/Viegard.PipelineHost/Viegard.PipelineHost.csproj" />
+    <Project Path="src/Viegard.Sources.Imap/Viegard.Sources.Imap.csproj" />
+    <Project Path="src/Viegard.Sources.MDaemonLogs/Viegard.Sources.MDaemonLogs.csproj" />
+    <Project Path="src/Viegard.Sources.Syslog/Viegard.Sources.Syslog.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Viegard.Application.Tests/Viegard.Application.Tests.csproj" />
+    <Project Path="tests/Viegard.Domain.Tests/Viegard.Domain.Tests.csproj" />
+    <Project Path="tests/Viegard.Persistence.Postgres.Tests/Viegard.Persistence.Postgres.Tests.csproj" />
+    <Project Path="tests/Viegard.Sources.Imap.Tests/Viegard.Sources.Imap.Tests.csproj" />
+    <Project Path="tests/Viegard.Sources.MDaemonLogs.Tests/Viegard.Sources.MDaemonLogs.Tests.csproj" />
+    <Project Path="tests/Viegard.Sources.Syslog.Tests/Viegard.Sources.Syslog.Tests.csproj" />
+  </Folder>
+</Solution>

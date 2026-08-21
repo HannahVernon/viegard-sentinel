@@ -1,0 +1,17 @@
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /source
+COPY . .
+RUN dotnet publish src/Viegard.AdminApi/Viegard.AdminApi.csproj \
+    --configuration Release --output /app
+
+# Runtime stage
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+COPY --from=build /app .
+
+# Run as the non-root user provided by the base image.
+USER $APP_UID
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "Viegard.AdminApi.dll"]

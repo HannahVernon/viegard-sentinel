@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Viegard.Application\Viegard.Application.csproj" />
+    <ProjectReference Include="..\Viegard.Persistence\Viegard.Persistence.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <UserSecretsId>6b873927-6406-4221-b6d2-a32f97258b24</UserSecretsId>
+  </PropertyGroup>
+
+</Project>

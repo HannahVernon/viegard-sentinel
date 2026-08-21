@@ -74,6 +74,7 @@ services:
       Viegard__Host__InstanceId: pipeline-1
       # Connection string components; the password is read via the secret
       # file viegard-db-password, never placed here.
+      Viegard__Persistence__Provider: postgres
       Viegard__Database__Host: viegard-db
       Viegard__Database__Name: viegard
       Viegard__Database__Username: viegard
@@ -100,6 +101,7 @@ services:
       ASPNETCORE_URLS: http://+:8080
       Viegard__Secrets__Provider: file
       Viegard__Secrets__Directory: /run/viegard/secrets
+      Viegard__Persistence__Provider: postgres
       Viegard__Database__Host: viegard-db
       Viegard__Database__Name: viegard
       Viegard__Database__Username: viegard

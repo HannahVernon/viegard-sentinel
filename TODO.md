@@ -55,6 +55,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 - [ ] **HashiCorp Vault for secrets**: discuss adopting Vault as an `ISecretProvider` implementation (deployment cost of running a Vault container, unseal/auto-unseal workflow, audit and rotation benefits, versus mounted secret files per D-0006).
 - [ ] **Operator email notification details**: sending SMTP server/account, sender/recipient addresses, TLS settings, and which events warrant email vs. push.
 - [ ] **How the phone reaches the admin GUI** (VPN such as WireGuard vs. exposure through SWAG; affects Web Push subscription and admin auth threat model).
+- [ ] **Syslog source trust weighting**: once many LAN hosts may send syslog (wide allowlist), forged log lines from any allowed host become an injection vector for fake incidents.  Harmless under dry-run; before Phase 7 automatic actions, consider per-source trust weighting or per-source evidence caps.
 - [ ] **Admin API authentication model.**  Includes the deferred Data Protection key-encryption-at-rest decision: keys currently persist to a permission-protected volume (700, UID 1654) but are unencrypted on disk ("No XML encryptor" warning is expected); choose a certificate or other protector when auth cookies become real.
 - [ ] **Retention periods** for raw events, normalized events, incidents, classifications, actions, audit records, and model prompts/responses.
 - [ ] **Observability/monitoring technology** if the choice materially affects deployment.

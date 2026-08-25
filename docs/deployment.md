@@ -73,6 +73,39 @@ Sources ship disabled; enable them deliberately, one at a time.
 - **IMAP accounts:** add entries under `Viegard__Sources__Imap__Accounts__*` with a password secret file per account (`PasswordSecretName`).
 - **MDaemon logs:** runs as a satellite pipeline instance on the mail host (D-0025); deployment guide pending.
 
+## Firewalling the syslog port
+
+**Docker bypasses the host firewall for published ports.**  Traffic to a published container port flows through Docker's NAT/forward chains, not the `INPUT` chain that tools like ufw manage: a `ufw deny 5514` is silently ineffective.  Docker's sanctioned filtering hook is the `DOCKER-USER` chain, which Docker creates and never flushes.
+
+Restrict UDP 5514 to a single sender:
+
+```bash
+sudo iptables -I DOCKER-USER -p udp --dport 5514 ! -s 192.0.2.10 -j DROP
+```
+
+Or to private ranges, if many LAN hosts will send syslog:
+
+```bash
+sudo iptables -I DOCKER-USER -p udp --dport 5514 -s 192.168.0.0/16 -j RETURN
+sudo iptables -I DOCKER-USER -p udp --dport 5514 -s 172.16.0.0/12 -j RETURN
+sudo iptables -I DOCKER-USER 3 -p udp --dport 5514 -j DROP
+```
+
+Persist across reboots:
+
+```bash
+sudo apt install iptables-persistent
+sudo netfilter-persistent save        # after any rule change
+```
+
+Notes:
+
+- This is defense-in-depth layer two.  Layer one is Viegard's own fail-closed source allowlist (`AllowedSources`), which drops and counts non-allowlisted datagrams before any parsing.  Skipping the firewall rule leaves integrity intact but exposes the socket to floods (kernel-buffer pressure can drop legitimate datagrams) and widens reachable surface.
+- Neither layer defeats on-LAN source spoofing; both trust the claimed source address.  Anti-spoofing belongs to the network layer (router/switch controls).
+- `172.16.0.0/12` includes Docker's own container networks; allowing it means containers on this host can send syslog too.  Decide deliberately.
+- The admin port needs no rule here: it binds to `127.0.0.1` on the host and is not reachable through the Docker forward path.
+- Host services that are not Docker-published (e.g., SSH) hit `INPUT` normally; ufw or plain nftables work fine for those.
+
 ## Operational notes
 
 - `docker compose logs` keeps the container's full history; use `--since`/`-t` to separate fresh entries from old ones after a fix.

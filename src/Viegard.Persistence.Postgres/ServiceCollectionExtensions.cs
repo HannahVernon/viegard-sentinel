@@ -46,13 +46,20 @@ public static class ServiceCollectionExtensions
                 Database = options.Name,
                 Username = options.Username,
                 Password = password.Reveal(),
+                // All Viegard objects live in the configured schema; the
+                // model and raw SQL are schema-agnostic and follow the
+                // search path.
+                SearchPath = options.Schema,
             };
 
             return new NpgsqlDataSourceBuilder(builder.ConnectionString).Build();
         });
 
         services.AddDbContextFactory<ViegardDbContext>((sp, optionsBuilder) =>
-            optionsBuilder.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>()));
+            ViegardDbContextConfiguration.Configure(
+                optionsBuilder,
+                sp.GetRequiredService<NpgsqlDataSource>(),
+                sp.GetRequiredService<IOptions<DatabaseOptions>>().Value.Schema));
 
         services.AddSingleton<IRawObservationStore, PostgresRawObservationStore>();
         services.AddSingleton<IEventStore, PostgresEventStore>();
@@ -83,13 +90,29 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Applies pending migrations when AutoMigrate is enabled.  Call once at host startup.</summary>
+    /// <summary>Creates the configured schema if needed and applies pending migrations when AutoMigrate is enabled.  Call once at host startup.</summary>
     public static async Task MigrateViegardDatabaseAsync(this IServiceProvider services, CancellationToken cancellationToken = default)
     {
         var options = services.GetRequiredService<IOptions<DatabaseOptions>>().Value;
         if (!options.AutoMigrate)
         {
             return;
+        }
+
+        // The schema name is validated at startup against ^[a-z][a-z0-9_]*$
+        // (DatabaseOptionsValidator); re-check here as defense in depth
+        // before it participates in DDL.
+        if (!DatabaseOptionsValidator.IsSafeSchemaName(options.Schema))
+        {
+            throw new InvalidOperationException($"Refusing to create schema from unsafe name '{options.Schema}'.");
+        }
+
+        var dataSource = services.GetRequiredService<NpgsqlDataSource>();
+        await using (var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false))
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"CREATE SCHEMA IF NOT EXISTS {options.Schema}";
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
         var factory = services.GetRequiredService<IDbContextFactory<ViegardDbContext>>();

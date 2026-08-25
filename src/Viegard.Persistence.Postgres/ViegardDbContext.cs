@@ -4,9 +4,15 @@ using Viegard.Persistence.Postgres.Model;
 
 namespace Viegard.Persistence.Postgres;
 
-/// <summary>EF Core context for Viegard's PostgreSQL persistence (D-0024).</summary>
+/// <summary>
+/// EF Core context for Viegard's PostgreSQL persistence (D-0024).  The model
+/// is deliberately schema-agnostic: all objects follow the connection's
+/// search path, so the schema is deployment configuration
+/// (Viegard:Database:Schema), not a compiled-in constant.
+/// </summary>
 public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> options) : DbContext(options)
 {
+
     public DbSet<RawObservationRow> RawObservations => Set<RawObservationRow>();
 
     public DbSet<NormalizedEventRow> Events => Set<NormalizedEventRow>();

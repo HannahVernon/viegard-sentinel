@@ -15,13 +15,14 @@ using Viegard.Persistence.Postgres.Model;
 namespace Viegard.Persistence.Postgres.Stores;
 
 /// <summary>PostgreSQL implementations of the persistence ports (D-0024).</summary>
-public sealed class PostgresRawObservationStore(IDbContextFactory<ViegardDbContext> factory) : IRawObservationStore
+public sealed class PostgresRawObservationStore(IDbContextFactory<ViegardDbContext> factory, ReferenceResolver resolver) : IRawObservationStore
 {
     public async ValueTask AddAsync(RawObservation observation, string rawPayload, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(observation);
+        var sourceRef = await resolver.ResolveSourceAsync(observation.SourceId, observation.SourceType, cancellationToken).ConfigureAwait(false);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        db.RawObservations.Add(observation.ToRow(rawPayload));
+        db.RawObservations.Add(observation.ToRow(rawPayload, sourceRef));
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -29,7 +30,15 @@ public sealed class PostgresRawObservationStore(IDbContextFactory<ViegardDbConte
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await db.RawObservations.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, cancellationToken).ConfigureAwait(false);
-        return row?.ToDomain();
+        if (row is null)
+        {
+            return null;
+        }
+
+        var (sourceKey, sourceType) = await resolver.GetSourceAsync(row.SourceId, cancellationToken).ConfigureAwait(false);
+        // A null type means no typed writer has ever been seen for this
+        // source key; label the absence rather than guess.
+        return row.ToDomain(sourceKey, sourceType ?? "unknown");
     }
 
     public async ValueTask<string?> GetPayloadAsync(string payloadReference, CancellationToken cancellationToken = default)
@@ -42,13 +51,14 @@ public sealed class PostgresRawObservationStore(IDbContextFactory<ViegardDbConte
     }
 }
 
-public sealed class PostgresEventStore(IDbContextFactory<ViegardDbContext> factory) : IEventStore
+public sealed class PostgresEventStore(IDbContextFactory<ViegardDbContext> factory, ReferenceResolver resolver) : IEventStore
 {
     public async ValueTask AddAsync(NormalizedEvent normalizedEvent, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(normalizedEvent);
+        var sourceRef = await resolver.ResolveSourceAsync(normalizedEvent.SourceId, normalizedEvent.SourceType, cancellationToken).ConfigureAwait(false);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        db.Events.Add(normalizedEvent.ToRow());
+        db.Events.Add(normalizedEvent.ToRow(sourceRef));
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -56,7 +66,13 @@ public sealed class PostgresEventStore(IDbContextFactory<ViegardDbContext> facto
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await db.Events.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, cancellationToken).ConfigureAwait(false);
-        return row?.ToDomain();
+        if (row is null)
+        {
+            return null;
+        }
+
+        var (sourceKey, sourceType) = await resolver.GetSourceAsync(row.SourceId, cancellationToken).ConfigureAwait(false);
+        return row.ToDomain(sourceKey, sourceType ?? "unknown");
     }
 }
 
@@ -97,13 +113,14 @@ public sealed class PostgresIncidentStore(IDbContextFactory<ViegardDbContext> fa
     }
 }
 
-public sealed class PostgresClassificationStore(IDbContextFactory<ViegardDbContext> factory) : IClassificationStore
+public sealed class PostgresClassificationStore(IDbContextFactory<ViegardDbContext> factory, ReferenceResolver resolver) : IClassificationStore
 {
     public async ValueTask AddAsync(Classification classification, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(classification);
+        var classifierRef = await resolver.ResolveClassifierAsync(classification.ClassifierId, cancellationToken).ConfigureAwait(false);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        db.Classifications.Add(classification.ToRow());
+        db.Classifications.Add(classification.ToRow(classifierRef));
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -111,17 +128,24 @@ public sealed class PostgresClassificationStore(IDbContextFactory<ViegardDbConte
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await db.Classifications.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, cancellationToken).ConfigureAwait(false);
-        return row?.ToDomain();
+        if (row is null)
+        {
+            return null;
+        }
+
+        var classifierKey = await resolver.GetClassifierAsync(row.ClassifierId, cancellationToken).ConfigureAwait(false);
+        return row.ToDomain(classifierKey);
     }
 }
 
-public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> factory) : IDecisionStore
+public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> factory, ReferenceResolver resolver) : IDecisionStore
 {
     public async ValueTask AddAsync(Decision decision, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(decision);
+        var policyRef = await resolver.ResolvePolicyAsync(decision.PolicyId, decision.PolicyVersion, cancellationToken).ConfigureAwait(false);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        db.Decisions.Add(decision.ToRow());
+        db.Decisions.Add(decision.ToRow(policyRef));
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -129,24 +153,31 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await db.Decisions.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, cancellationToken).ConfigureAwait(false);
-        return row?.ToDomain();
+        if (row is null)
+        {
+            return null;
+        }
+
+        var (policyKey, policyVersion) = await resolver.GetPolicyAsync(row.PolicyId, cancellationToken).ConfigureAwait(false);
+        return row.ToDomain(policyKey, policyVersion);
     }
 }
 
-public sealed class PostgresActionStore(IDbContextFactory<ViegardDbContext> factory) : IActionStore
+public sealed class PostgresActionStore(IDbContextFactory<ViegardDbContext> factory, ReferenceResolver resolver) : IActionStore
 {
     public async ValueTask UpsertAsync(ActionRecord actionRecord, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(actionRecord);
+        var providerRef = await resolver.ResolveActionProviderAsync(actionRecord.ProviderId, cancellationToken).ConfigureAwait(false);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var existing = await db.Actions.FirstOrDefaultAsync(r => r.Id == actionRecord.Id, cancellationToken).ConfigureAwait(false);
         if (existing is null)
         {
-            db.Actions.Add(actionRecord.ToRow());
+            db.Actions.Add(actionRecord.ToRow(providerRef));
         }
         else
         {
-            db.Entry(existing).CurrentValues.SetValues(actionRecord.ToRow());
+            db.Entry(existing).CurrentValues.SetValues(actionRecord.ToRow(providerRef));
         }
 
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -156,7 +187,13 @@ public sealed class PostgresActionStore(IDbContextFactory<ViegardDbContext> fact
     {
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await db.Actions.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, cancellationToken).ConfigureAwait(false);
-        return row?.ToDomain();
+        if (row is null)
+        {
+            return null;
+        }
+
+        var providerKey = await resolver.GetActionProviderAsync(row.ProviderId, cancellationToken).ConfigureAwait(false);
+        return row.ToDomain(providerKey);
     }
 }
 
@@ -182,13 +219,18 @@ public sealed class PostgresCorrectionStore(IDbContextFactory<ViegardDbContext> 
 }
 
 /// <summary>Append-only audit ledger over PostgreSQL.</summary>
-public sealed class PostgresAuditLedger(IDbContextFactory<ViegardDbContext> factory) : IAuditLedger
+public sealed class PostgresAuditLedger(IDbContextFactory<ViegardDbContext> factory, ReferenceResolver resolver) : IAuditLedger
 {
     public async ValueTask AppendAsync(AuditRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
+        // The audit path does not know the source type; the resolver only
+        // creates a row when the key has never been seen by a typed writer.
+        var sourceRef = record.SourceId is null
+            ? (int?)null
+            : await resolver.ResolveSourceAsync(record.SourceId, sourceType: null, cancellationToken).ConfigureAwait(false);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        db.AuditRecords.Add(record.ToRow());
+        db.AuditRecords.Add(record.ToRow(sourceRef));
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 }

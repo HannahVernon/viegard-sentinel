@@ -28,7 +28,7 @@ public sealed class MappingTimestampTests
             RawObservationId = Guid.NewGuid(),
         };
 
-        var row = normalizedEvent.ToRow();
+        var row = normalizedEvent.ToRow(sourceRefId: 1);
 
         Assert.Equal(TimeSpan.Zero, row.OccurredAt.Offset);
         Assert.Equal(Local, row.OccurredAt);
@@ -41,11 +41,12 @@ public sealed class MappingTimestampTests
         {
             Id = Guid.NewGuid(),
             SourceId = "s",
+            SourceType = "syslog",
             ObservedAt = Local,
             PayloadReference = "r",
         };
 
-        var row = observation.ToRow("payload");
+        var row = observation.ToRow("payload", sourceRefId: 1);
 
         Assert.Equal(TimeSpan.Zero, row.ObservedAt.Offset);
         Assert.Equal(Local, row.ObservedAt);

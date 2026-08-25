@@ -219,6 +219,7 @@ public sealed class MDaemonLogSource(
                 {
                     Id = ViegardId.New(),
                     SourceId = SourceId,
+                    SourceType = MDaemonSourceType,
                     ObservedAt = capturedAt,
                     PayloadReference = $"mdaemon/{fileName}/{length}/{i}",
                     IngestOffset = length.ToString(),

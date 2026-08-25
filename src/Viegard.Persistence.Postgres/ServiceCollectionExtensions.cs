@@ -61,6 +61,10 @@ public static class ServiceCollectionExtensions
                 sp.GetRequiredService<NpgsqlDataSource>(),
                 sp.GetRequiredService<IOptions<DatabaseOptions>>().Value.Schema));
 
+        // Reference-table resolver (D-0031): process-lifetime caches over
+        // the insert-only sources/classifiers/policies/action_providers.
+        services.AddSingleton<ReferenceResolver>();
+
         services.AddSingleton<IRawObservationStore, PostgresRawObservationStore>();
         services.AddSingleton<IEventStore, PostgresEventStore>();
         services.AddSingleton<IIncidentStore, PostgresIncidentStore>();

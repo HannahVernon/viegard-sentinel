@@ -31,10 +31,12 @@ appsettings.*.local.json
 .env
 .env.*
 
-# Deployment runtime state (never commit data, dumps, or secrets)
+# Deployment runtime state (never commit data, dumps, secrets, or the
+# environment-specific compose copy made from the example)
 deploy/data/
 deploy/backups/
 deploy/secrets/
+deploy/docker-compose.yml
 
 # Local model files (never commit models)
 *.gguf

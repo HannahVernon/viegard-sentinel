@@ -13,8 +13,9 @@ Each secret is one file in `deploy/secrets/`; the file name is the secret name (
 
 ```bash
 cd deploy
-mkdir -p secrets data/postgres backups/postgres
+mkdir -p secrets data/postgres backups/postgres data/dataprotection-keys
 chmod 700 backups/postgres      # dumps will contain full email bodies and security history
+chown 1654 data/dataprotection-keys && chmod 700 data/dataprotection-keys   # admin's ASP.NET Data Protection keys
 openssl rand -base64 24 | tr -d '\n' > secrets/viegard-db-password
 
 # The viegard-pipeline and viegard-admin containers run as the non-root
@@ -77,3 +78,5 @@ Sources ship disabled; enable them deliberately, one at a time.
 - `docker compose logs` keeps the container's full history; use `--since`/`-t` to separate fresh entries from old ones after a fix.
 - Keep `Logging__LogLevel__Microsoft.EntityFrameworkCore: Warning` (in the example) so SQL statement logging stays quiet; noisy always-on errors train operators to ignore logs.
 - Foreground `docker compose up` stops the stack on Ctrl-C; use `-d` for anything you want to survive the terminal.
+- Benign startup warnings: `Overriding HTTP_PORTS ... Binding to values defined by URLS` (explicit `ASPNETCORE_URLS` supersedes the image default) and Postgres listening on IPv6 inside the compose network (nothing is published beyond admin's localhost 8080).
+- The admin container's `No XML encryptor configured` warning is expected for now: keys persist to a permission-protected volume; encrypting them at rest is deliberately deferred to the admin-authentication work (TODO.md).

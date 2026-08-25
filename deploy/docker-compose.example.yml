@@ -118,6 +118,11 @@ services:
       Viegard__Database__Username: viegard
     volumes:
       - ./secrets:/run/viegard/secrets:ro
+      # Persist Data Protection keys across container rebuilds (antiforgery
+      # today; auth cookies once admin login exists).  Host dir: chown 1654,
+      # chmod 700.  Key encryption at rest is deferred to the admin-auth
+      # phase (see TODO.md).
+      - ./data/dataprotection-keys:/home/app/.aspnet/DataProtection-Keys
     ports:
       # Bind to localhost only; front with a reverse proxy + TLS for real use.
       - "127.0.0.1:8080:8080"

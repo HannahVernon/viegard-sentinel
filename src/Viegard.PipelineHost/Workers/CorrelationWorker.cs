@@ -3,6 +3,7 @@ using Viegard.Application.Audit;
 using Viegard.Application.Correlation;
 using Viegard.Application.Queues;
 using Viegard.Application.Stores;
+using Viegard.Domain;
 using Viegard.Domain.Audit;
 
 namespace Viegard.PipelineHost.Workers;
@@ -39,7 +40,7 @@ public sealed class CorrelationWorker(
                 {
                     await auditLedger.AppendAsync(new AuditRecord
                     {
-                        Id = Guid.NewGuid(),
+                        Id = ViegardId.New(),
                         Timestamp = DateTimeOffset.UtcNow,
                         Stage = PipelineStage.Correlation,
                         Summary = $"Correlation wrote incident {incident.Id} for event {eventId}.",

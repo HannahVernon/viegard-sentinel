@@ -10,6 +10,7 @@ using Viegard.Application.Health;
 using Viegard.Application.Secrets;
 using Viegard.Application.Sources;
 using Viegard.Application.Stores;
+using Viegard.Domain;
 using Viegard.Domain.Events;
 using Viegard.Domain.Health;
 
@@ -240,7 +241,7 @@ public sealed class ImapMailSource(
 
         var observation = new RawObservation
         {
-            Id = Guid.NewGuid(),
+            Id = ViegardId.New(),
             SourceId = SourceId,
             ObservedAt = DateTimeOffset.UtcNow,
             PayloadReference = $"imap/{account.AccountId}/{folder.FullName}/{folder.UidValidity}/{uid.Id}",

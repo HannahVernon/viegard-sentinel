@@ -1,5 +1,6 @@
 using Viegard.Application.Detection;
 using Viegard.Application.Stores;
+using Viegard.Domain;
 using Viegard.Domain.Events;
 using Viegard.Domain.Incidents;
 
@@ -89,7 +90,7 @@ public sealed class TimeWindowCorrelator(
         string correlationKey,
         IReadOnlyList<EvidenceItem> evidence) => new()
     {
-        Id = Guid.NewGuid(),
+        Id = ViegardId.New(),
         CorrelationKey = correlationKey,
         WindowStart = normalizedEvent.OccurredAt,
         WindowEnd = normalizedEvent.OccurredAt,

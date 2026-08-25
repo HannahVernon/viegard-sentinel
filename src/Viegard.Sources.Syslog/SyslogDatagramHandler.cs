@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Viegard.Application.Net;
 using Viegard.Application.Sources;
+using Viegard.Domain;
 using Viegard.Domain.Events;
 
 namespace Viegard.Sources.Syslog;
@@ -103,7 +104,7 @@ public sealed class SyslogDatagramHandler
             {
                 Observation = new RawObservation
                 {
-                    Id = Guid.NewGuid(),
+                    Id = ViegardId.New(),
                     SourceId = _sourceId,
                     ObservedAt = now,
                     PayloadReference = $"syslog/{peer}/{now.UtcTicks}/{sequence}",

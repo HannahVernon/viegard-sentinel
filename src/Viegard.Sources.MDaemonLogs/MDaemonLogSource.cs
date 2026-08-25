@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Viegard.Application.Health;
 using Viegard.Application.Sources;
 using Viegard.Application.Stores;
+using Viegard.Domain;
 using Viegard.Domain.Events;
 using Viegard.Domain.Health;
 
@@ -216,7 +217,7 @@ public sealed class MDaemonLogSource(
             {
                 Observation = new RawObservation
                 {
-                    Id = Guid.NewGuid(),
+                    Id = ViegardId.New(),
                     SourceId = SourceId,
                     ObservedAt = capturedAt,
                     PayloadReference = $"mdaemon/{fileName}/{length}/{i}",

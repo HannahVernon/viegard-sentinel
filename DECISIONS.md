@@ -248,3 +248,10 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Alternatives considered:** Building the inference abstraction first (delays dry-run calibration on real traffic for no safety gain).
 - **Consequences:** Dry-run calibration can begin on the Debian VM before any inference runtime exists.  The IInferenceProvider work proceeds later without reworking this stage.
 - **Approval:** Explicitly approved by Hannah.
+
+## D-0029: Operational configuration is runtime-editable via the admin interface
+
+- **Date:** 2026-08-25 (post-deployment)
+- **Decision:** Viegard adopts a two-tier configuration model.  Bootstrap configuration (database connection, host roles, secrets provider, listener bindings) stays in environment/files and changes by redeploy.  Operational configuration (detection signatures and term lists, classification/policy thresholds, allow/deny lists, protected ranges per D-0026, posture flags) is persisted in the database and editable through the admin interface at runtime, with changes propagated to pipeline hosts without restart (LISTEN/NOTIFY) and every change audited (who, when, before/after values).  Requirement stated by Hannah after the first live deployment: tuning via YAML edits and redeploys does not scale for calibration-era iteration (concrete trigger: wanting a custom detection signature for ref=aftership referral-bot traffic without editing compose files).
+- **Consequences:** The admin authentication model (open TODO) becomes a hard prerequisite for write operations; a config store, versioning/audit schema, and pipeline-side refresh mechanism are new Phase 8 design work; environment overrides remain authoritative at bootstrap for break-glass recovery.  The custom-signature detection rule should be built against this mechanism rather than options-only configuration.
+- **Approval:** Requirement explicitly stated by Hannah; design shape (two tiers, DB-backed store, notify-based refresh, audited writes) proposed by the agent and pending detailed design at Phase 8.

@@ -88,12 +88,16 @@ services:
       Viegard__Database__Host: viegard-db
       Viegard__Database__Name: viegard
       Viegard__Database__Username: viegard
+      # Syslog listener (D-0023): uncomment to enable.  The allowlist takes
+      # single addresses and/or CIDR ranges and is fail-closed.
+      # Viegard__Sources__Syslog__Enabled: "true"
+      # Viegard__Sources__Syslog__AllowedSources__0: "192.0.2.10"
+      # Viegard__Sources__Syslog__AllowedSources__1: "192.168.0.0/16"
     volumes:
       - ./secrets:/run/viegard/secrets:ro
-    # Syslog listener (D-0023): enable and allowlist explicitly, then map
-    # the UDP port, e.g.:
-    #   Viegard__Sources__Syslog__Enabled: "true"
-    #   Viegard__Sources__Syslog__AllowedSources__0: "192.0.2.10"
+    # When enabling the syslog listener, also publish the UDP port.  NOTE:
+    # ports: is a service-level key (sibling of environment:/volumes:),
+    # and remember the DOCKER-USER firewall rule (docs/deployment.md).
     # ports:
     #   - "5514:5514/udp"
 

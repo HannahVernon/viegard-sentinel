@@ -55,12 +55,54 @@ public sealed class IngestionWorker(
         {
             await foreach (var item in source.ObserveAsync(cancellationToken).ConfigureAwait(false))
             {
-                await IngestAsync(source, normalizer, item, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await IngestAsync(source, normalizer, item, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // One failed item must never stop ingestion (or the
+                    // host): log, audit, and keep consuming the source.
+                    logger.LogError(
+                        ex,
+                        "Ingestion failed for observation {ObservationId} from {SourceId}; continuing.",
+                        item.Observation.Id, source.SourceId);
+                    await TryAuditIngestFailureAsync(source, item, ex, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException)
         {
             // Normal shutdown.
+        }
+    }
+
+    private async Task TryAuditIngestFailureAsync(
+        IDataSource source,
+        ObservedItem item,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = Guid.NewGuid(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Ingestion,
+                Summary = $"Ingestion failed: {exception.GetType().Name}: {exception.Message}",
+                SourceId = source.SourceId,
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception auditEx) when (auditEx is not OperationCanceledException)
+        {
+            // Auditing the failure failed too (e.g., database outage).  The
+            // original error is already logged; do not take down ingestion.
+            logger.LogError(auditEx, "Failed to audit an ingestion failure for {SourceId}.", source.SourceId);
         }
     }
 

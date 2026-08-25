@@ -46,6 +46,7 @@ Viegard is in early development (Phase 1: Discovery / Phase 2: Architecture).  N
 
 Document | Purpose
 ---------|--------
+[docs/deployment.md](docs/deployment.md) | Deployment runbook: compose stack, verification, and the post-deploy backup restore drill
 [DECISIONS.md](DECISIONS.md)   | Living architectural decision record
 [TODO.md](TODO.md)             | Unresolved questions, pending decisions, and work queue
 [AGENT-README.md](AGENT-README.md) | Orientation for AI coding agents working on this repository

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 
 namespace Viegard.Persistence.Postgres;
@@ -15,6 +16,13 @@ public sealed class DatabaseOptions
 
     public string Username { get; set; } = "viegard";
 
+    /// <summary>
+    /// Schema for all Viegard objects (tables, queues, EF history), applied
+    /// via the connection search path.  Lowercase letters, digits, and
+    /// underscores only: the name participates in DDL.
+    /// </summary>
+    public string Schema { get; set; } = "viegard";
+
     /// <summary>Secret name resolved via ISecretProvider.</summary>
     public string PasswordSecretName { get; set; } = "viegard-db-password";
 
@@ -22,7 +30,7 @@ public sealed class DatabaseOptions
     public bool AutoMigrate { get; set; } = true;
 }
 
-public sealed class DatabaseOptionsValidator : IValidateOptions<DatabaseOptions>
+public sealed partial class DatabaseOptionsValidator : IValidateOptions<DatabaseOptions>
 {
     public ValidateOptionsResult Validate(string? name, DatabaseOptions options)
     {
@@ -43,6 +51,13 @@ public sealed class DatabaseOptionsValidator : IValidateOptions<DatabaseOptions>
             failures.Add("Database: Name and Username are required.");
         }
 
+        // Fail-closed: the schema name is interpolated into DDL, so only a
+        // strictly safe identifier shape is accepted.
+        if (!IsSafeSchemaName(options.Schema))
+        {
+            failures.Add("Database: Schema must match ^[a-z][a-z0-9_]*$ and be at most 63 characters.");
+        }
+
         if (string.IsNullOrWhiteSpace(options.PasswordSecretName))
         {
             failures.Add("Database: PasswordSecretName is required (the secret name, never the password).");
@@ -50,4 +65,13 @@ public sealed class DatabaseOptionsValidator : IValidateOptions<DatabaseOptions>
 
         return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;
     }
+
+    /// <summary>Shared safety check for schema names that participate in DDL.</summary>
+    public static bool IsSafeSchemaName(string? schema) =>
+        !string.IsNullOrWhiteSpace(schema)
+        && schema.Length <= 63
+        && SchemaNamePattern().IsMatch(schema);
+
+    [GeneratedRegex("^[a-z][a-z0-9_]*$")]
+    private static partial Regex SchemaNamePattern();
 }

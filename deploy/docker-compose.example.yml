@@ -88,6 +88,10 @@ services:
       Viegard__Database__Host: viegard-db
       Viegard__Database__Name: viegard
       Viegard__Database__Username: viegard
+      # PostgreSQL schema that holds every Viegard object (created on
+      # startup if missing).  Lowercase letters, digits, and underscores
+      # only; must start with a letter.  Both services must agree.
+      Viegard__Database__Schema: viegard
       # Syslog listener (D-0023): uncomment to enable.  The allowlist takes
       # single addresses and/or CIDR ranges and is fail-closed.
       # Viegard__Sources__Syslog__Enabled: "true"
@@ -120,6 +124,7 @@ services:
       Viegard__Database__Host: viegard-db
       Viegard__Database__Name: viegard
       Viegard__Database__Username: viegard
+      Viegard__Database__Schema: viegard
     volumes:
       - ./secrets:/run/viegard/secrets:ro
       # Persist Data Protection keys across container rebuilds (antiforgery

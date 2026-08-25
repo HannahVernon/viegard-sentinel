@@ -13,9 +13,8 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Vie
 {
     public ViegardDbContext CreateDbContext(string[] args)
     {
-        var options = new DbContextOptionsBuilder<ViegardDbContext>()
-            .UseNpgsql("Host=localhost;Database=viegard_design;Username=design")
-            .Options;
-        return new ViegardDbContext(options);
+        var builder = new DbContextOptionsBuilder<ViegardDbContext>();
+        ViegardDbContextConfiguration.Configure(builder, "Host=localhost;Database=viegard_design;Username=design", "viegard");
+        return new ViegardDbContext(builder.Options);
     }
 }

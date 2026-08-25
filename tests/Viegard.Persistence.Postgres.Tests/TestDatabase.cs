@@ -21,10 +21,19 @@ public sealed class PostgresFactAttribute : FactAttribute
 
 public static class TestDatabase
 {
+    /// <summary>Schema the tests run in, mirroring the runtime default.</summary>
+    public const string Schema = "viegard";
+
     public static string? ConnectionString { get; } =
         Environment.GetEnvironmentVariable("VIEGARD_TEST_POSTGRES");
 
-    public static NpgsqlDataSource CreateDataSource() =>
-        new NpgsqlDataSourceBuilder(ConnectionString
-            ?? throw new InvalidOperationException("VIEGARD_TEST_POSTGRES is not set.")).Build();
+    public static NpgsqlDataSource CreateDataSource()
+    {
+        var builder = new NpgsqlConnectionStringBuilder(ConnectionString
+            ?? throw new InvalidOperationException("VIEGARD_TEST_POSTGRES is not set."))
+        {
+            SearchPath = Schema,
+        };
+        return new NpgsqlDataSourceBuilder(builder.ConnectionString).Build();
+    }
 }

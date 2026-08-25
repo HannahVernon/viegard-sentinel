@@ -23,10 +23,17 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         _dataSource = TestDatabase.CreateDataSource();
 
-        var options = new DbContextOptionsBuilder<ViegardDbContext>()
-            .UseNpgsql(_dataSource)
-            .Options;
-        await using var db = new ViegardDbContext(options);
+        // The schema must exist before the first search_path-relative
+        // statement runs, mirroring MigrateViegardDatabaseAsync.
+        await using (var create = _dataSource.CreateCommand(
+            $"CREATE SCHEMA IF NOT EXISTS {TestDatabase.Schema}"))
+        {
+            await create.ExecuteNonQueryAsync();
+        }
+
+        var builder = new DbContextOptionsBuilder<ViegardDbContext>();
+        ViegardDbContextConfiguration.Configure(builder, _dataSource, TestDatabase.Schema);
+        await using var db = new ViegardDbContext(builder.Options);
         await db.Database.MigrateAsync(CancellationToken.None);
 
         // Clean slate for queue tables between runs.
@@ -192,7 +199,11 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
     private sealed class TestDbContextFactory(Npgsql.NpgsqlDataSource dataSource) : IDbContextFactory<ViegardDbContext>
     {
-        public ViegardDbContext CreateDbContext() => new(
-            new DbContextOptionsBuilder<ViegardDbContext>().UseNpgsql(dataSource).Options);
+        public ViegardDbContext CreateDbContext()
+        {
+            var builder = new DbContextOptionsBuilder<ViegardDbContext>();
+            ViegardDbContextConfiguration.Configure(builder, dataSource, TestDatabase.Schema);
+            return new ViegardDbContext(builder.Options);
+        }
     }
 }

@@ -35,7 +35,7 @@ Viegard monitors mail accounts (IMAP) and infrastructure logs (SWAG/nginx syslog
 ## Conventions
 Facts (non-negotiable):
 - .NET 10 LTS, `Viegard.slnx` (XML solution format), nullable enabled, warnings as errors.
-- Database is PostgreSQL 17 (D-0024) via EF Core + Npgsql; snake_case columns; durable queues use `SKIP LOCKED` + `LISTEN/NOTIFY` behind `IWorkQueue`.
+- Database is PostgreSQL 17 (D-0024) via EF Core + Npgsql; all objects in a configurable dedicated schema (`Viegard__Database__Schema`, default `viegard`, applied via connection `search_path`); snake_case columns; durable queues use `SKIP LOCKED` + `LISTEN/NOTIFY` behind `IWorkQueue`.
 - `Viegard.Domain` has zero external dependencies; adapters implement `Viegard.Application` ports; classifier namespace is `Viegard.Application.Classifiers` (avoids colliding with the `Classification` type).
 - Branches: `feature/xxx`/`fix/xxx` off `dev`; PRs to `dev` on Forgejo (REST API + GCM credentials); GitHub is a push mirror; commit trailer `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`.
 
@@ -44,7 +44,7 @@ Preferences:
 - Raven metaphor (Eyes/Flight/Mind/Judgment/Talons/Roost/Ledger) only where it clarifies.
 
 ## Current state
-Phases 1-5 complete with provisional policy thresholds from D-0027 and deterministic-only classification from D-0028.  Working today: IMAP source (per-account, IDLE+fallback, read-only), syslog UDP listener (fail-closed allowlist) with nginx parsing, MDaemon file-tailing source (satellite-ready per D-0025), detection rules + `TimeWindowCorrelator` + `CorrelationWorker`, `DeterministicIncidentClassifier` + `ClassificationWorker`, D-0027 policy engine + `PolicyWorker`, D-0026 protected-address guardrail, in-memory guardrail state, PostgreSQL persistence + durable events/incidents/classifications queues, and queue telemetry with traffic-light evaluator.  In flight: admin GUI features, optional llama.cpp inference enrichment (Phase 6, nothing installed yet), PostgreSQL guardrail-state persistence, and dry-run threshold calibration.  Not yet deployed anywhere; deploy/ artifacts are unverified.  Authoritative queues: TODO.md (open questions), DECISIONS.md (D-0001..D-0028).
+Phases 1-5 complete with provisional policy thresholds from D-0027 and deterministic-only classification from D-0028.  Working today: IMAP source (per-account, IDLE+fallback, read-only), syslog UDP listener (fail-closed allowlist) with nginx parsing, MDaemon file-tailing source (satellite-ready per D-0025), detection rules + `TimeWindowCorrelator` + `CorrelationWorker`, `DeterministicIncidentClassifier` + `ClassificationWorker`, D-0027 policy engine + `PolicyWorker`, D-0026 protected-address guardrail, in-memory guardrail state, PostgreSQL persistence + durable events/incidents/classifications queues, and queue telemetry with traffic-light evaluator.  In flight: admin GUI features, optional llama.cpp inference enrichment (Phase 6, nothing installed yet), PostgreSQL guardrail-state persistence, and dry-run threshold calibration.  Deployed live on the Debian VM since 2026-08-25 (see docs/deployment.md), ingesting real SWAG/nginx syslog traffic in dry-run.  Authoritative queues: TODO.md (open questions), DECISIONS.md (D-0001..D-0029).
 
 ## Surprises
 - The pipeline host is one binary that can run as many role-configured instances (D-0011); the correlator and policy/action engine are singleton roles enforced at startup.

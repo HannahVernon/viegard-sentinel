@@ -35,6 +35,27 @@ docker compose up -d --build
 
 First start applies EF Core migrations automatically (`Viegard:Database:AutoMigrate`).
 
+### Database schema
+
+Every Viegard object lives in a dedicated PostgreSQL schema rather than `public`, controlled by `Viegard__Database__Schema` in the compose file (default `viegard`).  The pipeline creates the schema on startup if it is missing; both services must use the same value.  Names are validated fail-closed: lowercase letters, digits, and underscores only, starting with a letter, at most 63 characters.
+
+The schema is applied via the connection `search_path`, so the migrations and queue SQL are schema-agnostic.  Keeping application objects out of `public` means a `pg_dump --schema=viegard` captures exactly the application state, and other tooling added to the same database later cannot collide with Viegard tables.
+
+**Upgrading an existing deployment** that already migrated into `public`: the simplest path while the data is still expendable is to reset.  If any rows are worth keeping (for example, captured bot-signature events), export them first:
+
+```bash
+# Optional: keep selected rows before the reset.
+docker compose exec viegard-db pg_dump -U viegard -d viegard \
+    --table=public.normalized_events --data-only > /root/keep-events.sql
+
+docker compose stop viegard-pipeline viegard-admin
+docker compose exec viegard-db psql -U viegard -d viegard \
+    -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+docker compose up -d          # migrations re-run into the configured schema
+```
+
+Rows exported this way can be replayed into the new schema with `psql` after editing the `SET search_path` / table references, or simply kept as an archive.
+
 ## 3. Verify
 
 ```bash

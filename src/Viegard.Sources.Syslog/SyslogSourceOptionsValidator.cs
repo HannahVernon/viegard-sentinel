@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Options;
+using Viegard.Application.Net;
 
 namespace Viegard.Sources.Syslog;
 
@@ -32,9 +33,9 @@ public sealed class SyslogSourceOptionsValidator : IValidateOptions<SyslogSource
 
         foreach (var source in options.AllowedSources)
         {
-            if (!IPAddress.TryParse(source, out _))
+            if (!CidrSet.TryParseEntry(source, out var failure))
             {
-                failures.Add($"Syslog: allowed source '{source}' is not a valid IP address.");
+                failures.Add($"Syslog: allowed source '{source}' is not a valid IP address or CIDR range: {failure}");
             }
         }
 

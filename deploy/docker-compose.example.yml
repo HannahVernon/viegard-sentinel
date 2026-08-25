@@ -7,6 +7,11 @@
 # see .gitignore).  The directory is mounted read-only and the file name is
 # the secret name, e.g. ./secrets/yahoo-imap-password.
 #
+# IMPORTANT: the viegard-pipeline and viegard-admin containers run as the
+# non-root 'app' user (UID 1654) from the .NET base images, so each secret
+# file must be readable by that UID:
+#   chown 1654 secrets/<name> && chmod 400 secrets/<name>
+#
 # PostgreSQL (D-0024): dedicated container; data and nightly dumps live on
 # the VM disk under this directory, so both ride the weekly Hyper-V export.
 # Dumps give ~24h RPO; the data directory alone would be crash-consistent.

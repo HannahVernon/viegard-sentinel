@@ -50,6 +50,9 @@ services:
     entrypoint: [ "/bin/sh", "-c" ]
     command:
       - |
+        # Dumps contain full email bodies and security history: never
+        # world-readable (umask 077 -> mode 600 files).
+        umask 077
         export PGPASSWORD="$$(cat /run/viegard/secrets/viegard-db-password)"
         while true; do
           pg_dump -h viegard-db -U viegard -d viegard -F c \

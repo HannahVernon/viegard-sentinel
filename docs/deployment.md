@@ -14,6 +14,7 @@ Each secret is one file in `deploy/secrets/`; the file name is the secret name (
 ```bash
 cd deploy
 mkdir -p secrets data/postgres backups/postgres
+chmod 700 backups/postgres      # dumps will contain full email bodies and security history
 openssl rand -base64 24 | tr -d '\n' > secrets/viegard-db-password
 
 # The viegard-pipeline and viegard-admin containers run as the non-root
@@ -60,6 +61,8 @@ docker compose exec viegard-db dropdb -U viegard restore_drill
 If `pg_restore` completes and `\dt` lists the Viegard tables, the dump is provably restorable.  (With multiple dumps present, replace the glob with one specific file.)
 
 Disaster-recovery posture (D-0024): the dumps live on the VM disk, so they ride the host's regular VM-image backups; worst-case data loss is bounded by the daily dump cadence.
+
+**Backup file protection:** dumps carry everything the database holds, which once mail ingestion is live includes full message bodies and your security event history.  The sidecar writes them mode 600 (root-owned) via `umask 077`, and the directory should be `700` (step 1).  If you deployed before this hardening, tighten existing files: `chmod 700 backups/postgres && chmod 600 backups/postgres/*.dump`.
 
 ## 5. Enable data sources
 

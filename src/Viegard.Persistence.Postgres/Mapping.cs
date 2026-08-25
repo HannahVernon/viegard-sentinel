@@ -29,11 +29,20 @@ internal static class Mapping
     private static T FromJson<T>(string json) => JsonSerializer.Deserialize<T>(json, Json)
         ?? throw new InvalidOperationException($"Persisted JSON deserialized to null for {typeof(T).Name}.");
 
+    /// <summary>
+    /// Npgsql only accepts offset-zero DateTimeOffset values for
+    /// timestamptz; observed timestamps (e.g., nginx "-0500") arrive with
+    /// local offsets.  Normalizing preserves the instant exactly.
+    /// </summary>
+    private static DateTimeOffset Utc(DateTimeOffset value) => value.ToUniversalTime();
+
+    private static DateTimeOffset? Utc(DateTimeOffset? value) => value?.ToUniversalTime();
+
     public static RawObservationRow ToRow(this RawObservation observation, string rawPayload) => new()
     {
         Id = observation.Id,
         SourceId = observation.SourceId,
-        ObservedAt = observation.ObservedAt,
+        ObservedAt = Utc(observation.ObservedAt),
         PayloadReference = observation.PayloadReference,
         IngestOffset = observation.IngestOffset,
         RawPayload = rawPayload,
@@ -53,7 +62,7 @@ internal static class Mapping
         Id = normalizedEvent.Id,
         SourceId = normalizedEvent.SourceId,
         SourceType = normalizedEvent.SourceType,
-        OccurredAt = normalizedEvent.OccurredAt,
+        OccurredAt = Utc(normalizedEvent.OccurredAt),
         EntitiesJson = ToJson(normalizedEvent.Entities),
         PayloadJson = ToJson(normalizedEvent.Payload),
         RawObservationId = normalizedEvent.RawObservationId,
@@ -74,8 +83,8 @@ internal static class Mapping
     {
         Id = incident.Id,
         CorrelationKey = incident.CorrelationKey,
-        WindowStart = incident.WindowStart,
-        WindowEnd = incident.WindowEnd,
+        WindowStart = Utc(incident.WindowStart),
+        WindowEnd = Utc(incident.WindowEnd),
         EventIdsJson = ToJson(incident.EventIds),
         EvidenceJson = ToJson(incident.Evidence),
         State = (int)incident.State,
@@ -105,7 +114,7 @@ internal static class Mapping
         ReasonsJson = ToJson(classification.Reasons),
         RecommendedAction = classification.RecommendedAction,
         Uncertainty = classification.Uncertainty,
-        CreatedAt = classification.CreatedAt,
+        CreatedAt = Utc(classification.CreatedAt),
     };
 
     public static Classification ToDomain(this ClassificationRow row) => new()
@@ -133,7 +142,7 @@ internal static class Mapping
         Outcome = (int)decision.Outcome,
         Rationale = decision.Rationale,
         GuardrailsJson = ToJson(decision.Guardrails),
-        CreatedAt = decision.CreatedAt,
+        CreatedAt = Utc(decision.CreatedAt),
     };
 
     public static Decision ToDomain(this DecisionRow row) => new()
@@ -158,8 +167,8 @@ internal static class Mapping
         Status = (int)action.Status,
         Error = action.Error,
         RollbackJson = action.RollbackJson,
-        RequestedAt = action.RequestedAt,
-        CompletedAt = action.CompletedAt,
+        RequestedAt = Utc(action.RequestedAt),
+        CompletedAt = Utc(action.CompletedAt),
     };
 
     public static ActionRecord ToDomain(this ActionRecordRow row) => new()
@@ -179,7 +188,7 @@ internal static class Mapping
     public static AuditRecordRow ToRow(this AuditRecord record) => new()
     {
         Id = record.Id,
-        Timestamp = record.Timestamp,
+        Timestamp = Utc(record.Timestamp),
         Stage = (int)record.Stage,
         Summary = record.Summary,
         SourceId = record.SourceId,
@@ -198,7 +207,7 @@ internal static class Mapping
         CorrectedCategory = correction.CorrectedCategory,
         CorrectedBy = correction.CorrectedBy,
         Note = correction.Note,
-        CreatedAt = correction.CreatedAt,
+        CreatedAt = Utc(correction.CreatedAt),
     };
 
     public static Correction ToDomain(this CorrectionRow row) => new()
@@ -217,12 +226,12 @@ internal static class Mapping
         QueueName = snapshot.QueueName,
         Depth = snapshot.Depth,
         InFlight = snapshot.InFlight,
-        OldestPendingEnqueuedAt = snapshot.OldestPendingEnqueuedAt,
+        OldestPendingEnqueuedAt = Utc(snapshot.OldestPendingEnqueuedAt),
         TotalEnqueued = snapshot.TotalEnqueued,
         TotalCompleted = snapshot.TotalCompleted,
         TotalAbandoned = snapshot.TotalAbandoned,
         DeadLetterCount = snapshot.DeadLetterCount,
-        CapturedAt = snapshot.CapturedAt,
+        CapturedAt = Utc(snapshot.CapturedAt),
     };
 
     public static QueueTelemetrySnapshot ToDomain(this QueueTelemetryRow row) => new()

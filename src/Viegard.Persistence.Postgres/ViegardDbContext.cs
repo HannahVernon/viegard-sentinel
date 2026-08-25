@@ -15,6 +15,14 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<RawObservationRow> RawObservations => Set<RawObservationRow>();
 
+    public DbSet<SourceRow> Sources => Set<SourceRow>();
+
+    public DbSet<ClassifierRow> Classifiers => Set<ClassifierRow>();
+
+    public DbSet<PolicyRow> Policies => Set<PolicyRow>();
+
+    public DbSet<ActionProviderRow> ActionProviders => Set<ActionProviderRow>();
+
     public DbSet<NormalizedEventRow> Events => Set<NormalizedEventRow>();
 
     public DbSet<IncidentRow> Incidents => Set<IncidentRow>();
@@ -39,12 +47,48 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Insert-only reference tables (D-0031): rows are never deleted and
+        // natural keys never change; the only permitted mutation is filling
+        // a null sources.source_type once a typed writer first observes it.
+        modelBuilder.Entity<SourceRow>(entity =>
+        {
+            entity.ToTable("sources");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityAlwaysColumn();
+            entity.HasIndex(e => e.SourceKey).IsUnique();
+        });
+
+        modelBuilder.Entity<ClassifierRow>(entity =>
+        {
+            entity.ToTable("classifiers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityAlwaysColumn();
+            entity.HasIndex(e => e.ClassifierKey).IsUnique();
+        });
+
+        modelBuilder.Entity<PolicyRow>(entity =>
+        {
+            entity.ToTable("policies");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityAlwaysColumn();
+            entity.HasIndex(e => new { e.PolicyKey, e.PolicyVersion }).IsUnique();
+        });
+
+        modelBuilder.Entity<ActionProviderRow>(entity =>
+        {
+            entity.ToTable("action_providers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityAlwaysColumn();
+            entity.HasIndex(e => e.ProviderKey).IsUnique();
+        });
+
         modelBuilder.Entity<RawObservationRow>(entity =>
         {
             entity.ToTable("raw_observations");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.PayloadReference).IsUnique();
             entity.HasIndex(e => e.SourceId);
+            entity.HasOne<SourceRow>().WithMany().HasForeignKey(e => e.SourceId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<NormalizedEventRow>(entity =>
@@ -53,6 +97,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.OccurredAt);
             entity.HasIndex(e => e.RawObservationId);
+            entity.HasIndex(e => e.SourceId);
+            entity.HasOne<SourceRow>().WithMany().HasForeignKey(e => e.SourceId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.EntitiesJson).HasColumnType("jsonb");
             entity.Property(e => e.PayloadJson).HasColumnType("jsonb");
         });
@@ -72,6 +118,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.SubjectId);
             entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.ClassifierId);
+            entity.HasOne<ClassifierRow>().WithMany().HasForeignKey(e => e.ClassifierId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.ModelJson).HasColumnType("jsonb");
             entity.Property(e => e.ReasonsJson).HasColumnType("jsonb");
         });
@@ -81,6 +129,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.ToTable("decisions");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.ClassificationId);
+            entity.HasIndex(e => e.PolicyId);
+            entity.HasOne<PolicyRow>().WithMany().HasForeignKey(e => e.PolicyId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.GuardrailsJson).HasColumnType("jsonb");
         });
 
@@ -89,6 +139,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.ToTable("actions");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.DecisionId);
+            entity.HasIndex(e => e.ProviderId);
+            entity.HasOne<ActionProviderRow>().WithMany().HasForeignKey(e => e.ProviderId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.ParametersJson).HasColumnType("jsonb");
             entity.Property(e => e.RollbackJson).HasColumnType("jsonb");
         });
@@ -98,6 +150,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.ToTable("audit_records");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.Timestamp);
+            entity.HasIndex(e => e.SourceId);
+            entity.HasOne<SourceRow>().WithMany().HasForeignKey(e => e.SourceId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.DetailJson).HasColumnType("jsonb");
         });
 

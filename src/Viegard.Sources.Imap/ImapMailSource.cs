@@ -243,6 +243,7 @@ public sealed class ImapMailSource(
         {
             Id = ViegardId.New(),
             SourceId = SourceId,
+            SourceType = ImapEventNormalizer.ImapSourceType,
             ObservedAt = DateTimeOffset.UtcNow,
             PayloadReference = $"imap/{account.AccountId}/{folder.FullName}/{folder.UidValidity}/{uid.Id}",
             IngestOffset = uid.Id.ToString(),

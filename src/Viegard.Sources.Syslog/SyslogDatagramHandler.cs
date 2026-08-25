@@ -106,6 +106,7 @@ public sealed class SyslogDatagramHandler
                 {
                     Id = ViegardId.New(),
                     SourceId = _sourceId,
+                    SourceType = SyslogEventNormalizer.SyslogSourceType,
                     ObservedAt = now,
                     PayloadReference = $"syslog/{peer}/{now.UtcTicks}/{sequence}",
                 },

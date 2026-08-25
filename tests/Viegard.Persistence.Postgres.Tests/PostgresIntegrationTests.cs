@@ -164,13 +164,15 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     public async Task Event_store_round_trips_polymorphic_payloads()
     {
         var factory = new TestDbContextFactory(_dataSource!);
-        var store = new PostgresEventStore(factory);
-        var observationStore = new PostgresRawObservationStore(factory);
+        var resolver = new ReferenceResolver(factory);
+        var store = new PostgresEventStore(factory, resolver);
+        var observationStore = new PostgresRawObservationStore(factory, resolver);
 
         var observation = new RawObservation
         {
             Id = Guid.NewGuid(),
             SourceId = "it:source",
+            SourceType = "syslog",
             ObservedAt = DateTimeOffset.UtcNow,
             PayloadReference = $"it/{Guid.NewGuid():N}",
         };
@@ -193,8 +195,62 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var http = Assert.IsType<HttpRequestEvent>(restored.Payload);
         Assert.Equal("/.env", http.Uri);
         Assert.Equal(normalizedEvent.Entities, restored.Entities);
+        Assert.Equal("it:source", restored.SourceId);
+        Assert.Equal("syslog", restored.SourceType);
 
         Assert.Equal("raw-payload", await observationStore.GetPayloadAsync(observation.PayloadReference));
+    }
+
+    [PostgresFact]
+    public async Task Repeated_descriptor_strings_share_one_reference_row()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var resolver = new ReferenceResolver(factory);
+        var store = new PostgresEventStore(factory, resolver);
+        var sourceKey = $"it:dedup-{Guid.NewGuid():N}";
+
+        for (var i = 0; i < 3; i++)
+        {
+            await store.AddAsync(new NormalizedEvent
+            {
+                Id = Guid.NewGuid(),
+                SourceId = sourceKey,
+                SourceType = "syslog",
+                OccurredAt = DateTimeOffset.UtcNow,
+                Entities = [],
+                Payload = new HttpRequestEvent { RemoteAddress = "203.0.113.7" },
+                RawObservationId = Guid.NewGuid(),
+            });
+        }
+
+        // A second resolver (fresh cache, as another process would have)
+        // must find the same row rather than create a duplicate.
+        var secondResolver = new ReferenceResolver(factory);
+        var firstId = await resolver.ResolveSourceAsync(sourceKey, "syslog");
+        var secondId = await secondResolver.ResolveSourceAsync(sourceKey, "syslog");
+        Assert.Equal(firstId, secondId);
+
+        await using var db = factory.CreateDbContext();
+        Assert.Equal(1, await db.Sources.CountAsync(s => s.SourceKey == sourceKey));
+    }
+
+    [PostgresFact]
+    public async Task Audit_first_source_type_is_filled_by_later_typed_writer()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var resolver = new ReferenceResolver(factory);
+        var sourceKey = $"it:fill-{Guid.NewGuid():N}";
+
+        // Audit path does not know the type; the row starts untyped.
+        var id = await resolver.ResolveSourceAsync(sourceKey, sourceType: null);
+        var (_, typeBefore) = await resolver.GetSourceAsync(id);
+        Assert.Null(typeBefore);
+
+        // First typed writer fills it exactly once.
+        var sameId = await resolver.ResolveSourceAsync(sourceKey, "imap");
+        Assert.Equal(id, sameId);
+        var (_, typeAfter) = await resolver.GetSourceAsync(id);
+        Assert.Equal("imap", typeAfter);
     }
 
     private sealed class TestDbContextFactory(Npgsql.NpgsqlDataSource dataSource) : IDbContextFactory<ViegardDbContext>

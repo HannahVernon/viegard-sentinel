@@ -11,6 +11,7 @@ public sealed class MDaemonEventNormalizerTests
     {
         Id = Guid.NewGuid(),
         SourceId = "mdaemon:logs",
+        SourceType = "mdaemon",
         ObservedAt = new DateTimeOffset(2026, 8, 18, 12, 0, 0, TimeSpan.Zero),
         PayloadReference = "mdaemon/test/1",
     };

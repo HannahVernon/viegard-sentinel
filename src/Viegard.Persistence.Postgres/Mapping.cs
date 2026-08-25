@@ -38,41 +38,41 @@ internal static class Mapping
 
     private static DateTimeOffset? Utc(DateTimeOffset? value) => value?.ToUniversalTime();
 
-    public static RawObservationRow ToRow(this RawObservation observation, string rawPayload) => new()
+    public static RawObservationRow ToRow(this RawObservation observation, string rawPayload, int sourceRefId) => new()
     {
         Id = observation.Id,
-        SourceId = observation.SourceId,
+        SourceId = sourceRefId,
         ObservedAt = Utc(observation.ObservedAt),
         PayloadReference = observation.PayloadReference,
         IngestOffset = observation.IngestOffset,
         RawPayload = rawPayload,
     };
 
-    public static RawObservation ToDomain(this RawObservationRow row) => new()
+    public static RawObservation ToDomain(this RawObservationRow row, string sourceKey, string sourceType) => new()
     {
         Id = row.Id,
-        SourceId = row.SourceId,
+        SourceId = sourceKey,
+        SourceType = sourceType,
         ObservedAt = row.ObservedAt,
         PayloadReference = row.PayloadReference,
         IngestOffset = row.IngestOffset,
     };
 
-    public static NormalizedEventRow ToRow(this NormalizedEvent normalizedEvent) => new()
+    public static NormalizedEventRow ToRow(this NormalizedEvent normalizedEvent, int sourceRefId) => new()
     {
         Id = normalizedEvent.Id,
-        SourceId = normalizedEvent.SourceId,
-        SourceType = normalizedEvent.SourceType,
+        SourceId = sourceRefId,
         OccurredAt = Utc(normalizedEvent.OccurredAt),
         EntitiesJson = ToJson(normalizedEvent.Entities),
         PayloadJson = ToJson(normalizedEvent.Payload),
         RawObservationId = normalizedEvent.RawObservationId,
     };
 
-    public static NormalizedEvent ToDomain(this NormalizedEventRow row) => new()
+    public static NormalizedEvent ToDomain(this NormalizedEventRow row, string sourceKey, string sourceType) => new()
     {
         Id = row.Id,
-        SourceId = row.SourceId,
-        SourceType = row.SourceType,
+        SourceId = sourceKey,
+        SourceType = sourceType,
         OccurredAt = row.OccurredAt,
         Entities = FromJson<List<EntityRef>>(row.EntitiesJson),
         Payload = FromJson<EventPayload>(row.PayloadJson),
@@ -101,12 +101,12 @@ internal static class Mapping
         State = (IncidentState)row.State,
     };
 
-    public static ClassificationRow ToRow(this Classification classification) => new()
+    public static ClassificationRow ToRow(this Classification classification, int classifierRefId) => new()
     {
         Id = classification.Id,
         SubjectKind = (int)classification.SubjectKind,
         SubjectId = classification.SubjectId,
-        ClassifierId = classification.ClassifierId,
+        ClassifierId = classifierRefId,
         ModelJson = classification.Model is null ? null : ToJson(classification.Model),
         Category = classification.Category,
         Confidence = classification.Confidence,
@@ -117,12 +117,12 @@ internal static class Mapping
         CreatedAt = Utc(classification.CreatedAt),
     };
 
-    public static Classification ToDomain(this ClassificationRow row) => new()
+    public static Classification ToDomain(this ClassificationRow row, string classifierKey) => new()
     {
         Id = row.Id,
         SubjectKind = (ClassificationSubjectKind)row.SubjectKind,
         SubjectId = row.SubjectId,
-        ClassifierId = row.ClassifierId,
+        ClassifierId = classifierKey,
         Model = row.ModelJson is null ? null : FromJson<ModelInfo>(row.ModelJson),
         Category = row.Category,
         Confidence = row.Confidence,
@@ -133,35 +133,34 @@ internal static class Mapping
         CreatedAt = row.CreatedAt,
     };
 
-    public static DecisionRow ToRow(this Decision decision) => new()
+    public static DecisionRow ToRow(this Decision decision, int policyRefId) => new()
     {
         Id = decision.Id,
         ClassificationId = decision.ClassificationId,
-        PolicyId = decision.PolicyId,
-        PolicyVersion = decision.PolicyVersion,
+        PolicyId = policyRefId,
         Outcome = (int)decision.Outcome,
         Rationale = decision.Rationale,
         GuardrailsJson = ToJson(decision.Guardrails),
         CreatedAt = Utc(decision.CreatedAt),
     };
 
-    public static Decision ToDomain(this DecisionRow row) => new()
+    public static Decision ToDomain(this DecisionRow row, string policyKey, string policyVersion) => new()
     {
         Id = row.Id,
         ClassificationId = row.ClassificationId,
-        PolicyId = row.PolicyId,
-        PolicyVersion = row.PolicyVersion,
+        PolicyId = policyKey,
+        PolicyVersion = policyVersion,
         Outcome = (DecisionOutcome)row.Outcome,
         Rationale = row.Rationale,
         Guardrails = FromJson<List<GuardrailEvaluation>>(row.GuardrailsJson),
         CreatedAt = row.CreatedAt,
     };
 
-    public static ActionRecordRow ToRow(this ActionRecord action) => new()
+    public static ActionRecordRow ToRow(this ActionRecord action, int providerRefId) => new()
     {
         Id = action.Id,
         DecisionId = action.DecisionId,
-        ProviderId = action.ProviderId,
+        ProviderId = providerRefId,
         OperationId = action.OperationId,
         ParametersJson = action.ParametersJson,
         Status = (int)action.Status,
@@ -171,11 +170,11 @@ internal static class Mapping
         CompletedAt = Utc(action.CompletedAt),
     };
 
-    public static ActionRecord ToDomain(this ActionRecordRow row) => new()
+    public static ActionRecord ToDomain(this ActionRecordRow row, string providerKey) => new()
     {
         Id = row.Id,
         DecisionId = row.DecisionId,
-        ProviderId = row.ProviderId,
+        ProviderId = providerKey,
         OperationId = row.OperationId,
         ParametersJson = row.ParametersJson,
         Status = (ActionStatus)row.Status,
@@ -185,13 +184,13 @@ internal static class Mapping
         CompletedAt = row.CompletedAt,
     };
 
-    public static AuditRecordRow ToRow(this AuditRecord record) => new()
+    public static AuditRecordRow ToRow(this AuditRecord record, int? sourceRefId) => new()
     {
         Id = record.Id,
         Timestamp = Utc(record.Timestamp),
         Stage = (int)record.Stage,
         Summary = record.Summary,
-        SourceId = record.SourceId,
+        SourceId = sourceRefId,
         EventId = record.EventId,
         IncidentId = record.IncidentId,
         ClassificationId = record.ClassificationId,

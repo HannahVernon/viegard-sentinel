@@ -65,6 +65,8 @@ When Hannah answers a question, remove or update the item here and record the ou
 ## Implementation work
 
 - [ ] **Operational config store (D-0029)**: DB-backed runtime-editable configuration (detection signatures, thresholds, lists, posture) with LISTEN/NOTIFY refresh and audited writes; admin GUI editors on top.  Prerequisite: admin auth model.  The custom-signature detection rule (ref=aftership case) builds on this rather than options-only config.
+- [ ] **Reference-table follow-ons (D-0031)**: normalize `classifications.category`/`recommended_action` and `actions.operation_id` once the D-0029 config store defines those vocabularies; move `corrections.corrected_by` to the users table when admin auth lands.
+- [ ] **Security audit against ai-security-audit prompts**: evaluate the codebase against the prompts in Hannah's `ai-security-audit` repo (github.com/HannahVernon/ai-security-audit); triage findings into prioritized todos with Hannah (requested 2026-08-25).
 
 - [x] **PostgreSQL integration verification** - DONE 2026-08-20: all 7 integration tests pass against a live postgres:17 container (Docker CE in WSL2 Debian on the dev workstation).  Three defects found and fixed by the tests: PascalCase/snake_case column mismatch vs. the queue's raw SQL, missing dead_lettered value on enqueue, unsupported FULL JOIN in the stats query, plus jsonb key-reordering breaking the polymorphic discriminator (fixed with AllowOutOfOrderMetadataProperties).  Remaining: verify the compose stack itself on the Debian VM at deployment time.
 - [ ] **Admin API Postgres wiring**: register the read-side stores and command queue in `viegard-admin` when the admin features (Phase 8) land.

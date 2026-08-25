@@ -12,6 +12,9 @@ public sealed record RawObservation
     /// <summary>Identifier of the configured data-source instance that produced this observation.</summary>
     public required string SourceId { get; init; }
 
+    /// <summary>Kind of source that produced this observation (e.g., "imap", "syslog", "mdaemon").</summary>
+    public required string SourceType { get; init; }
+
     /// <summary>When the source observed the data (not when it originally occurred).</summary>
     public required DateTimeOffset ObservedAt { get; init; }
 

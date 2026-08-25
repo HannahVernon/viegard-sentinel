@@ -1,6 +1,7 @@
-using System.Text.Json;
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Viegard.Application.Sources;
+using Viegard.Domain;
 using Viegard.Domain.Events;
 
 namespace Viegard.Sources.MDaemonLogs;
@@ -91,7 +92,7 @@ public sealed class MDaemonEventNormalizer(MDaemonSourceOptions options) : IEven
 
         return NormalizationResult.Success(new NormalizedEvent
         {
-            Id = Guid.NewGuid(),
+            Id = ViegardId.New(),
             SourceId = observation.SourceId,
             SourceType = MDaemonLogSource.MDaemonSourceType,
             OccurredAt = parsed.ReportedAt ?? capturedAt,

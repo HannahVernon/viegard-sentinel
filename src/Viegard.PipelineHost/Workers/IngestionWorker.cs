@@ -2,6 +2,7 @@ using Viegard.Application.Audit;
 using Viegard.Application.Queues;
 using Viegard.Application.Sources;
 using Viegard.Application.Stores;
+using Viegard.Domain;
 using Viegard.Domain.Audit;
 
 namespace Viegard.PipelineHost.Workers;
@@ -91,7 +92,7 @@ public sealed class IngestionWorker(
         {
             await auditLedger.AppendAsync(new AuditRecord
             {
-                Id = Guid.NewGuid(),
+                Id = ViegardId.New(),
                 Timestamp = DateTimeOffset.UtcNow,
                 Stage = PipelineStage.Ingestion,
                 Summary = $"Ingestion failed: {exception.GetType().Name}: {exception.Message}",
@@ -115,7 +116,7 @@ public sealed class IngestionWorker(
         await rawObservationStore.AddAsync(item.Observation, item.RawPayload, cancellationToken).ConfigureAwait(false);
         await auditLedger.AppendAsync(new AuditRecord
         {
-            Id = Guid.NewGuid(),
+            Id = ViegardId.New(),
             Timestamp = DateTimeOffset.UtcNow,
             Stage = PipelineStage.Ingestion,
             Summary = $"Observation ingested from {source.SourceId}.",
@@ -130,7 +131,7 @@ public sealed class IngestionWorker(
                 item.Observation.Id, source.SourceId, result.FailureReason);
             await auditLedger.AppendAsync(new AuditRecord
             {
-                Id = Guid.NewGuid(),
+                Id = ViegardId.New(),
                 Timestamp = DateTimeOffset.UtcNow,
                 Stage = PipelineStage.Normalization,
                 Summary = $"Normalization failed: {result.FailureReason}",
@@ -146,7 +147,7 @@ public sealed class IngestionWorker(
             result.Event.Id, result.Event.Payload.GetType().Name, source.SourceId);
         await auditLedger.AppendAsync(new AuditRecord
         {
-            Id = Guid.NewGuid(),
+            Id = ViegardId.New(),
             Timestamp = DateTimeOffset.UtcNow,
             Stage = PipelineStage.Normalization,
             Summary = $"Event normalized ({result.Event.SourceType}) and queued for correlation.",

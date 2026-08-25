@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Viegard.Application.Stores;
+using Viegard.Domain;
 using Viegard.Domain.Classifications;
 using Viegard.Domain.Decisions;
 using Viegard.Domain.Incidents;
@@ -263,7 +264,7 @@ public sealed class DefaultPolicyEngine(
 
         return new Decision
         {
-            Id = Guid.NewGuid(),
+            Id = ViegardId.New(),
             ClassificationId = classification.Id,
             PolicyId = DefaultPolicyId,
             PolicyVersion = DefaultPolicyVersion,

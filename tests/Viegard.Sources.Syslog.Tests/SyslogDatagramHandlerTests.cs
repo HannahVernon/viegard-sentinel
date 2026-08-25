@@ -21,6 +21,57 @@ public sealed class SyslogDatagramHandlerTests
         return options;
     }
 
+    private static SyslogSourceOptions CidrOptions(params string[] sources)
+    {
+        var options = new SyslogSourceOptions { Enabled = true };
+        foreach (var source in sources)
+        {
+            options.AllowedSources.Add(source);
+        }
+
+        return options;
+    }
+
+    [Fact]
+    public void Cidr_allowlist_admits_addresses_within_the_range()
+    {
+        var handler = new SyslogDatagramHandler(CidrOptions("192.168.0.0/16"), "syslog:udp-5514");
+
+        Assert.NotNull(handler.Handle(IPAddress.Parse("192.168.0.10"), Encoding.UTF8.GetBytes("x")).Item);
+        Assert.NotNull(handler.Handle(IPAddress.Parse("192.168.200.7"), Encoding.UTF8.GetBytes("x")).Item);
+    }
+
+    [Fact]
+    public void Cidr_allowlist_rejects_addresses_outside_the_range()
+    {
+        var handler = new SyslogDatagramHandler(CidrOptions("192.168.0.0/16", "172.16.0.0/12"), "syslog:udp-5514");
+
+        Assert.Equal(DatagramDropReason.SourceNotAllowed,
+            handler.Handle(IPAddress.Parse("10.1.2.3"), Encoding.UTF8.GetBytes("x")).DropReason);
+        Assert.Equal(DatagramDropReason.SourceNotAllowed,
+            handler.Handle(IPAddress.Parse("203.0.113.9"), Encoding.UTF8.GetBytes("x")).DropReason);
+        Assert.NotNull(handler.Handle(IPAddress.Parse("172.20.0.5"), Encoding.UTF8.GetBytes("x")).Item);
+    }
+
+    [Fact]
+    public void Mixed_exact_and_cidr_entries_work_together()
+    {
+        var handler = new SyslogDatagramHandler(CidrOptions("203.0.113.7", "192.168.8.0/24"), "syslog:udp-5514");
+
+        Assert.NotNull(handler.Handle(IPAddress.Parse("203.0.113.7"), Encoding.UTF8.GetBytes("x")).Item);
+        Assert.NotNull(handler.Handle(IPAddress.Parse("192.168.8.42"), Encoding.UTF8.GetBytes("x")).Item);
+        Assert.Equal(DatagramDropReason.SourceNotAllowed,
+            handler.Handle(IPAddress.Parse("203.0.113.8"), Encoding.UTF8.GetBytes("x")).DropReason);
+    }
+
+    [Fact]
+    public void Ipv4_mapped_ipv6_peer_matches_ipv4_cidr()
+    {
+        var handler = new SyslogDatagramHandler(CidrOptions("192.168.0.0/16"), "syslog:udp-5514");
+
+        Assert.NotNull(handler.Handle(IPAddress.Parse("::ffff:192.168.1.5"), Encoding.UTF8.GetBytes("x")).Item);
+    }
+
     [Fact]
     public void Accepted_datagram_becomes_observed_item()
     {

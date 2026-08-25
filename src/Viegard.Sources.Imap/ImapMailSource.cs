@@ -31,6 +31,14 @@ public sealed class ImapMailSource(
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
+    /// <summary>
+    /// Largest body part (server-reported transfer octets) that will be
+    /// downloaded.  Generous headroom over the normalizer's 256 KiB
+    /// character truncation budget (base64 and multibyte overhead), while
+    /// bounding what a hostile oversized message can force into memory.
+    /// </summary>
+    public const uint MaxBodyFetchOctets = 1_048_576;
+
     private int _consecutiveIdleFailures;
     private string? _lastError;
     private bool _connected;
@@ -265,6 +273,15 @@ public sealed class ImapMailSource(
         if (part is null)
         {
             return null;
+        }
+
+        // Cap enforced BEFORE download: a hostile oversized message must
+        // not force the full body into memory just to be truncated later
+        // by the normalizer (security-audit finding, 2026-08-25).  Octets
+        // is the server-reported transfer size of this part.
+        if (part.Octets > MaxBodyFetchOctets)
+        {
+            return $"[BODY NOT FETCHED BY VIEGARD: part size {part.Octets} octets exceeds the {MaxBodyFetchOctets}-octet fetch cap]";
         }
 
         // Folder is opened read-only, so retrieval can never set \Seen (D-0022).

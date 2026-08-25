@@ -73,6 +73,8 @@ services:
         condition: service_healthy
     environment:
       DOTNET_ENVIRONMENT: Production
+      # EF SQL command logging is noisy and could echo observed data; keep it quiet.
+      Logging__LogLevel__Microsoft.EntityFrameworkCore: Warning
       Viegard__Secrets__Provider: file
       Viegard__Secrets__Directory: /run/viegard/secrets
       # Roles this instance runs (D-0011); all roles by default.
@@ -103,6 +105,7 @@ services:
         condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      Logging__LogLevel__Microsoft.EntityFrameworkCore: Warning
       ASPNETCORE_URLS: http://+:8080
       Viegard__Secrets__Provider: file
       Viegard__Secrets__Directory: /run/viegard/secrets

@@ -11,7 +11,7 @@ namespace Viegard.Persistence.Postgres.Tests;
 /// </summary>
 public sealed class PayloadSerializationTests
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = Mapping.Json;
 
     private static EventPayload RoundTrip(EventPayload payload)
     {
@@ -105,6 +105,22 @@ public sealed class PayloadSerializationTests
     {
         var payload = new MalformedRecordPayload { Reason = "bad", RawSample = "x" };
         var restored = Assert.IsType<MalformedRecordPayload>(RoundTrip(payload));
+        Assert.Equal(payload, restored);
+    }
+
+    [Fact]
+    public void Admin_auth_payload_round_trips()
+    {
+        var payload = new AdminAuthEvent
+        {
+            Kind = AdminAuthEventKind.LoginFailed,
+            Username = "admin",
+            RemoteAddress = "198.51.100.10",
+            UserAgent = "test-agent",
+            OccurredAt = DateTimeOffset.Parse("2026-08-25T20:22:57Z"),
+        };
+
+        var restored = Assert.IsType<AdminAuthEvent>(RoundTrip(payload));
         Assert.Equal(payload, restored);
     }
 

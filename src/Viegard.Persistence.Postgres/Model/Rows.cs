@@ -273,3 +273,73 @@ public sealed class QueueCounterRow
 
     public long Abandoned { get; set; }
 }
+
+public sealed class AdminUserRow
+{
+    public Guid Id { get; set; }
+
+    public string Username { get; set; } = string.Empty;
+
+    public string PasswordHash { get; set; } = string.Empty;
+
+    public DateTimeOffset PasswordChangedAt { get; set; }
+
+    public int FailedLoginCount { get; set; }
+
+    public DateTimeOffset? LockedUntil { get; set; }
+
+    public bool MustChangePassword { get; set; }
+
+    public bool TotpEnrolled { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class AdminTotpSecretRow
+{
+    public Guid UserId { get; set; }
+
+    public string SecretBase32 { get; set; } = string.Empty;
+
+    public long? LastAcceptedStep { get; set; }
+
+    public DateTimeOffset EnrolledAt { get; set; }
+}
+
+public sealed class AdminRecoveryCodeRow
+{
+    public Guid Id { get; set; }
+
+    public Guid UserId { get; set; }
+
+    public string CodeHash { get; set; } = string.Empty;
+
+    public DateTimeOffset? UsedAt { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class AdminSessionRow
+{
+    public Guid Id { get; set; }
+
+    public Guid UserId { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset LastSeenAt { get; set; }
+
+    public DateTimeOffset AbsoluteExpiresAt { get; set; }
+
+    public DateTimeOffset IdleExpiresAt { get; set; }
+
+    public string Ip { get; set; } = string.Empty;
+
+    public string IpBindingMode { get; set; } = string.Empty;
+
+    public string UserAgent { get; set; } = string.Empty;
+
+    public DateTimeOffset? RevokedAt { get; set; }
+
+    public DateTimeOffset? StepUpAt { get; set; }
+}

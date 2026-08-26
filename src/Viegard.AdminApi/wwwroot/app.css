@@ -36,3 +36,83 @@ h1:focus {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+
+body {
+    font-family: system-ui, sans-serif;
+    margin: 0;
+    color: #1f2937;
+    background: #f8fafc;
+}
+
+.auth-panel,
+.account-panel {
+    width: min(52rem, calc(100% - 2rem));
+    margin: 3rem auto;
+    padding: 1.5rem;
+    background: white;
+    border: 1px solid #d1d5db;
+    border-radius: 0.5rem;
+}
+
+label {
+    display: block;
+    margin: 0.75rem 0;
+    font-weight: 600;
+}
+
+input {
+    display: block;
+    width: min(100%, 32rem);
+    padding: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+button {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.85rem;
+}
+
+section {
+    border-top: 1px solid #e5e7eb;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+}
+
+.message {
+    padding: 0.75rem;
+    background: #ecfdf5;
+    border: 1px solid #10b981;
+}
+
+.message.error {
+    background: #fef2f2;
+    border-color: #ef4444;
+}
+
+.secret-block {
+    overflow-wrap: anywhere;
+    padding: 0.75rem;
+    background: #f3f4f6;
+    border: 1px solid #d1d5db;
+}
+
+.secondary-form {
+    margin-top: 1.5rem;
+}
+
+.recovery-codes,
+.sessions {
+    padding-left: 1.25rem;
+}
+
+.sessions li {
+    margin-bottom: 1rem;
+}
+
+.sessions span {
+    display: block;
+}
+
+.small {
+    font-size: 0.9rem;
+}

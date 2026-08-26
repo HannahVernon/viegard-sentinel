@@ -93,6 +93,8 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IDecisionStore, InMemoryDecisionStore>();
         builder.Services.AddSingleton<IActionStore, InMemoryActionStore>();
         builder.Services.AddSingleton<ICorrectionStore, InMemoryCorrectionStore>();
+        builder.Services.AddSingleton<IAdminUserStore, InMemoryAdminUserStore>();
+        builder.Services.AddSingleton<IAdminSessionStore, InMemoryAdminSessionStore>();
         builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();

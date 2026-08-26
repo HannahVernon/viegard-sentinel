@@ -1,7 +1,11 @@
 ﻿@page "/"
+@attribute [Authorize]
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Viegard admin</PageTitle>
 
-<h1>Hello, world!</h1>
+<main class="account-panel">
+    <h1>Viegard admin</h1>
 
-Welcome to your new app.
+    <p>Authentication is enabled.  Account setup and active sessions are available from the account page.</p>
+    <p><a href="/account">Open account settings</a></p>
+</main>

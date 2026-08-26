@@ -45,6 +45,14 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<QueueCounterRow> QueueCounters => Set<QueueCounterRow>();
 
+    public DbSet<AdminUserRow> AdminUsers => Set<AdminUserRow>();
+
+    public DbSet<AdminTotpSecretRow> AdminTotpSecrets => Set<AdminTotpSecretRow>();
+
+    public DbSet<AdminRecoveryCodeRow> AdminRecoveryCodes => Set<AdminRecoveryCodeRow>();
+
+    public DbSet<AdminSessionRow> AdminSessions => Set<AdminSessionRow>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Insert-only reference tables (D-0031): rows are never deleted and
@@ -187,6 +195,38 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
         {
             entity.ToTable("queue_counters");
             entity.HasKey(e => e.QueueName);
+        });
+
+        modelBuilder.Entity<AdminUserRow>(entity =>
+        {
+            entity.ToTable("admin_users");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Username).IsUnique();
+        });
+
+        modelBuilder.Entity<AdminTotpSecretRow>(entity =>
+        {
+            entity.ToTable("admin_totp_secrets");
+            entity.HasKey(e => e.UserId);
+            entity.HasOne<AdminUserRow>().WithOne().HasForeignKey<AdminTotpSecretRow>(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AdminRecoveryCodeRow>(entity =>
+        {
+            entity.ToTable("admin_recovery_codes");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AdminSessionRow>(entity =>
+        {
+            entity.ToTable("admin_sessions");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.AbsoluteExpiresAt);
+            entity.HasIndex(e => e.IdleExpiresAt);
+            entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         // snake_case column names everywhere: PostgreSQL convention, and the

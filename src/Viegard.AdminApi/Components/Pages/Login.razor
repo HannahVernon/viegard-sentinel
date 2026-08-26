@@ -1,0 +1,39 @@
+﻿@page "/login"
+@attribute [AllowAnonymous]
+
+<PageTitle>Admin login</PageTitle>
+
+<main class="auth-panel">
+    <h1>Viegard admin</h1>
+    <p>Sign in with your local operator account.</p>
+
+    @if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <p class="message error">@Error</p>
+    }
+    @if (!string.IsNullOrWhiteSpace(Status))
+    {
+        <p class="message">@Status</p>
+    }
+
+    <form method="post" action="/auth/login">
+        <AntiforgeryToken />
+        <label>
+            Username
+            <input name="username" autocomplete="username" required />
+        </label>
+        <label>
+            Password
+            <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <button type="submit">Continue</button>
+    </form>
+</main>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+}

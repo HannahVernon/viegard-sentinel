@@ -94,6 +94,47 @@ Sources ship disabled; enable them deliberately, one at a time.
 - **IMAP accounts:** add entries under `Viegard__Sources__Imap__Accounts__*` with a password secret file per account (`PasswordSecretName`).
 - **MDaemon logs:** runs as a satellite pipeline instance on the mail host (D-0025); deployment guide pending.
 
+## Admin interface exposure and authentication
+
+The admin interface uses local accounts, cookie authentication, server-side revocable sessions, mandatory TOTP, and recovery codes.  WebAuthn hardware-key support is planned for the next increment and will require HTTPS because browsers require a secure context.
+
+### Bootstrap flow
+
+Create the bootstrap password secret before the first admin startup:
+
+```bash
+openssl rand -base64 32 | tr -d '\n' > secrets/viegard-admin-bootstrap-password
+chown 1654 secrets/viegard-admin-bootstrap-password
+chmod 400 secrets/viegard-admin-bootstrap-password
+```
+
+When no `admin_users` rows exist, the admin service creates `Viegard__Admin__Bootstrap__Username` (default `admin`) from that secret.  The first login forces a password change, then TOTP enrollment with a manual base32 secret and otpauth URI.  Recovery codes are shown once after enrollment or regeneration.  Store them outside Viegard.
+
+If the bootstrap secret is missing and no users exist, the host stays up but the UI remains locked.  Add the secret and restart the admin service.
+
+### Exposure modes
+
+Mode | Configuration | Notes
+-----|---------------|------
+`loopback` | `Viegard__Admin__Exposure=loopback` | Default.  The operator must keep the published port bound to loopback only, for example `127.0.0.1:8080:8080`.
+`direct` | `Viegard__Admin__Exposure=direct` plus `Viegard__Admin__Tls__CertificatePath` and `KeyPath` | Kestrel loads mounted PEM files and exposes HTTPS directly.  A dedicated public IP with router dst-nat of 80/443 to the Viegard host is the reference topology.
+`proxy` | `Viegard__Admin__Exposure=proxy` plus `Viegard__Admin__Proxy__TrustedNetworks__*` | Use only with a trusted TLS-terminating proxy.  Trusted networks are fail-closed: an empty list is a startup error.
+
+Prefer a self-hosted VPN such as WireGuard for routine access.  Opening `AllowedSources` to `0.0.0.0/0` exposes the admin login to the internet and should be a deliberate exception, not the default.
+
+### AllowedSources
+
+`Viegard__Admin__AllowedSources__*` accepts bare IP addresses or CIDR ranges and uses the same semantics as syslog CIDR matching.  Empty list means loopback only.  Requests outside loopback and the configured ranges receive HTTP 403 with no body details and a warning log entry with sanitized values.
+
+### Session and IP binding options
+
+Setting | Default | Meaning
+--------|---------|--------
+`Viegard__Admin__Auth__AbsoluteLifetime` | `14.00:00:00` | Maximum session age.  Validation rejects values above 30 days.
+`Viegard__Admin__Auth__IdleTimeout` | `48:00:00` | Session expires when not seen for this interval.
+`Viegard__Admin__Auth__IpBindingMode` | `strict` | `strict` requires exact IP match, `subnet` accepts `/24` IPv4 or `/64` IPv6 movement, and `log-only` records mismatches without rejecting.
+`Viegard__Admin__Auth__StepUpValidity` | `00:05:00` | How long a TOTP step-up remains valid for sensitive account actions.
+
 ## Firewalling the syslog port
 
 **Docker bypasses the host firewall for published ports.**  Traffic to a published container port flows through Docker's NAT/forward chains, not the `INPUT` chain that tools like ufw manage: a `ufw deny 5514` is silently ineffective.  Docker's sanctioned filtering hook is the `DOCKER-USER` chain, which Docker creates and never flushes.

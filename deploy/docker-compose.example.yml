@@ -5,7 +5,8 @@
 #
 # Secrets (D-0006): each secret is one file in ./secrets/ (never committed;
 # see .gitignore).  The directory is mounted read-only and the file name is
-# the secret name, e.g. ./secrets/yahoo-imap-password.
+# the secret name, e.g. ./secrets/yahoo-imap-password.  Admin bootstrap
+# uses ./secrets/viegard-admin-bootstrap-password for the first operator.
 #
 # IMPORTANT: the viegard-pipeline and viegard-admin containers run as the
 # non-root 'app' user (UID 1654) from the .NET base images, so each secret
@@ -125,12 +126,36 @@ services:
       Viegard__Database__Name: viegard
       Viegard__Database__Username: viegard
       Viegard__Database__Schema: viegard
+      # Admin authentication bootstrap.  On first startup with no users, the
+      # admin service reads this secret, creates the configured user, then
+      # forces password change and TOTP enrollment.
+      Viegard__Admin__Bootstrap__Username: admin
+      Viegard__Admin__Bootstrap__PasswordSecretName: viegard-admin-bootstrap-password
+      # Exposure modes:
+      #   loopback: default.  Do not publish this port beyond 127.0.0.1.
+      #   direct: Kestrel terminates HTTPS with mounted PEM files.
+      #   proxy: a TLS-terminating proxy is in front; configure trusted networks.
+      Viegard__Admin__Exposure: loopback
+      # Viegard__Admin__Tls__CertificatePath: /run/viegard/certs/admin.crt
+      # Viegard__Admin__Tls__KeyPath: /run/viegard/certs/admin.key
+      # Viegard__Admin__Tls__Port: "8443"
+      # Viegard__Admin__Proxy__TrustedNetworks__0: "192.0.2.0/24"
+      # AllowedSources is fail-closed.  Empty means loopback only.
+      #
+      # WARNING: setting 0.0.0.0/0 exposes the admin login to the internet.
+      # Prefer a self-hosted VPN such as WireGuard and allow only the VPN
+      # client subnet or dedicated management addresses.
+      # Viegard__Admin__AllowedSources__0: "192.0.2.0/24"
+      # Viegard__Admin__Auth__AbsoluteLifetime: "14.00:00:00"
+      # Viegard__Admin__Auth__IdleTimeout: "48:00:00"
+      # Viegard__Admin__Auth__IpBindingMode: strict
+      # Viegard__Admin__Auth__StepUpValidity: "00:05:00"
     volumes:
       - ./secrets:/run/viegard/secrets:ro
+      # Direct mode PEM certificate example:
+      # - ./certs:/run/viegard/certs:ro
       # Persist Data Protection keys across container rebuilds (antiforgery
-      # today; auth cookies once admin login exists).  Host dir: chown 1654,
-      # chmod 700.  Key encryption at rest is deferred to the admin-auth
-      # phase (see TODO.md).
+      # and auth cookies).  Host dir: chown 1654, chmod 700.
       - ./data/dataprotection-keys:/home/app/.aspnet/DataProtection-Keys
     ports:
       # Bind to localhost only; front with a reverse proxy + TLS for real use.

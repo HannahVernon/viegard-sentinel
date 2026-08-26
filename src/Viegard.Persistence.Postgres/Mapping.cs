@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Viegard.Domain.Admin;
 using Viegard.Domain.Actions;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Classifications;
@@ -245,5 +246,95 @@ internal static class Mapping
         TotalAbandoned = row.TotalAbandoned,
         DeadLetterCount = row.DeadLetterCount,
         CapturedAt = row.CapturedAt,
+    };
+
+    public static AdminUserRow ToRow(this AdminUser user) => new()
+    {
+        Id = user.Id,
+        Username = user.Username,
+        PasswordHash = user.PasswordHash,
+        PasswordChangedAt = Utc(user.PasswordChangedAt),
+        FailedLoginCount = user.FailedLoginCount,
+        LockedUntil = Utc(user.LockedUntil),
+        MustChangePassword = user.MustChangePassword,
+        TotpEnrolled = user.TotpEnrolled,
+        CreatedAt = Utc(user.CreatedAt),
+    };
+
+    public static AdminUser ToDomain(this AdminUserRow row) => new()
+    {
+        Id = row.Id,
+        Username = row.Username,
+        PasswordHash = row.PasswordHash,
+        PasswordChangedAt = row.PasswordChangedAt,
+        FailedLoginCount = row.FailedLoginCount,
+        LockedUntil = row.LockedUntil,
+        MustChangePassword = row.MustChangePassword,
+        TotpEnrolled = row.TotpEnrolled,
+        CreatedAt = row.CreatedAt,
+    };
+
+    public static AdminTotpSecretRow ToRow(this AdminTotpSecret secret) => new()
+    {
+        UserId = secret.UserId,
+        SecretBase32 = secret.SecretBase32,
+        LastAcceptedStep = secret.LastAcceptedStep,
+        EnrolledAt = Utc(secret.EnrolledAt),
+    };
+
+    public static AdminTotpSecret ToDomain(this AdminTotpSecretRow row) => new()
+    {
+        UserId = row.UserId,
+        SecretBase32 = row.SecretBase32,
+        LastAcceptedStep = row.LastAcceptedStep,
+        EnrolledAt = row.EnrolledAt,
+    };
+
+    public static AdminRecoveryCodeRow ToRow(this AdminRecoveryCode code) => new()
+    {
+        Id = code.Id,
+        UserId = code.UserId,
+        CodeHash = code.CodeHash,
+        UsedAt = Utc(code.UsedAt),
+        CreatedAt = Utc(code.CreatedAt),
+    };
+
+    public static AdminRecoveryCode ToDomain(this AdminRecoveryCodeRow row) => new()
+    {
+        Id = row.Id,
+        UserId = row.UserId,
+        CodeHash = row.CodeHash,
+        UsedAt = row.UsedAt,
+        CreatedAt = row.CreatedAt,
+    };
+
+    public static AdminSessionRow ToRow(this AdminSession session) => new()
+    {
+        Id = session.Id,
+        UserId = session.UserId,
+        CreatedAt = Utc(session.CreatedAt),
+        LastSeenAt = Utc(session.LastSeenAt),
+        AbsoluteExpiresAt = Utc(session.AbsoluteExpiresAt),
+        IdleExpiresAt = Utc(session.IdleExpiresAt),
+        Ip = session.Ip,
+        IpBindingMode = session.IpBindingMode,
+        UserAgent = session.UserAgent,
+        RevokedAt = Utc(session.RevokedAt),
+        StepUpAt = Utc(session.StepUpAt),
+    };
+
+    public static AdminSession ToDomain(this AdminSessionRow row) => new()
+    {
+        Id = row.Id,
+        UserId = row.UserId,
+        CreatedAt = row.CreatedAt,
+        LastSeenAt = row.LastSeenAt,
+        AbsoluteExpiresAt = row.AbsoluteExpiresAt,
+        IdleExpiresAt = row.IdleExpiresAt,
+        Ip = row.Ip,
+        IpBindingMode = row.IpBindingMode,
+        UserAgent = row.UserAgent,
+        RevokedAt = row.RevokedAt,
+        StepUpAt = row.StepUpAt,
     };
 }

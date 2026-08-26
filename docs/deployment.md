@@ -120,6 +120,26 @@ Mode | Configuration | Notes
 `direct` | `Viegard__Admin__Exposure=direct` plus `Viegard__Admin__Tls__CertificatePath` and `KeyPath` | Kestrel loads mounted PEM files and exposes HTTPS directly.  A dedicated public IP with router dst-nat of 80/443 to the Viegard host is the reference topology.
 `proxy` | `Viegard__Admin__Exposure=proxy` plus `Viegard__Admin__Proxy__TrustedNetworks__*` | Use only with a trusted TLS-terminating proxy.  Trusted networks are fail-closed: an empty list is a startup error.
 
+For `direct` mode, mount the PEM pair readable by the container user: the certificate directory must be traversable (`chmod 755`) and the files owned by UID 1654 with mode 400.  A `umask 077` shell (recommended for the secrets steps) creates `700` directories, which make the files invisible to the container; the startup error "requires readable ... PEM files" is the symptom.  With Let's Encrypt via host certbot, a deploy hook keeps the copies fresh and restarts the admin container:
+
+```bash
+mkdir -p deploy/certs && chmod 755 deploy/certs
+cat > /etc/letsencrypt/renewal-hooks/deploy/viegard.sh <<'EOF'
+#!/bin/sh
+set -e
+D=/etc/letsencrypt/live/<your-admin-host>
+T=/opt/viegard-sentinel/deploy/certs
+cp -L "$D/fullchain.pem" "$T/admin.crt"
+cp -L "$D/privkey.pem"  "$T/admin.key"
+chown 1654:1654 "$T/admin.crt" "$T/admin.key"
+chmod 400 "$T/admin.crt" "$T/admin.key"
+cd /opt/viegard-sentinel/deploy && docker compose restart viegard-admin
+EOF
+chmod 755 /etc/letsencrypt/renewal-hooks/deploy/viegard.sh
+```
+
+If port 80 on the dedicated address is occupied or NAT-translated, certbot standalone accepts `--http-01-address <dedicated-ip> --http-01-port <port>`; the public side of the challenge is always port 80.  Remember that adding the certs volume to an existing deployment requires `docker compose up -d viegard-admin` (recreate), not `restart`.
+
 Prefer a self-hosted VPN such as WireGuard for routine access.  Opening `AllowedSources` to `0.0.0.0/0` exposes the admin login to the internet and should be a deliberate exception, not the default.
 
 ### AllowedSources

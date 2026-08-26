@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Viegard.Application.Audit;
 using Viegard.Application.Stores;
+using Viegard.Domain.Admin;
 using Viegard.Application.Telemetry;
 using Viegard.Domain.Actions;
 using Viegard.Domain.Audit;
@@ -292,5 +293,209 @@ public sealed class PostgresSourceOffsetStore(IDbContextFactory<ViegardDbContext
         }
 
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+}
+
+public sealed class PostgresAdminUserStore(IDbContextFactory<ViegardDbContext> factory) : IAdminUserStore
+{
+    public async ValueTask<bool> AnyUsersAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await db.AdminUsers.AsNoTracking().AnyAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask<AdminUser?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await db.AdminUsers.AsNoTracking().FirstOrDefaultAsync(u => u.Id == id, cancellationToken).ConfigureAwait(false);
+        return row?.ToDomain();
+    }
+
+    public async ValueTask<AdminUser?> FindByUsernameAsync(string username, CancellationToken cancellationToken = default)
+    {
+        var normalized = NormalizeUsername(username);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await db.AdminUsers.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Username == normalized, cancellationToken)
+            .ConfigureAwait(false);
+        return row?.ToDomain();
+    }
+
+    public async ValueTask CreateAsync(AdminUser user, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        db.AdminUsers.Add((user with { Username = NormalizeUsername(user.Username) }).ToRow());
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask UpdateAsync(AdminUser user, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var existing = await db.AdminUsers.FirstAsync(u => u.Id == user.Id, cancellationToken).ConfigureAwait(false);
+        db.Entry(existing).CurrentValues.SetValues((user with { Username = NormalizeUsername(user.Username) }).ToRow());
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask<AdminTotpSecret?> GetTotpSecretAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await db.AdminTotpSecrets.AsNoTracking().FirstOrDefaultAsync(s => s.UserId == userId, cancellationToken).ConfigureAwait(false);
+        return row?.ToDomain();
+    }
+
+    public async ValueTask UpsertTotpSecretAsync(AdminTotpSecret secret, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(secret);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var existing = await db.AdminTotpSecrets.FirstOrDefaultAsync(s => s.UserId == secret.UserId, cancellationToken).ConfigureAwait(false);
+        if (existing is null)
+        {
+            db.AdminTotpSecrets.Add(secret.ToRow());
+        }
+        else
+        {
+            db.Entry(existing).CurrentValues.SetValues(secret.ToRow());
+        }
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask<bool> TrySetTotpLastAcceptedStepAsync(
+        Guid userId,
+        long acceptedStep,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var updated = await db.AdminTotpSecrets
+            .Where(s => s.UserId == userId && (s.LastAcceptedStep == null || s.LastAcceptedStep < acceptedStep))
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.LastAcceptedStep, acceptedStep), cancellationToken)
+            .ConfigureAwait(false);
+        return updated == 1;
+    }
+
+    public async ValueTask<IReadOnlyList<AdminRecoveryCode>> GetRecoveryCodesAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.AdminRecoveryCodes.AsNoTracking()
+            .Where(c => c.UserId == userId)
+            .OrderBy(c => c.CreatedAt)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return rows.Select(r => r.ToDomain()).ToList();
+    }
+
+    public async ValueTask ReplaceRecoveryCodesAsync(
+        Guid userId,
+        IReadOnlyList<AdminRecoveryCode> codes,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(codes);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        await db.AdminRecoveryCodes.Where(c => c.UserId == userId).ExecuteDeleteAsync(cancellationToken).ConfigureAwait(false);
+        db.AdminRecoveryCodes.AddRange(codes.Select(c => c.ToRow()));
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask<bool> TryMarkRecoveryCodeUsedAsync(
+        Guid codeId,
+        DateTimeOffset usedAt,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var updated = await db.AdminRecoveryCodes
+            .Where(c => c.Id == codeId && c.UsedAt == null)
+            .ExecuteUpdateAsync(c => c.SetProperty(r => r.UsedAt, usedAt.ToUniversalTime()), cancellationToken)
+            .ConfigureAwait(false);
+        return updated == 1;
+    }
+
+    private static string NormalizeUsername(string username) =>
+        username.Trim().ToLowerInvariant();
+}
+
+public sealed class PostgresAdminSessionStore(IDbContextFactory<ViegardDbContext> factory) : IAdminSessionStore
+{
+    public async ValueTask CreateAsync(AdminSession session, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        db.AdminSessions.Add(session.ToRow());
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask<AdminSession?> GetAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await db.AdminSessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, cancellationToken).ConfigureAwait(false);
+        return row?.ToDomain();
+    }
+
+    public async ValueTask<IReadOnlyList<AdminSession>> ListForUserAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.AdminSessions.AsNoTracking()
+            .Where(s => s.UserId == userId
+                && s.RevokedAt == null
+                && s.AbsoluteExpiresAt > now
+                && s.IdleExpiresAt > now)
+            .OrderByDescending(s => s.LastSeenAt)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return rows.Select(r => r.ToDomain()).ToList();
+    }
+
+    public async ValueTask UpdateActivityAsync(
+        Guid id,
+        DateTimeOffset lastSeenAt,
+        DateTimeOffset idleExpiresAt,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        await db.AdminSessions
+            .Where(s => s.Id == id && s.RevokedAt == null)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.LastSeenAt, lastSeenAt.ToUniversalTime())
+                .SetProperty(r => r.IdleExpiresAt, idleExpiresAt.ToUniversalTime()), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async ValueTask StampStepUpAsync(Guid id, DateTimeOffset stepUpAt, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        await db.AdminSessions
+            .Where(s => s.Id == id && s.RevokedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.StepUpAt, stepUpAt.ToUniversalTime()), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async ValueTask RevokeAsync(Guid id, DateTimeOffset revokedAt, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        await db.AdminSessions
+            .Where(s => s.Id == id && s.RevokedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.RevokedAt, revokedAt.ToUniversalTime()), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async ValueTask RevokeForUserAsync(
+        Guid userId,
+        DateTimeOffset revokedAt,
+        Guid? exceptSessionId = null,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var query = db.AdminSessions.Where(s => s.UserId == userId && s.RevokedAt == null);
+        if (exceptSessionId is not null)
+        {
+            query = query.Where(s => s.Id != exceptSessionId.Value);
+        }
+
+        await query.ExecuteUpdateAsync(s => s.SetProperty(r => r.RevokedAt, revokedAt.ToUniversalTime()), cancellationToken)
+            .ConfigureAwait(false);
     }
 }

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Viegard.Persistence.Postgres;
@@ -11,9 +12,11 @@ using Viegard.Persistence.Postgres;
 namespace Viegard.Persistence.Postgres.Migrations
 {
     [DbContext(typeof(ViegardDbContext))]
-    partial class ViegardDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260826013622_AddAdminAuth")]
+    partial class AddAdminAuth
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

@@ -90,7 +90,7 @@ Key invariants:
 Deployable | Container | Responsibility
 -----------|-----------|---------------
 `viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
-`viegard-admin` | ASP.NET Core (Blazor Web App: static SSR + Interactive Server islands, D-0016) | Mobile-compatible admin GUI + API: read access to incidents, classifications, decisions, audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no integration credentials.
+`viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication (D-0032), read access to incidents, classifications, decisions, audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no integration credentials.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
 Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, feedback, telemetry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
 
@@ -120,7 +120,7 @@ src/
   Viegard.Domain/              Entities, value objects, enums; zero external dependencies
   Viegard.Application/         Ports (interfaces), deterministic classification,
                                pipeline orchestration, policy engine, prompt assembly,
-                               schema validation, guardrails
+                               schema validation, guardrails, admin auth helpers
   Viegard.Persistence/         Store implementations (in-memory/file first; DB when chosen)
   Viegard.Sources.Imap/        IMAP data source adapter (MailKit)
   Viegard.Sources.Syslog/      Syslog UDP source adapter; nginx/SWAG access logs normalize
@@ -136,7 +136,7 @@ src/
   Viegard.Notifications.Email/ Operator status/alert emails via SMTP (MailKit)
   Viegard.PipelineHost/        Worker service executable, including ingestion,
                                correlation, classification, and policy workers
-  Viegard.AdminApi/            Admin API executable
+  Viegard.AdminApi/            Admin API executable, auth endpoints, static SSR pages
 tests/
   Viegard.Domain.Tests/
   Viegard.Application.Tests/   Policy, guardrails, deterministic classification,
@@ -202,7 +202,7 @@ Untrusted data | All observed content (bodies, subjects, URLs, User-Agents, file
 Inference | Prompt assembly separates SYSTEM / APPLICATION / UNTRUSTED-OBSERVED-DATA.  Model output is parsed against a strict schema; anything malformed, incomplete, oversized, or contradictory is discarded and recorded as an AI failure.  Local-only by default; no silent fallback to remote.
 Policy | The policy engine is the only path to actions.  Guardrails (protected addresses/networks/hosts, action rate caps, max ban duration, cooldowns, circuit breaker, emergency stop, dry-run, approval mode) are enforced here and cannot be bypassed by any classifier.
 Actions | Providers expose a closed catalog of typed operations (e.g., `AddAddressListEntry(ip, list, ttl)`), never command strings.  IP syntax, private/reserved ranges, and protected lists are validated at this layer too (defense in depth).  Destructive operations (mail delete, firewall change) ship disabled and require explicit configuration.
-Admin | Separate process; authn/authz model TBD (open question).  No integration credentials in this process.  Commands are durable, validated, and audited; the admin API cannot invoke actions directly.
+Admin | Separate process; local accounts with cookie authentication backed by server-side revocable sessions, mandatory TOTP, recovery codes, step-up verification, rate limiting, and fail-closed AllowedSources (D-0032/D-0033).  No integration credentials in this process.  Commands are durable, validated, and audited; the admin API cannot invoke actions directly.
 Secrets | `ISecretProvider` only.  Never in source, config in git, logs, prompts, exceptions, telemetry, audit records, or docs.
 
 ## Failure handling

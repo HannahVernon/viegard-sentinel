@@ -1,0 +1,108 @@
+﻿@page "/login/2fa"
+@attribute [AllowAnonymous]
+@inject IHttpContextAccessor HttpContextAccessor
+@inject PendingTwoFactorCookie PendingCookie
+@inject IAdminUserStore Users
+@inject TotpService Totp
+
+<PageTitle>Second factor</PageTitle>
+
+<main class="auth-panel">
+    <h1>Second factor</h1>
+
+    @if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <p class="message error">@Error</p>
+    }
+    @if (!string.IsNullOrWhiteSpace(Status))
+    {
+        <p class="message">@Status</p>
+    }
+
+    @if (_user is null)
+    {
+        <p>Your pending sign-in expired.  Return to the login page and start again.</p>
+        <p><a href="/login">Back to login</a></p>
+    }
+    else if (_user.MustChangePassword)
+    {
+        <p>The bootstrap password must be changed before TOTP enrollment.</p>
+        <form method="post" action="/auth/totp">
+            <AntiforgeryToken />
+            <input type="hidden" name="flow" value="change-password" />
+            <label>
+                New password
+                <input name="newPassword" type="password" autocomplete="new-password" required minlength="@PasswordPolicy.MinimumLength" />
+            </label>
+            <label>
+                Confirm new password
+                <input name="confirmPassword" type="password" autocomplete="new-password" required minlength="@PasswordPolicy.MinimumLength" />
+            </label>
+            <button type="submit">Change password</button>
+        </form>
+    }
+    else if (!_user.TotpEnrolled)
+    {
+        <p>Enroll TOTP to finish the first login.  Enter this secret manually in your authenticator app.</p>
+        <pre class="secret-block">@_setupSecret</pre>
+        <p class="small">otpauth URI:</p>
+        <pre class="secret-block">@_otpUri</pre>
+        <form method="post" action="/auth/totp">
+            <AntiforgeryToken />
+            <input type="hidden" name="setupSecret" value="@_setupSecret" />
+            <label>
+                Verification code
+                <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
+            </label>
+            <button type="submit">Enroll and sign in</button>
+        </form>
+    }
+    else
+    {
+        <form method="post" action="/auth/totp">
+            <AntiforgeryToken />
+            <label>
+                TOTP code
+                <input name="code" inputmode="numeric" autocomplete="one-time-code" />
+            </label>
+            <button type="submit">Sign in</button>
+        </form>
+
+        <form method="post" action="/auth/totp" class="secondary-form">
+            <AntiforgeryToken />
+            <label>
+                Recovery code
+                <input name="recoveryCode" autocomplete="one-time-code" />
+            </label>
+            <button type="submit">Use recovery code</button>
+        </form>
+    }
+</main>
+
+@code {
+    private AdminUser? _user;
+    private string _setupSecret = string.Empty;
+    private string _otpUri = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var context = HttpContextAccessor.HttpContext;
+        if (context is null || !PendingCookie.TryRead(context, out var userId))
+        {
+            return;
+        }
+
+        _user = await Users.GetByIdAsync(userId, context.RequestAborted).ConfigureAwait(false);
+        if (_user is not null && !_user.TotpEnrolled && !_user.MustChangePassword)
+        {
+            _setupSecret = Totp.GenerateSecret();
+            _otpUri = Totp.BuildOtpAuthUri(_user.Username, _setupSecret);
+        }
+    }
+}

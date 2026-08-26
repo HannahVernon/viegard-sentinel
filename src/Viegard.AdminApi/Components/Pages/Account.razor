@@ -1,0 +1,214 @@
+﻿@page "/account"
+@attribute [Authorize]
+@inject IHttpContextAccessor HttpContextAccessor
+@inject IAdminUserStore Users
+@inject IAdminSessionStore Sessions
+@inject TotpService Totp
+@inject RecoveryCodesCookie RecoveryCodesCookie
+@inject IOptions<AdminAuthOptions> AuthOptions
+
+<PageTitle>Account</PageTitle>
+
+<main class="account-panel">
+    <h1>Admin account</h1>
+
+    @if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <p class="message error">@Error</p>
+    }
+    @if (!string.IsNullOrWhiteSpace(Status))
+    {
+        <p class="message">@Status</p>
+    }
+
+    @if (_user is null)
+    {
+        <p>Account details are not available.</p>
+    }
+    else
+    {
+        <section>
+            <h2>Signed in as @_user.Username</h2>
+            @if (_user.MustChangePassword)
+            {
+                <p class="message error">Password change is required before using the admin interface.</p>
+            }
+            @if (!_user.TotpEnrolled)
+            {
+                <p class="message error">TOTP enrollment is required before using the admin interface.</p>
+            }
+        </section>
+
+        @if (_newRecoveryCodes.Count > 0)
+        {
+            <section>
+                <h2>Recovery codes</h2>
+                <p>Store these now.  They are shown once and each code can be used one time.</p>
+                <ul class="recovery-codes">
+                    @foreach (var recoveryCode in _newRecoveryCodes)
+                    {
+                        <li><code>@recoveryCode</code></li>
+                    }
+                </ul>
+            </section>
+        }
+
+        <section>
+            <h2>Change password</h2>
+            <form method="post" action="/auth/password/change">
+                <AntiforgeryToken />
+                <label>
+                    Current password
+                    <input name="currentPassword" type="password" autocomplete="current-password" required />
+                </label>
+                <label>
+                    New password
+                    <input name="newPassword" type="password" autocomplete="new-password" required minlength="@PasswordPolicy.MinimumLength" />
+                </label>
+                <label>
+                    Confirm new password
+                    <input name="confirmPassword" type="password" autocomplete="new-password" required minlength="@PasswordPolicy.MinimumLength" />
+                </label>
+                <button type="submit">Change password</button>
+            </form>
+        </section>
+
+        <section>
+            <h2>Step-up verification</h2>
+            @if (_stepUpFresh)
+            {
+                <p>Step-up is valid for this session.</p>
+            }
+            else
+            {
+                <p>Verify TOTP before changing TOTP enrollment or recovery codes.</p>
+            }
+            <form method="post" action="/auth/step-up">
+                <AntiforgeryToken />
+                <label>
+                    TOTP code
+                    <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
+                </label>
+                <button type="submit">Verify</button>
+            </form>
+        </section>
+
+        @if (!_user.TotpEnrolled || _stepUpFresh)
+        {
+            <section>
+                <h2>@(_user.TotpEnrolled ? "Re-enroll TOTP" : "Enroll TOTP")</h2>
+                <p>Enter this secret manually in your authenticator app, then verify the current code.</p>
+                <pre class="secret-block">@_setupSecret</pre>
+                <p class="small">otpauth URI:</p>
+                <pre class="secret-block">@_otpUri</pre>
+                <form method="post" action="/auth/totp/enroll">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="setupSecret" value="@_setupSecret" />
+                    <label>
+                        Verification code
+                        <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
+                    </label>
+                    <button type="submit">@(_user.TotpEnrolled ? "Replace TOTP" : "Enroll TOTP")</button>
+                </form>
+            </section>
+        }
+
+        <section>
+            <h2>Recovery codes</h2>
+            <form method="post" action="/auth/recovery-codes/regenerate">
+                <AntiforgeryToken />
+                <button type="submit">Regenerate recovery codes</button>
+            </form>
+        </section>
+
+        <section>
+            <h2>Active sessions</h2>
+            <form method="post" action="/auth/sessions/revoke">
+                <AntiforgeryToken />
+                <input type="hidden" name="scope" value="all" />
+                <button type="submit">Revoke all sessions</button>
+            </form>
+            <ul class="sessions">
+                @foreach (var session in _sessions)
+                {
+                    <li>
+                        <strong>@session.Ip</strong>
+                        <span>@session.UserAgent</span>
+                        <span>Last seen @session.LastSeenAt.UtcDateTime.ToString("u")</span>
+                        @if (session.RevokedAt is null)
+                        {
+                            <form method="post" action="/auth/sessions/revoke">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="sessionId" value="@session.Id" />
+                                <button type="submit">Revoke</button>
+                            </form>
+                        }
+                        else
+                        {
+                            <span>Revoked @session.RevokedAt.Value.UtcDateTime.ToString("u")</span>
+                        }
+                    </li>
+                }
+            </ul>
+        </section>
+
+        <section>
+            <form method="post" action="/auth/logout">
+                <AntiforgeryToken />
+                <button type="submit">Sign out</button>
+            </form>
+        </section>
+    }
+</main>
+
+@code {
+    private AdminUser? _user;
+    private AdminSession? _currentSession;
+    private IReadOnlyList<AdminSession> _sessions = [];
+    private IReadOnlyList<string> _newRecoveryCodes = [];
+    private string _setupSecret = string.Empty;
+    private string _otpUri = string.Empty;
+    private bool _stepUpFresh;
+
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var context = HttpContextAccessor.HttpContext;
+        if (context is null)
+        {
+            return;
+        }
+
+        var userIdClaim = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdClaim, out var userId))
+        {
+            return;
+        }
+
+        _user = await Users.GetByIdAsync(userId, context.RequestAborted).ConfigureAwait(false);
+        if (_user is null)
+        {
+            return;
+        }
+
+        _sessions = await Sessions.ListForUserAsync(userId, context.RequestAborted).ConfigureAwait(false);
+        var sessionIdClaim = context.User.FindFirstValue(AdminCookieNames.SessionIdClaim);
+        if (Guid.TryParse(sessionIdClaim, out var sessionId))
+        {
+            _currentSession = _sessions.FirstOrDefault(s => s.Id == sessionId);
+        }
+
+        _stepUpFresh = _currentSession?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
+        _newRecoveryCodes = RecoveryCodesCookie.ReadAndClear(context);
+        if (!_user.TotpEnrolled || _stepUpFresh)
+        {
+            _setupSecret = Totp.GenerateSecret();
+            _otpUri = Totp.BuildOtpAuthUri(_user.Username, _setupSecret);
+        }
+    }
+}

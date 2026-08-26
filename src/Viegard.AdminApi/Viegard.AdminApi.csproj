@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Viegard.Application\Viegard.Application.csproj" />
     <ProjectReference Include="..\Viegard.Persistence\Viegard.Persistence.csproj" />
+    <ProjectReference Include="..\Viegard.Persistence.Postgres\Viegard.Persistence.Postgres.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

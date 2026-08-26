@@ -14,6 +14,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 - [ ] **Event architecture** details: if a meaningful choice arises between alternatives (e.g., event store vs. event bus, push vs. pull correlation), present options before implementing.
 - [ ] **Queue/broker technology beyond in-database queues**: D-0024 implements durable queues in PostgreSQL (`SKIP LOCKED` + `LISTEN/NOTIFY`); an external broker (Kafka KIP-932 share groups, RabbitMQ, NATS JetStream, Redis Streams) remains a speculative future option only if scale ever demands it.  The queue port stays broker-ready (ARCHITECTURE.md assumption 3).
 - [ ] **CI/CD**: whether to use Forgejo Actions, GitHub Actions (on the mirror), both, or neither.
+- [ ] **Schema-change data migration** (Hannah, 2026-08-25): changing `Viegard__Database__Schema` on an existing deployment currently starts a fresh, empty schema and strands the old data (observed live when `viegard` replaced `public`).  Design an automated, data-preserving path: likely an explicit opt-in setting (e.g., `Viegard__Database__RenameSchemaFrom`) performing `ALTER SCHEMA ... RENAME` when the old schema is dedicated to Viegard, plus fail-closed startup detection ("Viegard data found in schema X but configured schema is Y") instead of silently proceeding.  Needs design decision before implementation.
 
 ### Yahoo Mail / IMAP
 

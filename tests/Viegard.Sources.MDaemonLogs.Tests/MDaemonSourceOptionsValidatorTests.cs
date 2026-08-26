@@ -58,4 +58,21 @@ public sealed class MDaemonSourceOptionsValidatorTests
 
         Assert.True(_validator.Validate(null, options).Failed);
     }
+
+    [Fact]
+    public void Max_scan_bytes_below_floor_fails_when_enabled()
+    {
+        var options = new MDaemonSourceOptions
+        {
+            Enabled = true,
+            LogDirectory = "C:\\Logs\\MDaemon",
+            MaxScanBytes = 4095,
+        };
+        options.Files.Add(new MDaemonLogFileOptions { Pattern = "DynScrn-*.log", LogKind = "DynamicScreening" });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("MaxScanBytes", result.FailureMessage, StringComparison.Ordinal);
+    }
 }

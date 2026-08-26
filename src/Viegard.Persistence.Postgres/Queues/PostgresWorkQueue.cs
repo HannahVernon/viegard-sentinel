@@ -103,15 +103,19 @@ public sealed partial class PostgresWorkQueue<T> : IWorkQueue<T>
         return new WorkQueueStats
         {
             QueueName = QueueName,
-            Depth = (int)reader.GetInt64(0),
-            InFlight = (int)reader.GetInt64(1),
+            // Counts are clamped rather than cast: a flooded queue must
+            // not wrap the reported stats negative (security audit, 2026-08-25).
+            Depth = ClampToInt(reader.GetInt64(0)),
+            InFlight = ClampToInt(reader.GetInt64(1)),
             OldestPendingEnqueuedAt = reader.IsDBNull(2) ? null : reader.GetFieldValue<DateTimeOffset>(2),
-            DeadLetterCount = (int)reader.GetInt64(3),
+            DeadLetterCount = ClampToInt(reader.GetInt64(3)),
             TotalEnqueued = reader.GetInt64(4),
             TotalCompleted = reader.GetInt64(5),
             TotalAbandoned = reader.GetInt64(6),
         };
     }
+
+    private static int ClampToInt(long value) => (int)Math.Min(value, int.MaxValue);
 
     private async Task<IWorkLease<T>?> TryLeaseOnceAsync(CancellationToken cancellationToken)
     {

@@ -102,6 +102,11 @@ public sealed class MDaemonLogSource(
             foreach (var path in Directory.EnumerateFiles(options.LogDirectory, fileOption.Pattern, SearchOption.TopDirectoryOnly))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (!IsSafeLogFile(path))
+                {
+                    continue;
+                }
+
                 tracked++;
                 var fileItems = await ReadNewLinesAsync(path, logKind, cancellationToken).ConfigureAwait(false);
                 items.AddRange(fileItems);
@@ -117,6 +122,37 @@ public sealed class MDaemonLogSource(
         }
 
         return items;
+    }
+
+    /// <summary>
+    /// Rejects symlinks/reparse points and any path that escapes the
+    /// configured log directory so the tailer cannot be steered to read an
+    /// arbitrary file (security-audit finding, 2026-08-25).  Comparison is
+    /// case-insensitive because MDaemon hosts are Windows.
+    /// </summary>
+    private bool IsSafeLogFile(string path)
+    {
+        var info = new FileInfo(path);
+        if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+        {
+            logger.LogWarning(
+                "MDaemon log file {FileName} is a symlink or reparse point; skipping.",
+                info.Name);
+            return false;
+        }
+
+        var directory = Path.GetFullPath(options.LogDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        if (!Path.GetFullPath(path).StartsWith(directory, StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(
+                "MDaemon log file {FileName} resolves outside the configured log directory; skipping.",
+                info.Name);
+            return false;
+        }
+
+        return true;
     }
 
     private async Task<IReadOnlyList<ObservedItem>> ReadNewLinesAsync(

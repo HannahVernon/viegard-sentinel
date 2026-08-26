@@ -3,6 +3,7 @@ using Viegard.Application.Stores;
 using Viegard.Domain;
 using Viegard.Domain.Classifications;
 using Viegard.Domain.Decisions;
+using Viegard.Domain.Events;
 using Viegard.Domain.Incidents;
 
 namespace Viegard.Application.Policy;
@@ -23,6 +24,7 @@ public sealed class DefaultPolicyEngine(
     IOptions<PolicyOptions> options,
     ProtectedAddressList protectedAddresses,
     IIncidentStore incidentStore,
+    IEventStore eventStore,
     IGuardrailStateStore guardrailStateStore) : IPolicyEngine
 {
     public const string DefaultPolicyId = "viegard-default";
@@ -93,16 +95,20 @@ public sealed class DefaultPolicyEngine(
         {
             guardrails.Add(Skipped(PolicyGuardrailNames.Allowlist, "Skipped because action is already denied."));
         }
-        else if (TryMatchAllowlist(classification, policyOptions, out var allowlistDetail))
-        {
-            guardrails.Add(Fail(PolicyGuardrailNames.Allowlist, allowlistDetail));
-            rationale.Add("Allowlist guardrail denied automated action.");
-            outcome = DecisionOutcome.Deny;
-            denied = true;
-        }
         else
         {
-            guardrails.Add(Pass(PolicyGuardrailNames.Allowlist, allowlistDetail));
+            var (allowlistMatched, allowlistDetail) = await MatchAllowlistAsync(classification, policyOptions, cancellationToken).ConfigureAwait(false);
+            if (allowlistMatched)
+            {
+                guardrails.Add(Fail(PolicyGuardrailNames.Allowlist, allowlistDetail));
+                rationale.Add("Allowlist guardrail denied automated action.");
+                outcome = DecisionOutcome.Deny;
+                denied = true;
+            }
+            else
+            {
+                guardrails.Add(Pass(PolicyGuardrailNames.Allowlist, allowlistDetail));
+            }
         }
 
         if (denied)
@@ -363,118 +369,71 @@ public sealed class DefaultPolicyEngine(
             "Deterministic classification is record-only.");
     }
 
-    private static bool TryMatchAllowlist(
+    /// <summary>
+    /// Checks whether the classified mail message's structured From
+    /// addresses match the configured sender/domain allowlists.  The sender
+    /// is read exclusively from the stored MailMessageEvent; classification
+    /// text (category, reasons, recommended action) is never parsed for
+    /// sender values because that text derives from attacker-influenceable
+    /// mail content (security-audit finding, 2026-08-25).
+    /// </summary>
+    private async Task<(bool Matched, string Detail)> MatchAllowlistAsync(
         Classification classification,
         PolicyOptions options,
-        out string detail)
+        CancellationToken cancellationToken)
     {
         if (classification.SubjectKind != ClassificationSubjectKind.MailMessage)
         {
-            detail = "Not a mail-message subject; allowlist guardrail skipped.";
-            return false;
-        }
-
-        if (!classification.Category.Contains("sender", StringComparison.OrdinalIgnoreCase))
-        {
-            detail = "Mail-message category is not a mail-sender category; allowlist guardrail skipped.";
-            return false;
+            return (false, "Not a mail-message subject; allowlist guardrail skipped.");
         }
 
         if (options.AllowedSenders.Count == 0 && options.AllowedDomains.Count == 0)
         {
-            detail = "Mail-sender category evaluated, but no allowed senders or domains are configured.";
-            return false;
+            return (false, "Mail-message subject evaluated, but no allowed senders or domains are configured.");
         }
 
-        if (!TryExtractSender(classification, out var sender))
+        var mailEvent = await eventStore.GetAsync(classification.SubjectId, cancellationToken).ConfigureAwait(false);
+        if (mailEvent?.Payload is not MailMessageEvent mail)
         {
-            detail = "Mail-sender category evaluated, but no sender value was present in classification details.";
-            return false;
+            return (false, $"Mail event {classification.SubjectId} was not found or is not a mail payload; sender cannot be verified.");
         }
 
-        var normalizedSender = sender.ToLowerInvariant();
-        var senderMatched = options.AllowedSenders
+        var senders = mail.From
+            .Select(static a => a.Address.Trim())
+            .Where(static a => a.Length > 0)
+            .ToList();
+        if (senders.Count == 0)
+        {
+            return (false, "Mail event has no From addresses; sender cannot be verified.");
+        }
+
+        var allowedSenders = options.AllowedSenders
             .Select(static s => s.Trim().ToLowerInvariant())
-            .Any(s => s.Length > 0 && s == normalizedSender);
-        if (senderMatched)
-        {
-            detail = $"Sender {sender} is allowlisted.";
-            return true;
-        }
-
-        var at = normalizedSender.LastIndexOf('@');
-        var domain = at >= 0 ? normalizedSender[(at + 1)..] : normalizedSender;
-        var domainMatched = options.AllowedDomains
+            .Where(static s => s.Length > 0)
+            .ToList();
+        var allowedDomains = options.AllowedDomains
             .Select(static d => d.Trim().TrimStart('@').ToLowerInvariant())
-            .Any(d => d.Length > 0 && (domain == d || domain.EndsWith($".{d}", StringComparison.Ordinal)));
+            .Where(static d => d.Length > 0)
+            .ToList();
 
-        detail = domainMatched
-            ? $"Sender domain {domain} is allowlisted."
-            : $"Sender {sender} did not match configured allowlists.";
-        return domainMatched;
-    }
-
-    private static bool TryExtractSender(Classification classification, out string sender)
-    {
-        foreach (var candidate in ClassificationTextCandidates(classification))
+        foreach (var sender in senders)
         {
-            if (TryExtractValue(candidate, "sender=", out sender)
-                || TryExtractValue(candidate, "sender:", out sender)
-                || TryExtractValue(candidate, "from=", out sender)
-                || TryExtractValue(candidate, "from:", out sender))
+            var normalizedSender = sender.ToLowerInvariant();
+            if (allowedSenders.Contains(normalizedSender))
             {
-                return true;
+                return (true, $"Sender {sender} is allowlisted.");
+            }
+
+            var at = normalizedSender.LastIndexOf('@');
+            var domain = at >= 0 ? normalizedSender[(at + 1)..] : normalizedSender;
+            if (allowedDomains.Any(d => domain == d || domain.EndsWith($".{d}", StringComparison.Ordinal)))
+            {
+                return (true, $"Sender domain {domain} is allowlisted.");
             }
         }
 
-        sender = string.Empty;
-        return false;
+        return (false, $"No From address matched configured allowlists ({senders.Count} checked).");
     }
-
-    private static IEnumerable<string> ClassificationTextCandidates(Classification classification)
-    {
-        yield return classification.Category;
-        if (!string.IsNullOrWhiteSpace(classification.RecommendedAction))
-        {
-            yield return classification.RecommendedAction;
-        }
-
-        foreach (var reason in classification.Reasons)
-        {
-            yield return reason;
-        }
-    }
-
-    private static bool TryExtractValue(string text, string marker, out string value)
-    {
-        value = string.Empty;
-        var start = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (start < 0)
-        {
-            return false;
-        }
-
-        start += marker.Length;
-        while (start < text.Length && IsTrimCharacter(text[start]))
-        {
-            start++;
-        }
-
-        var end = start;
-        while (end < text.Length && !IsTerminator(text[end]))
-        {
-            end++;
-        }
-
-        value = text[start..end].Trim().Trim('<', '>', '"', '\'');
-        return value.Length > 0;
-    }
-
-    private static bool IsTrimCharacter(char c) =>
-        char.IsWhiteSpace(c) || c is '<' or '"' or '\'';
-
-    private static bool IsTerminator(char c) =>
-        char.IsWhiteSpace(c) || c is ',' or ';' or ')' or ']' or '>' or '"' or '\'';
 
     private static GuardrailEvaluation Pass(string name, string detail) =>
         new()

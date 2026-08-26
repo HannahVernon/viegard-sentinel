@@ -540,7 +540,11 @@ public static class AdminAuthEndpoints
             LastSeenAt = now,
             AbsoluteExpiresAt = now.Add(options.AbsoluteLifetime),
             IdleExpiresAt = now.Add(options.IdleTimeout),
-            Ip = context.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+            // Normalized so the session list shows 192.168.0.x rather than
+            // the dual-stack socket's ::ffff:192.168.0.x mapped form.
+            Ip = context.Connection.RemoteIpAddress is { } remote
+                ? AdminIpBinding.Normalize(remote).ToString()
+                : string.Empty,
             IpBindingMode = AdminIpBindingModes.Normalize(options.IpBindingMode),
             UserAgent = context.Request.Headers.UserAgent.ToString(),
             RevokedAt = null,

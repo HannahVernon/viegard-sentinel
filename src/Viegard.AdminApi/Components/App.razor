@@ -8,14 +8,16 @@
     <ResourcePreloader />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["Viegard.AdminApi.styles.css"]" />
-    <ImportMap />
     <HeadOutlet />
 </head>
 
 <body>
+    @* Every admin page is static SSR with plain HTML form posts; the app
+       deliberately ships no client-side Blazor script.  blazor.web.js and
+       the reconnect modal caused a spurious "unhandled error" banner on
+       anonymous pages and are gone until an increment actually needs
+       interactivity. *@
     <Routes />
-    <ReconnectModal />
-    <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>
 
 </html>

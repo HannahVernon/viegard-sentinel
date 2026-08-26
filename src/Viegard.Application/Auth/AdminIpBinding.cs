@@ -44,6 +44,7 @@ public static class AdminIpBinding
         return cidr.Contains(normalizedCurrent);
     }
 
-    private static IPAddress Normalize(IPAddress address) =>
+    /// <summary>IPv4-mapped IPv6 addresses normalize to their IPv4 form (dual-stack sockets report ::ffff:a.b.c.d).</summary>
+    public static IPAddress Normalize(IPAddress address) =>
         address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
 }

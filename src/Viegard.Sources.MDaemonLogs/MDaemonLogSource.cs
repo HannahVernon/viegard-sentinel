@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Viegard.Application.Health;
+using Viegard.Application.Logging;
 using Viegard.Application.Sources;
 using Viegard.Application.Stores;
 using Viegard.Domain;
@@ -137,7 +138,7 @@ public sealed class MDaemonLogSource(
         {
             logger.LogWarning(
                 "MDaemon log file {FileName} is a symlink or reparse point; skipping.",
-                info.Name);
+                LogSanitizer.Sanitize(info.Name));
             return false;
         }
 
@@ -148,7 +149,7 @@ public sealed class MDaemonLogSource(
         {
             logger.LogWarning(
                 "MDaemon log file {FileName} resolves outside the configured log directory; skipping.",
-                info.Name);
+                LogSanitizer.Sanitize(info.Name));
             return false;
         }
 
@@ -179,7 +180,9 @@ public sealed class MDaemonLogSource(
         }
         else if (offset > length)
         {
-            logger.LogInformation("MDaemon log file {FileName} shrank from offset {Offset} to {Length}; reading from start.", fileName, offset, length);
+            logger.LogInformation(
+                "MDaemon log file {FileName} shrank from offset {Offset} to {Length}; reading from start.",
+                LogSanitizer.Sanitize(fileName), offset, length);
             offset = 0;
         }
 
@@ -188,16 +191,15 @@ public sealed class MDaemonLogSource(
             return [];
         }
 
+        // Bounded read (security-audit finding, 2026-08-25): consume at
+        // most MaxScanBytes per scan, ending at the last complete line;
+        // the remainder is picked up by subsequent scans.
         var byteCount = length - offset;
-        if (byteCount > int.MaxValue)
-        {
-            _lastError = $"File '{fileName}' has more than {int.MaxValue} unread bytes; skipping until next scan.";
-            logger.LogWarning("MDaemon log file {FileName} has too many unread bytes ({ByteCount}); skipping this scan.", fileName, byteCount);
-            return [];
-        }
+        var capped = byteCount > options.MaxScanBytes;
+        var readTarget = capped ? options.MaxScanBytes : (int)byteCount;
 
         stream.Seek(offset, SeekOrigin.Begin);
-        var buffer = new byte[byteCount];
+        var buffer = new byte[readTarget];
         var read = 0;
         while (read < buffer.Length)
         {
@@ -215,8 +217,28 @@ public sealed class MDaemonLogSource(
             return [];
         }
 
+        var consumed = read;
+        if (capped)
+        {
+            var lastNewline = buffer.AsSpan(0, read).LastIndexOf((byte)'\n');
+            if (lastNewline >= 0)
+            {
+                consumed = lastNewline + 1;
+            }
+            else
+            {
+                // A single line larger than the cap cannot be parsed;
+                // discard these bytes (advancing the offset) or the file
+                // would stall every future scan.
+                logger.LogWarning(
+                    "MDaemon log file {FileName} contains a line longer than MaxScanBytes ({MaxScanBytes}); discarding {Read} unparseable bytes.",
+                    LogSanitizer.Sanitize(fileName), options.MaxScanBytes, read);
+            }
+        }
+
+        var endOffset = offset + consumed;
         var capturedAt = DateTimeOffset.UtcNow;
-        var text = Encoding.UTF8.GetString(buffer, 0, read);
+        var text = Encoding.UTF8.GetString(buffer, 0, consumed);
         var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
         var items = new List<ObservedItem>();
 
@@ -257,14 +279,14 @@ public sealed class MDaemonLogSource(
                     SourceId = SourceId,
                     SourceType = MDaemonSourceType,
                     ObservedAt = capturedAt,
-                    PayloadReference = $"mdaemon/{fileName}/{length}/{i}",
-                    IngestOffset = length.ToString(),
+                    PayloadReference = $"mdaemon/{fileName}/{endOffset}/{i}",
+                    IngestOffset = endOffset.ToString(),
                 },
                 RawPayload = JsonSerializer.Serialize(dto, MDaemonJson.SerializerOptions),
             });
         }
 
-        await offsetStore.SetAsync(SourceId, offsetKey, length.ToString(), cancellationToken).ConfigureAwait(false);
+        await offsetStore.SetAsync(SourceId, offsetKey, endOffset.ToString(), cancellationToken).ConfigureAwait(false);
         return items;
     }
 }

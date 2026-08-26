@@ -7,6 +7,7 @@ using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using MimeKit;
 using Viegard.Application.Health;
+using Viegard.Application.Logging;
 using Viegard.Application.Secrets;
 using Viegard.Application.Sources;
 using Viegard.Application.Stores;
@@ -155,6 +156,17 @@ public sealed class ImapMailSource(
             await folder.OpenAsync(FolderAccess.ReadOnly, cancellationToken).ConfigureAwait(false);
 
             var lastUid = await ResolveLastUidAsync(folder, cancellationToken).ConfigureAwait(false);
+            // uint.MaxValue + 1 would wrap to UID 0 and produce an invalid
+            // or overbroad search; fail closed (security-audit finding,
+            // 2026-08-25).
+            if (lastUid == uint.MaxValue)
+            {
+                logger.LogWarning(
+                    "IMAP account {AccountId}: stored UID offset for folder {Folder} is at uint.MaxValue; skipping sweep.",
+                    account.AccountId, LogSanitizer.Sanitize(folder.FullName));
+                continue;
+            }
+
             var newUids = await folder.SearchAsync(
                 SearchQuery.Uids(new UniqueIdRange(new UniqueId(lastUid + 1), UniqueId.MaxValue)),
                 cancellationToken).ConfigureAwait(false);
@@ -191,7 +203,7 @@ public sealed class ImapMailSource(
             {
                 logger.LogWarning(
                     "IMAP account {AccountId}: UIDVALIDITY changed for folder {Folder}; re-baselining.",
-                    account.AccountId, folder.FullName);
+                    account.AccountId, LogSanitizer.Sanitize(folder.FullName));
             }
 
             await offsetStore.SetAsync(SourceId, validityKey, currentValidity, cancellationToken).ConfigureAwait(false);

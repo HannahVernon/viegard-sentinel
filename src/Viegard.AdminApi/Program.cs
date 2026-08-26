@@ -208,11 +208,11 @@ if (exposureMode == AdminExposureModes.Proxy)
 
 app.Use(async (context, next) =>
 {
-    // Blazor static SSR emits an inline import map, and the default template
-    // stylesheet uses inline data URLs.  Keep inline allowances scoped to
-    // scripts/styles until nonce plumbing is introduced.
+    // No client-side script ships at all (static SSR, plain form posts),
+    // so script-src needs no inline allowance.  The template stylesheet
+    // still uses inline styles and data: images.
     context.Response.Headers["Content-Security-Policy"] =
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["Referrer-Policy"] = "no-referrer";
     await next(context).ConfigureAwait(false);
@@ -296,7 +296,9 @@ app.MapRazorComponents<App>();
 app.Run();
 
 static string GetClientPartitionKey(HttpContext context) =>
-    context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    context.Connection.RemoteIpAddress is { } remote
+        ? Viegard.Application.Auth.AdminIpBinding.Normalize(remote).ToString()
+        : "unknown";
 
 static bool IsAnonymousAllowedPath(PathString path) =>
     path.StartsWithSegments("/login")

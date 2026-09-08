@@ -12,12 +12,10 @@
 </head>
 
 <body>
-    @* Every admin page is static SSR with plain HTML form posts; the app
-       deliberately ships no client-side Blazor script.  blazor.web.js and
-       the reconnect modal caused a spurious "unhandled error" banner on
-       anonymous pages and are gone until an increment actually needs
-       interactivity. *@
+    @* Every admin page is static SSR.  The only client script is the
+       first-party WebAuthn bridge, loaded as an external file for CSP. *@
     <Routes />
+    <script src="@Assets["js/webauthn.js"]" defer></script>
 </body>
 
 </html>

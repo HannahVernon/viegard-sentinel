@@ -308,6 +308,34 @@ internal static class Mapping
         CreatedAt = row.CreatedAt,
     };
 
+    public static AdminWebAuthnCredentialRow ToRow(this AdminWebAuthnCredential credential) => new()
+    {
+        Id = credential.Id,
+        UserId = credential.UserId,
+        CredentialId = credential.CredentialId.ToArray(),
+        PublicKey = credential.PublicKey.ToArray(),
+        SignCount = credential.SignCount,
+        Aaguid = credential.Aaguid,
+        Transports = credential.Transports,
+        Name = credential.Name,
+        CreatedAt = Utc(credential.CreatedAt),
+        LastUsedAt = Utc(credential.LastUsedAt),
+    };
+
+    public static AdminWebAuthnCredential ToDomain(this AdminWebAuthnCredentialRow row) => new()
+    {
+        Id = row.Id,
+        UserId = row.UserId,
+        CredentialId = row.CredentialId.ToArray(),
+        PublicKey = row.PublicKey.ToArray(),
+        SignCount = row.SignCount,
+        Aaguid = row.Aaguid,
+        Transports = row.Transports,
+        Name = row.Name,
+        CreatedAt = row.CreatedAt,
+        LastUsedAt = row.LastUsedAt,
+    };
+
     public static AdminSessionRow ToRow(this AdminSession session) => new()
     {
         Id = session.Id,

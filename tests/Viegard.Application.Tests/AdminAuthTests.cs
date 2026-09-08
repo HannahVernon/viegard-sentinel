@@ -73,6 +73,49 @@ public sealed class AdminAuthTests
     }
 
     [Fact]
+    public async Task In_memory_webauthn_credentials_round_trip_and_enforce_unique_ids()
+    {
+        var store = new InMemoryAdminUserStore();
+        var now = DateTimeOffset.UtcNow;
+        var userId = ViegardId.New();
+        var credential = new AdminWebAuthnCredential
+        {
+            Id = ViegardId.New(),
+            UserId = userId,
+            CredentialId = [1, 2, 3, 4],
+            PublicKey = [5, 6, 7, 8],
+            SignCount = 12,
+            Aaguid = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            Transports = "[\"usb\"]",
+            Name = "primary key",
+            CreatedAt = now,
+            LastUsedAt = null,
+        };
+
+        Assert.True(await store.AddWebAuthnCredentialAsync(credential));
+        Assert.False(await store.AddWebAuthnCredentialAsync(credential with { Id = ViegardId.New(), UserId = ViegardId.New() }));
+
+        var listed = Assert.Single(await store.ListWebAuthnCredentialsAsync(userId));
+        Assert.Equal(credential.CredentialId, listed.CredentialId);
+        Assert.Equal(credential.PublicKey, listed.PublicKey);
+        Assert.Equal("primary key", listed.Name);
+
+        var found = await store.GetWebAuthnCredentialByCredentialIdAsync([1, 2, 3, 4]);
+        Assert.NotNull(found);
+        Assert.Equal(credential.Id, found.Id);
+
+        var usedAt = now.AddMinutes(5);
+        Assert.True(await store.UpdateWebAuthnCredentialUsageAsync(credential.Id, 13, usedAt));
+        found = await store.GetWebAuthnCredentialByCredentialIdAsync([1, 2, 3, 4]);
+        Assert.Equal(13, found!.SignCount);
+        Assert.Equal(usedAt.ToUniversalTime(), found.LastUsedAt);
+
+        Assert.False(await store.DeleteWebAuthnCredentialAsync(ViegardId.New(), credential.Id));
+        Assert.True(await store.DeleteWebAuthnCredentialAsync(userId, credential.Id));
+        Assert.Empty(await store.ListWebAuthnCredentialsAsync(userId));
+    }
+
+    [Fact]
     public async Task In_memory_sessions_support_expiry_revocation_and_activity_refresh()
     {
         var store = new InMemoryAdminSessionStore();
@@ -191,5 +234,29 @@ public sealed class AdminAuthTests
         Assert.True(configured.IsAllowed(IPAddress.Parse("198.51.100.10")));
         Assert.True(configured.IsAllowed(IPAddress.Parse("2001:db8:abcd::10")));
         Assert.False(configured.IsAllowed(IPAddress.Parse("203.0.113.10")));
+    }
+
+    [Fact]
+    public void Webauthn_base64url_round_trips_without_padding()
+    {
+        var bytes = new byte[] { 0, 1, 2, 250, 251, 252, 253, 254, 255 };
+        var encoded = WebAuthnBase64Url.Encode(bytes);
+
+        Assert.DoesNotContain("+", encoded, StringComparison.Ordinal);
+        Assert.DoesNotContain("/", encoded, StringComparison.Ordinal);
+        Assert.DoesNotContain("=", encoded, StringComparison.Ordinal);
+        Assert.True(WebAuthnBase64Url.TryDecode(encoded, out var decoded));
+        Assert.Equal(bytes, decoded);
+        Assert.False(WebAuthnBase64Url.TryDecode("abcde", out _));
+    }
+
+    [Fact]
+    public void Webauthn_sign_count_policy_rejects_regressions()
+    {
+        Assert.True(WebAuthnSignCountPolicy.IsAcceptable(10, 11));
+        Assert.True(WebAuthnSignCountPolicy.IsAcceptable(10, 10));
+        Assert.True(WebAuthnSignCountPolicy.IsAcceptable(0, 0));
+        Assert.False(WebAuthnSignCountPolicy.IsAcceptable(0, -1));
+        Assert.False(WebAuthnSignCountPolicy.IsAcceptable(10, 9));
     }
 }

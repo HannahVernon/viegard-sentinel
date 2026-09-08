@@ -413,6 +413,85 @@ public sealed class PostgresAdminUserStore(IDbContextFactory<ViegardDbContext> f
         return updated == 1;
     }
 
+    public async ValueTask<bool> AddWebAuthnCredentialAsync(
+        AdminWebAuthnCredential credential,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(credential);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        if (await db.AdminWebAuthnCredentials.AsNoTracking()
+            .AnyAsync(c => c.CredentialId.SequenceEqual(credential.CredentialId), cancellationToken)
+            .ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        db.AdminWebAuthnCredentials.Add(credential.ToRow());
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            return false;
+        }
+    }
+
+    public async ValueTask<IReadOnlyList<AdminWebAuthnCredential>> ListWebAuthnCredentialsAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.AdminWebAuthnCredentials.AsNoTracking()
+            .Where(c => c.UserId == userId)
+            .OrderBy(c => c.CreatedAt)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return rows.Select(r => r.ToDomain()).ToList();
+    }
+
+    public async ValueTask<AdminWebAuthnCredential?> GetWebAuthnCredentialByCredentialIdAsync(
+        byte[] credentialId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(credentialId);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await db.AdminWebAuthnCredentials.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.CredentialId.SequenceEqual(credentialId), cancellationToken)
+            .ConfigureAwait(false);
+        return row?.ToDomain();
+    }
+
+    public async ValueTask<bool> UpdateWebAuthnCredentialUsageAsync(
+        Guid id,
+        long signCount,
+        DateTimeOffset lastUsedAt,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var updated = await db.AdminWebAuthnCredentials
+            .Where(c => c.Id == id)
+            .ExecuteUpdateAsync(c => c
+                .SetProperty(r => r.SignCount, signCount)
+                .SetProperty(r => r.LastUsedAt, lastUsedAt.ToUniversalTime()), cancellationToken)
+            .ConfigureAwait(false);
+        return updated == 1;
+    }
+
+    public async ValueTask<bool> DeleteWebAuthnCredentialAsync(
+        Guid userId,
+        Guid credentialId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var deleted = await db.AdminWebAuthnCredentials
+            .Where(c => c.UserId == userId && c.Id == credentialId)
+            .ExecuteDeleteAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return deleted == 1;
+    }
+
     private static string NormalizeUsername(string username) =>
         username.Trim().ToLowerInvariant();
 }

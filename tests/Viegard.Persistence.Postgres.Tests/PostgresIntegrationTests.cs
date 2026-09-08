@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Viegard.Domain.Admin;
 using Viegard.Domain.Events;
+using Viegard.Domain;
 using Viegard.Persistence.Postgres.Queues;
 using Viegard.Persistence.Postgres.Stores;
 
@@ -199,6 +201,54 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal("syslog", restored.SourceType);
 
         Assert.Equal("raw-payload", await observationStore.GetPayloadAsync(observation.PayloadReference));
+    }
+
+    [PostgresFact]
+    public async Task Admin_webauthn_credentials_enforce_unique_credential_id_and_ownership()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresAdminUserStore(factory);
+        var now = DateTimeOffset.UtcNow;
+        var user = new AdminUser
+        {
+            Id = ViegardId.New(),
+            Username = $"webauthn-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordChangedAt = now,
+            FailedLoginCount = 0,
+            LockedUntil = null,
+            MustChangePassword = false,
+            TotpEnrolled = true,
+            CreatedAt = now,
+        };
+        await store.CreateAsync(user);
+
+        var credential = new AdminWebAuthnCredential
+        {
+            Id = ViegardId.New(),
+            UserId = user.Id,
+            CredentialId = [9, 8, 7, 6],
+            PublicKey = [1, 2, 3, 4],
+            SignCount = 1,
+            Aaguid = Guid.Parse("44444444-4444-4444-4444-444444444444"),
+            Transports = "[\"usb\"]",
+            Name = "postgres key",
+            CreatedAt = now,
+            LastUsedAt = null,
+        };
+
+        Assert.True(await store.AddWebAuthnCredentialAsync(credential));
+        Assert.False(await store.AddWebAuthnCredentialAsync(credential with { Id = ViegardId.New() }));
+
+        var listed = Assert.Single(await store.ListWebAuthnCredentialsAsync(user.Id));
+        Assert.Equal(credential.CredentialId, listed.CredentialId);
+
+        var found = await store.GetWebAuthnCredentialByCredentialIdAsync([9, 8, 7, 6]);
+        Assert.NotNull(found);
+        Assert.Equal(user.Id, found.UserId);
+
+        Assert.False(await store.DeleteWebAuthnCredentialAsync(ViegardId.New(), credential.Id));
+        Assert.True(await store.DeleteWebAuthnCredentialAsync(user.Id, credential.Id));
     }
 
     [PostgresFact]

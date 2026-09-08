@@ -57,7 +57,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 - [ ] **Operator email notification details**: sending SMTP server/account, sender/recipient addresses, TLS settings, and which events warrant email vs. push.
 - [ ] **How the phone reaches the admin GUI** (VPN such as WireGuard vs. exposure through SWAG; affects Web Push subscription and admin auth threat model).
 - [ ] **Syslog source trust weighting**: once many LAN hosts may send syslog (wide allowlist), forged log lines from any allowed host become an injection vector for fake incidents.  Harmless under dry-run; before Phase 7 automatic actions, consider per-source trust weighting or per-source evidence caps.
-- [x] **Admin API authentication model** - DECIDED (D-0032/D-0033, 2026-08-25): local accounts, server-side revocable sessions, mandatory TOTP now, WebAuthn later, recovery codes, step-up, fail-closed AllowedSources, and explicit loopback/direct/proxy exposure modes.
+- [x] **Admin API authentication model** - DECIDED (D-0032/D-0033, 2026-08-25): local accounts, server-side revocable sessions, mandatory TOTP and WebAuthn security keys, recovery codes, step-up, fail-closed AllowedSources, and explicit loopback/direct/proxy exposure modes.
 - [ ] **Device Bound Session Credentials tracking**: DBSC remains future work once browser support and the standard stabilize.  The Phase 8 session registry is the substrate a later DBSC binding can plug into.
 - [ ] **Retention periods** for raw events, normalized events, incidents, classifications, actions, audit records, and model prompts/responses.
 - [ ] **Observability/monitoring technology** if the choice materially affects deployment.
@@ -84,7 +84,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 - [ ] **Phase 7: Actions** - action providers, dry-run first; real actions only after explicit approval.
 - [ ] **Phase 8: Administration** - admin interface/API.
   - [x] **Increment 1: admin authentication foundation** - local bootstrap user, password change, first-party TOTP, recovery codes, cookie auth with server-side sessions, IP binding, AllowedSources, exposure/TLS guardrails, auth auditing, and auth-failure pipeline events.
-  - [ ] **Increment 2: WebAuthn/FIDO2** - evaluate `fido2-net-lib` with a supply-chain review before adding the dependency; add hardware-key enrollment and sign-in.
+  - [x] **Increment 2: WebAuthn/FIDO2** - DONE 2026-09-08: Fido2 4.0.1 and Fido2.Models 4.0.1 are pinned in AdminApi only, behind `IWebAuthnService`; hardware-key enrollment, sign-in, step-up, deletion, persistence, audit events, docs, and tests are implemented.
   - [ ] **Increment 3: ACME certificate automation** - compare LettuceEncrypt vs Certes with supply-chain review before adding a dependency; add HTTP-01 challenge handling and renewal.
 - [ ] **Phase 9: Hardening** - security, dependency, prompt-injection, authorization reviews; failure-mode, rollback, and load testing.
 

@@ -14,6 +14,10 @@ public enum AdminAuthEventKind
     StepUpSucceeded,
     PasswordChanged,
     TotpEnrolled,
+    WebAuthnEnrolled,
+    WebAuthnFailed,
+    WebAuthnRemoved,
+    WebAuthnCloneWarning,
 }
 
 /// <summary>Security event emitted by the admin authentication boundary.</summary>

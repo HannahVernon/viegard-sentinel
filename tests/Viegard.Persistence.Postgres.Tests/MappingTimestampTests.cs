@@ -1,3 +1,5 @@
+using Viegard.Domain;
+using Viegard.Domain.Admin;
 using Viegard.Domain.Events;
 using Viegard.Domain.Incidents;
 
@@ -72,5 +74,33 @@ public sealed class MappingTimestampTests
         Assert.Equal(TimeSpan.Zero, row.WindowEnd.Offset);
         Assert.Equal(incident.WindowStart, row.WindowStart);
         Assert.Equal(incident.WindowEnd, row.WindowEnd);
+    }
+
+    [Fact]
+    public void Webauthn_credential_round_trips_row_mapping()
+    {
+        var credential = new AdminWebAuthnCredential
+        {
+            Id = ViegardId.New(),
+            UserId = ViegardId.New(),
+            CredentialId = [1, 2, 3],
+            PublicKey = [4, 5, 6],
+            SignCount = 42,
+            Aaguid = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+            Transports = "[\"usb\"]",
+            Name = "desk key",
+            CreatedAt = Local,
+            LastUsedAt = Local.AddMinutes(1),
+        };
+
+        var row = credential.ToRow();
+        var restored = row.ToDomain();
+
+        Assert.Equal(TimeSpan.Zero, row.CreatedAt.Offset);
+        Assert.Equal(TimeSpan.Zero, row.LastUsedAt!.Value.Offset);
+        Assert.Equal(credential.CredentialId, restored.CredentialId);
+        Assert.Equal(credential.PublicKey, restored.PublicKey);
+        Assert.Equal(credential.SignCount, restored.SignCount);
+        Assert.Equal(credential.Name, restored.Name);
     }
 }

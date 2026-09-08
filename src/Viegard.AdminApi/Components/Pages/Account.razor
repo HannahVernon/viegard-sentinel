@@ -81,7 +81,7 @@
             }
             else
             {
-                <p>Verify TOTP before changing TOTP enrollment or recovery codes.</p>
+                <p>Verify TOTP or a security key before changing TOTP enrollment, security keys, or recovery codes.</p>
             }
             <form method="post" action="/auth/step-up">
                 <AntiforgeryToken />
@@ -91,6 +91,16 @@
                 </label>
                 <button type="submit">Verify</button>
             </form>
+            @if (_webAuthnCredentials.Count > 0)
+            {
+                <p id="account-webauthn-stepup-message" class="message error" hidden></p>
+                <form>
+                    <AntiforgeryToken />
+                    <button type="button" data-webauthn-assert data-webauthn-message="#account-webauthn-stepup-message">
+                        Verify with security key
+                    </button>
+                </form>
+            }
         </section>
 
         @if (!_user.TotpEnrolled || _stepUpFresh)
@@ -112,6 +122,61 @@
                 </form>
             </section>
         }
+
+        <section>
+            <h2>Security keys</h2>
+            @if (_webAuthnCredentials.Count == 0)
+            {
+                <p>No security keys are enrolled.</p>
+            }
+            else
+            {
+                <ul class="security-keys">
+                    @foreach (var credential in _webAuthnCredentials)
+                    {
+                        <li>
+                            <strong>@credential.Name</strong>
+                            <span>Created @credential.CreatedAt.UtcDateTime.ToString("u")</span>
+                            <span>
+                                Last used @(credential.LastUsedAt is null
+                                    ? "never"
+                                    : credential.LastUsedAt.Value.UtcDateTime.ToString("u"))
+                            </span>
+                            @if (_stepUpFresh)
+                            {
+                                <form method="post" action="/auth/webauthn/delete">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="credentialId" value="@credential.Id" />
+                                    <button type="submit">Remove</button>
+                                </form>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+
+            @if (_stepUpFresh)
+            {
+                <p id="account-webauthn-register-message" class="message error" hidden></p>
+                <form>
+                    <AntiforgeryToken />
+                    <label>
+                        Security-key label
+                        <input id="webauthn-name" name="name" autocomplete="off" maxlength="80" />
+                    </label>
+                    <button type="button"
+                            data-webauthn-register
+                            data-webauthn-name="#webauthn-name"
+                            data-webauthn-message="#account-webauthn-register-message">
+                        Enroll security key
+                    </button>
+                </form>
+            }
+            else
+            {
+                <p>Step-up verification is required before enrolling or removing security keys.</p>
+            }
+        </section>
 
         <section>
             <h2>Recovery codes</h2>
@@ -165,6 +230,7 @@
     private AdminUser? _user;
     private AdminSession? _currentSession;
     private IReadOnlyList<AdminSession> _sessions = [];
+    private IReadOnlyList<AdminWebAuthnCredential> _webAuthnCredentials = [];
     private IReadOnlyList<string> _newRecoveryCodes = [];
     private string _setupSecret = string.Empty;
     private string _otpUri = string.Empty;
@@ -197,6 +263,7 @@
         }
 
         _sessions = await Sessions.ListForUserAsync(userId, context.RequestAborted).ConfigureAwait(false);
+        _webAuthnCredentials = await Users.ListWebAuthnCredentialsAsync(userId, context.RequestAborted).ConfigureAwait(false);
         var sessionIdClaim = context.User.FindFirstValue(AdminCookieNames.SessionIdClaim);
         if (Guid.TryParse(sessionIdClaim, out var sessionId))
         {

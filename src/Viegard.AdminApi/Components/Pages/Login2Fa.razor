@@ -76,6 +76,24 @@
             </label>
             <button type="submit">Use recovery code</button>
         </form>
+
+        <section>
+            <h2>Security key</h2>
+            <p id="login-webauthn-message" class="message error" hidden></p>
+            @if (_hasWebAuthnCredentials)
+            {
+                <form>
+                    <AntiforgeryToken />
+                    <button type="button" data-webauthn-assert data-webauthn-message="#login-webauthn-message">
+                        Use security key
+                    </button>
+                </form>
+            }
+            else
+            {
+                <p>No security keys are enrolled for this account.</p>
+            }
+        </section>
     }
 </main>
 
@@ -83,6 +101,7 @@
     private AdminUser? _user;
     private string _setupSecret = string.Empty;
     private string _otpUri = string.Empty;
+    private bool _hasWebAuthnCredentials;
 
     [SupplyParameterFromQuery(Name = "error")]
     public string? Error { get; set; }
@@ -103,6 +122,12 @@
         {
             _setupSecret = Totp.GenerateSecret();
             _otpUri = Totp.BuildOtpAuthUri(_user.Username, _setupSecret);
+        }
+
+        if (_user is { TotpEnrolled: true })
+        {
+            var credentials = await Users.ListWebAuthnCredentialsAsync(_user.Id, context.RequestAborted).ConfigureAwait(false);
+            _hasWebAuthnCredentials = credentials.Count > 0;
         }
     }
 }

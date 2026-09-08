@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Viegard.Application.Audit;
+using Viegard.Application.Auth;
 using Viegard.Application.Stores;
 using Viegard.Domain.Actions;
 using Viegard.Domain.Admin;
@@ -155,6 +156,8 @@ public sealed class InMemoryAdminUserStore : IAdminUserStore
     private readonly ConcurrentDictionary<Guid, AdminUser> _users = new();
     private readonly ConcurrentDictionary<Guid, AdminTotpSecret> _totpSecrets = new();
     private readonly ConcurrentDictionary<Guid, AdminRecoveryCode> _recoveryCodes = new();
+    private readonly ConcurrentDictionary<Guid, AdminWebAuthnCredential> _webAuthnCredentials = new();
+    private readonly ConcurrentDictionary<string, Guid> _webAuthnCredentialIds = new();
 
     public ValueTask<bool> AnyUsersAsync(CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(!_users.IsEmpty);
@@ -265,8 +268,102 @@ public sealed class InMemoryAdminUserStore : IAdminUserStore
         }
     }
 
+    public ValueTask<bool> AddWebAuthnCredentialAsync(
+        AdminWebAuthnCredential credential,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(credential);
+        var key = ToCredentialKey(credential.CredentialId);
+        lock (_sync)
+        {
+            if (_webAuthnCredentialIds.ContainsKey(key))
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            _webAuthnCredentials[credential.Id] = Clone(credential);
+            _webAuthnCredentialIds[key] = credential.Id;
+            return ValueTask.FromResult(true);
+        }
+    }
+
+    public ValueTask<IReadOnlyList<AdminWebAuthnCredential>> ListWebAuthnCredentialsAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult<IReadOnlyList<AdminWebAuthnCredential>>(
+            _webAuthnCredentials.Values
+                .Where(c => c.UserId == userId)
+                .OrderBy(c => c.CreatedAt)
+                .Select(Clone)
+                .ToList());
+
+    public ValueTask<AdminWebAuthnCredential?> GetWebAuthnCredentialByCredentialIdAsync(
+        byte[] credentialId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(credentialId);
+        var key = ToCredentialKey(credentialId);
+        if (!_webAuthnCredentialIds.TryGetValue(key, out var id)
+            || !_webAuthnCredentials.TryGetValue(id, out var credential))
+        {
+            return ValueTask.FromResult<AdminWebAuthnCredential?>(null);
+        }
+
+        return ValueTask.FromResult<AdminWebAuthnCredential?>(Clone(credential));
+    }
+
+    public ValueTask<bool> UpdateWebAuthnCredentialUsageAsync(
+        Guid id,
+        long signCount,
+        DateTimeOffset lastUsedAt,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (!_webAuthnCredentials.TryGetValue(id, out var credential))
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            _webAuthnCredentials[id] = credential with
+            {
+                SignCount = signCount,
+                LastUsedAt = lastUsedAt.ToUniversalTime(),
+            };
+            return ValueTask.FromResult(true);
+        }
+    }
+
+    public ValueTask<bool> DeleteWebAuthnCredentialAsync(
+        Guid userId,
+        Guid credentialId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (!_webAuthnCredentials.TryGetValue(credentialId, out var credential)
+                || credential.UserId != userId)
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            _webAuthnCredentials.TryRemove(credentialId, out _);
+            _webAuthnCredentialIds.TryRemove(ToCredentialKey(credential.CredentialId), out _);
+            return ValueTask.FromResult(true);
+        }
+    }
+
     private static string NormalizeUsername(string username) =>
         username.Trim().ToLowerInvariant();
+
+    private static string ToCredentialKey(byte[] credentialId) =>
+        WebAuthnBase64Url.Encode(credentialId);
+
+    private static AdminWebAuthnCredential Clone(AdminWebAuthnCredential credential) => credential with
+    {
+        CredentialId = credential.CredentialId.ToArray(),
+        PublicKey = credential.PublicKey.ToArray(),
+    };
 }
 
 public sealed class InMemoryAdminSessionStore : IAdminSessionStore

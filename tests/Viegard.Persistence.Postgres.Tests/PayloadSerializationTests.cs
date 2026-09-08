@@ -111,17 +111,20 @@ public sealed class PayloadSerializationTests
     [Fact]
     public void Admin_auth_payload_round_trips()
     {
-        var payload = new AdminAuthEvent
+        foreach (var kind in Enum.GetValues<AdminAuthEventKind>())
         {
-            Kind = AdminAuthEventKind.LoginFailed,
-            Username = "admin",
-            RemoteAddress = "198.51.100.10",
-            UserAgent = "test-agent",
-            OccurredAt = DateTimeOffset.Parse("2026-08-25T20:22:57Z"),
-        };
+            var payload = new AdminAuthEvent
+            {
+                Kind = kind,
+                Username = "admin",
+                RemoteAddress = "198.51.100.10",
+                UserAgent = "test-agent",
+                OccurredAt = DateTimeOffset.Parse("2026-08-25T20:22:57Z"),
+            };
 
-        var restored = Assert.IsType<AdminAuthEvent>(RoundTrip(payload));
-        Assert.Equal(payload, restored);
+            var restored = Assert.IsType<AdminAuthEvent>(RoundTrip(payload));
+            Assert.Equal(payload, restored);
+        }
     }
 
     [Fact]

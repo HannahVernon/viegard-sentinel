@@ -150,6 +150,10 @@ services:
       # Viegard__Admin__Auth__IdleTimeout: "48:00:00"
       # Viegard__Admin__Auth__IpBindingMode: strict
       # Viegard__Admin__Auth__StepUpValidity: "00:05:00"
+      # WebAuthn security-key settings.  Required for direct/proxy exposure
+      # before enrolling keys; changing the RP ID invalidates enrolled keys.
+      # Viegard__Admin__WebAuthn__RelyingPartyId: viegard.example.com
+      # Viegard__Admin__WebAuthn__Origins__0: https://viegard.example.com
     volumes:
       - ./secrets:/run/viegard/secrets:ro
       # Direct mode PEM certificate example:

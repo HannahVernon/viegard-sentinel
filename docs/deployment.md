@@ -96,7 +96,7 @@ Sources ship disabled; enable them deliberately, one at a time.
 
 ## Admin interface exposure and authentication
 
-The admin interface uses local accounts, cookie authentication, server-side revocable sessions, mandatory TOTP, and recovery codes.  WebAuthn hardware-key support is planned for the next increment and will require HTTPS because browsers require a secure context.
+The admin interface uses local accounts, cookie authentication, server-side revocable sessions, mandatory TOTP, optional WebAuthn security keys, and recovery codes.  WebAuthn requires HTTPS in browsers except for localhost development.
 
 ### Bootstrap flow
 
@@ -111,6 +111,23 @@ chmod 400 secrets/viegard-admin-bootstrap-password
 When no `admin_users` rows exist, the admin service creates `Viegard__Admin__Bootstrap__Username` (default `admin`) from that secret.  The first login forces a password change, then TOTP enrollment with a manual base32 secret and otpauth URI.  Recovery codes are shown once after enrollment or regeneration.  Store them outside Viegard.
 
 If the bootstrap secret is missing and no users exist, the host stays up but the UI remains locked.  Add the secret and restart the admin service.
+
+### WebAuthn security keys
+
+WebAuthn is configured under `Viegard__Admin__WebAuthn__*`.  In loopback development, Viegard defaults to relying party ID `localhost` and origin `http://localhost:8080`.  In `direct` or `proxy` exposure, set both values explicitly before enrolling keys:
+
+```yaml
+Viegard__Admin__WebAuthn__RelyingPartyId: viegard.example.com
+Viegard__Admin__WebAuthn__Origins__0: https://viegard.example.com
+```
+
+The relying party ID must be the public host name that browsers see, not a URL.  The origin must exactly match the browser origin, including scheme and non-default port if one is used.  Changing the relying party ID invalidates all enrolled keys because browsers scope credentials to that ID.
+
+Enrollment is available from **Account -> Security keys** after a fresh step-up verification.  Give the key an operator label, press **Enroll security key**, and follow the browser prompt.  Sign-in and step-up can then use **Use security key** when the account has at least one enrolled credential.
+
+Viegard requests WebAuthn attestation conveyance `none`.  In this self-hosted model, the operator enrolls their own keys, and collecting attestation metadata would add device-identifying data without changing the trust decision.
+
+Browsers require WebAuthn on a secure context.  Use HTTPS for real deployments, including VPN-only deployments; localhost is the only HTTP exception.
 
 ### Exposure modes
 

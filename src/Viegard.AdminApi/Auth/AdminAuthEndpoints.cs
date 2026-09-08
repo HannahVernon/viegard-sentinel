@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -16,6 +17,7 @@ namespace Viegard.AdminApi.Auth;
 public static class AdminAuthEndpoints
 {
     private const string UniformFailure = "Invalid username, password, or second factor.";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static void MapAdminAuthEndpoints(this WebApplication app)
     {
@@ -41,6 +43,21 @@ public static class AdminAuthEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/auth/recovery-codes/regenerate", RegenerateRecoveryCodesAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/auth/webauthn/register/options", BeginWebAuthnRegistrationAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/auth/webauthn/register", CompleteWebAuthnRegistrationAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/auth/webauthn/assert/options", BeginWebAuthnAssertionAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting("auth");
+        app.MapPost("/auth/webauthn/assert", CompleteWebAuthnAssertionAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting("auth");
+        app.MapPost("/auth/webauthn/delete", DeleteWebAuthnCredentialAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
     }
@@ -234,22 +251,16 @@ public static class AdminAuthEndpoints
             return Redirect("/login/2fa", error: UniformFailure);
         }
 
-        if (user.FailedLoginCount > 0)
-        {
-            user = user with { FailedLoginCount = 0, LockedUntil = null };
-            await users.UpdateAsync(user, context.RequestAborted).ConfigureAwait(false);
-        }
-
-        if (usedRecoveryCode)
-        {
-            await auditor.RecordAsync(AdminAuthEventKind.RecoveryCodeUsed, user.Username, context, cancellationToken: context.RequestAborted)
-                .ConfigureAwait(false);
-        }
-
-        await SignInAsync(context, sessions, pendingCookie, user, options.Value).ConfigureAwait(false);
-        await auditor.RecordAsync(AdminAuthEventKind.LoginSucceeded, user.Username, context, cancellationToken: context.RequestAborted)
-            .ConfigureAwait(false);
-        return Results.Redirect("/account");
+        return await CompleteSuccessfulPendingSecondFactorAsync(
+            context,
+            users,
+            sessions,
+            pendingCookie,
+            user,
+            options.Value,
+            auditor,
+            usedRecoveryCode,
+            "/account").ConfigureAwait(false);
     }
 
     private static async Task<IResult> ChangePendingPasswordCoreAsync(
@@ -443,6 +454,329 @@ public static class AdminAuthEndpoints
         return Redirect("/account", status: "Recovery codes regenerated.");
     }
 
+    private static async Task<IResult> BeginWebAuthnRegistrationAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        IWebAuthnService webAuthn,
+        WebAuthnStateCookie stateCookie,
+        AdminAuthAuditor auditor)
+    {
+        await ValidateAntiforgeryAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!await HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await auditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return JsonError("Step-up verification is required before enrolling a security key.", StatusCodes.Status403Forbidden);
+        }
+
+        try
+        {
+            var existingCredentials = await users.ListWebAuthnCredentialsAsync(user.Id, context.RequestAborted).ConfigureAwait(false);
+            var result = await webAuthn.BeginRegistrationAsync(
+                user,
+                existingCredentials.Select(c => c.CredentialId).ToList(),
+                context.RequestAborted).ConfigureAwait(false);
+            stateCookie.WriteRegistration(context, result.ServerState);
+            return Results.Content(result.OptionsJson, "application/json");
+        }
+        catch (WebAuthnConfigurationException ex)
+        {
+            return JsonError(ex.Message, StatusCodes.Status400BadRequest);
+        }
+    }
+
+    private static async Task<IResult> CompleteWebAuthnRegistrationAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        IWebAuthnService webAuthn,
+        WebAuthnStateCookie stateCookie,
+        AdminAuthAuditor auditor)
+    {
+        await ValidateAntiforgeryAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        if (!await HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await auditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return JsonError("Step-up verification is required before enrolling a security key.", StatusCodes.Status403Forbidden);
+        }
+
+        if (!stateCookie.TryReadRegistration(context, out var serverState))
+        {
+            return JsonError("Security-key enrollment expired.  Start enrollment again.", StatusCodes.Status400BadRequest);
+        }
+
+        stateCookie.ClearRegistration(context);
+        WebAuthnRegistrationCompleteRequest? request;
+        try
+        {
+            request = await JsonSerializer.DeserializeAsync<WebAuthnRegistrationCompleteRequest>(
+                context.Request.Body,
+                JsonOptions,
+                context.RequestAborted).ConfigureAwait(false);
+        }
+        catch (JsonException)
+        {
+            return JsonError("Invalid security-key enrollment response.", StatusCodes.Status400BadRequest);
+        }
+
+        if (request?.Response is null)
+        {
+            return JsonError("Invalid security-key enrollment response.", StatusCodes.Status400BadRequest);
+        }
+
+        var result = await webAuthn.CompleteRegistrationAsync(
+            serverState,
+            request.Response.Value.GetRawText(),
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded || result.Credential is null)
+        {
+            return JsonError(UniformFailure, StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var added = await users.AddWebAuthnCredentialAsync(new AdminWebAuthnCredential
+        {
+            Id = ViegardId.New(),
+            UserId = user.Id,
+            CredentialId = result.Credential.CredentialId,
+            PublicKey = result.Credential.PublicKey,
+            SignCount = result.Credential.SignCount,
+            Aaguid = result.Credential.Aaguid,
+            Transports = result.Credential.Transports,
+            Name = NormalizeCredentialName(request.Name),
+            CreatedAt = now,
+            LastUsedAt = null,
+        }, context.RequestAborted).ConfigureAwait(false);
+        if (!added)
+        {
+            return JsonError("This security key is already enrolled.", StatusCodes.Status409Conflict);
+        }
+
+        await auditor.RecordAsync(AdminAuthEventKind.WebAuthnEnrolled, user.Username, context, cancellationToken: context.RequestAborted)
+            .ConfigureAwait(false);
+        return JsonRedirect(BuildRedirectPath("/account", status: "Security key enrolled."));
+    }
+
+    private static async Task<IResult> BeginWebAuthnAssertionAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IAdminUserStore users,
+        IWebAuthnService webAuthn,
+        WebAuthnStateCookie stateCookie,
+        PendingTwoFactorCookie pendingCookie)
+    {
+        await ValidateAntiforgeryAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await TryResolveWebAuthnUserAsync(context, users, pendingCookie).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var credentials = await users.ListWebAuthnCredentialsAsync(user.Id, context.RequestAborted).ConfigureAwait(false);
+        if (credentials.Count == 0)
+        {
+            return Results.NoContent();
+        }
+
+        try
+        {
+            var result = await webAuthn.BeginAssertionAsync(
+                credentials.Select(c => c.CredentialId).ToList(),
+                context.RequestAborted).ConfigureAwait(false);
+            stateCookie.WriteAssertion(context, result.ServerState);
+            return Results.Content(result.OptionsJson, "application/json");
+        }
+        catch (WebAuthnConfigurationException)
+        {
+            return JsonError(UniformFailure, StatusCodes.Status400BadRequest);
+        }
+    }
+
+    private static async Task<IResult> CompleteWebAuthnAssertionAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        PendingTwoFactorCookie pendingCookie,
+        IWebAuthnService webAuthn,
+        WebAuthnStateCookie stateCookie,
+        IOptions<AdminAuthOptions> options,
+        AdminAuthAuditor auditor)
+    {
+        await ValidateAntiforgeryAsync(context, antiforgery).ConfigureAwait(false);
+        var pendingFlow = pendingCookie.TryRead(context, out _);
+        var assertionUser = await TryResolveWebAuthnUserAsync(context, users, pendingCookie).ConfigureAwait(false);
+        if (assertionUser is null)
+        {
+            return JsonRedirect(BuildRedirectPath("/login", error: UniformFailure), StatusCodes.Status401Unauthorized);
+        }
+
+        if (assertionUser.LockedUntil is not null && assertionUser.LockedUntil > DateTimeOffset.UtcNow)
+        {
+            pendingCookie.Clear(context);
+            await auditor.RecordAsync(
+                AdminAuthEventKind.LoginFailed,
+                assertionUser.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return JsonRedirect(BuildRedirectPath("/login", error: UniformFailure), StatusCodes.Status400BadRequest);
+        }
+
+        if (!stateCookie.TryReadAssertion(context, out var serverState))
+        {
+            await RecordWebAuthnFailureAsync(context, users, auditor, assertionUser).ConfigureAwait(false);
+            return JsonRedirect(WebAuthnFailureRedirect(pendingFlow), StatusCodes.Status400BadRequest);
+        }
+
+        stateCookie.ClearAssertion(context);
+        JsonDocument parsedDocument;
+        try
+        {
+            parsedDocument = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted)
+                .ConfigureAwait(false);
+        }
+        catch (JsonException)
+        {
+            await RecordWebAuthnFailureAsync(context, users, auditor, assertionUser).ConfigureAwait(false);
+            return JsonRedirect(WebAuthnFailureRedirect(pendingFlow), StatusCodes.Status400BadRequest);
+        }
+
+        using var document = parsedDocument;
+        if (!TryReadRawCredentialId(document.RootElement, out var rawCredentialId))
+        {
+            await RecordWebAuthnFailureAsync(context, users, auditor, assertionUser).ConfigureAwait(false);
+            return JsonRedirect(WebAuthnFailureRedirect(pendingFlow), StatusCodes.Status400BadRequest);
+        }
+
+        var credential = await users.GetWebAuthnCredentialByCredentialIdAsync(rawCredentialId, context.RequestAborted)
+            .ConfigureAwait(false);
+        if (credential is null || credential.UserId != assertionUser.Id)
+        {
+            await RecordWebAuthnFailureAsync(context, users, auditor, assertionUser).ConfigureAwait(false);
+            return JsonRedirect(WebAuthnFailureRedirect(pendingFlow), StatusCodes.Status400BadRequest);
+        }
+
+        var result = await webAuthn.CompleteAssertionAsync(
+            serverState,
+            document.RootElement.GetRawText(),
+            new WebAuthnStoredCredential(
+                credential.UserId,
+                credential.CredentialId,
+                credential.PublicKey,
+                credential.SignCount),
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded || result.NewSignCount is null)
+        {
+            await RecordWebAuthnFailureAsync(context, users, auditor, assertionUser).ConfigureAwait(false);
+            if (result.CloneWarning)
+            {
+                await auditor.RecordAsync(
+                    AdminAuthEventKind.WebAuthnCloneWarning,
+                    assertionUser.Username,
+                    context,
+                    enqueueForCorrelation: true,
+                    cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            }
+
+            return JsonRedirect(WebAuthnFailureRedirect(pendingFlow), StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        await users.UpdateWebAuthnCredentialUsageAsync(credential.Id, result.NewSignCount.Value, now, context.RequestAborted)
+            .ConfigureAwait(false);
+
+        if (pendingFlow)
+        {
+            await CompleteSuccessfulPendingSecondFactorAsync(
+                context,
+                users,
+                sessions,
+                pendingCookie,
+                assertionUser,
+                options.Value,
+                auditor,
+                usedRecoveryCode: false,
+                redirectPath: "/account").ConfigureAwait(false);
+            return JsonRedirect("/account");
+        }
+
+        if (!TryGetCurrentSessionId(context.User, out var sessionId))
+        {
+            return JsonRedirect(BuildRedirectPath("/login", error: UniformFailure), StatusCodes.Status401Unauthorized);
+        }
+
+        await sessions.StampStepUpAsync(sessionId, now, context.RequestAborted).ConfigureAwait(false);
+        await auditor.RecordAsync(AdminAuthEventKind.StepUpSucceeded, assertionUser.Username, context, cancellationToken: context.RequestAborted)
+            .ConfigureAwait(false);
+        return JsonRedirect(BuildRedirectPath("/account", status: "Step-up verification complete."));
+    }
+
+    private static async Task<IResult> DeleteWebAuthnCredentialAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor auditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await auditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect("/account", error: "Step-up verification is required before removing a security key.");
+        }
+
+        if (!Guid.TryParse(form["credentialId"].ToString(), out var credentialId))
+        {
+            return Redirect("/account", error: "Security key not found.");
+        }
+
+        var deleted = await users.DeleteWebAuthnCredentialAsync(user.Id, credentialId, context.RequestAborted).ConfigureAwait(false);
+        if (!deleted)
+        {
+            return Redirect("/account", error: "Security key not found.");
+        }
+
+        await auditor.RecordAsync(AdminAuthEventKind.WebAuthnRemoved, user.Username, context, cancellationToken: context.RequestAborted)
+            .ConfigureAwait(false);
+        return Redirect("/account", status: "Security key removed.");
+    }
+
     private static async Task<IResult> StepUpAsync(
         HttpContext context,
         IAntiforgery antiforgery,
@@ -524,6 +858,110 @@ public static class AdminAuthEndpoints
         return all ? Results.Redirect("/login?status=Signed%20out%20everywhere.") : Redirect("/account", status: "Session revoked.");
     }
 
+    private static async Task<IResult> CompleteSuccessfulPendingSecondFactorAsync(
+        HttpContext context,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        PendingTwoFactorCookie pendingCookie,
+        AdminUser user,
+        AdminAuthOptions options,
+        AdminAuthAuditor auditor,
+        bool usedRecoveryCode,
+        string redirectPath)
+    {
+        if (user.FailedLoginCount > 0 || user.LockedUntil is not null)
+        {
+            user = user with { FailedLoginCount = 0, LockedUntil = null };
+            await users.UpdateAsync(user, context.RequestAborted).ConfigureAwait(false);
+        }
+
+        if (usedRecoveryCode)
+        {
+            await auditor.RecordAsync(AdminAuthEventKind.RecoveryCodeUsed, user.Username, context, cancellationToken: context.RequestAborted)
+                .ConfigureAwait(false);
+        }
+
+        await SignInAsync(context, sessions, pendingCookie, user, options).ConfigureAwait(false);
+        await auditor.RecordAsync(AdminAuthEventKind.LoginSucceeded, user.Username, context, cancellationToken: context.RequestAborted)
+            .ConfigureAwait(false);
+        return Results.Redirect(redirectPath);
+    }
+
+    private static async Task RecordWebAuthnFailureAsync(
+        HttpContext context,
+        IAdminUserStore users,
+        AdminAuthAuditor auditor,
+        AdminUser user)
+    {
+        var failedCount = user.FailedLoginCount + 1;
+        var lockedUntil = failedCount >= 10
+            ? DateTimeOffset.UtcNow.AddMinutes(Math.Min(60, Math.Pow(2, failedCount - 10)))
+            : (DateTimeOffset?)null;
+        await users.UpdateAsync(user with
+        {
+            FailedLoginCount = failedCount,
+            LockedUntil = lockedUntil,
+        }, context.RequestAborted).ConfigureAwait(false);
+
+        await auditor.RecordAsync(
+            AdminAuthEventKind.WebAuthnFailed,
+            user.Username,
+            context,
+            enqueueForCorrelation: true,
+            cancellationToken: context.RequestAborted).ConfigureAwait(false);
+        if (lockedUntil is not null)
+        {
+            await auditor.RecordAsync(
+                AdminAuthEventKind.LockoutTriggered,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+        }
+    }
+
+    private static async ValueTask<AdminUser?> TryResolveWebAuthnUserAsync(
+        HttpContext context,
+        IAdminUserStore users,
+        PendingTwoFactorCookie pendingCookie)
+    {
+        if (pendingCookie.TryRead(context, out var pendingUserId))
+        {
+            return await users.GetByIdAsync(pendingUserId, context.RequestAborted).ConfigureAwait(false);
+        }
+
+        return await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+    }
+
+    private static bool TryReadRawCredentialId(JsonElement root, out byte[] credentialId)
+    {
+        credentialId = [];
+        if (!root.TryGetProperty("rawId", out var rawIdProperty)
+            || rawIdProperty.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        return WebAuthnBase64Url.TryDecode(rawIdProperty.GetString(), out credentialId);
+    }
+
+    private static string NormalizeCredentialName(string? name)
+    {
+        var normalized = string.IsNullOrWhiteSpace(name) ? "Security key" : name.Trim();
+        return normalized.Length <= 80 ? normalized : normalized[..80];
+    }
+
+    private static IResult JsonRedirect(string redirect, int statusCode = StatusCodes.Status200OK) =>
+        Results.Json(new { redirect }, JsonOptions, statusCode: statusCode);
+
+    private static IResult JsonError(string error, int statusCode) =>
+        Results.Json(new { error }, JsonOptions, statusCode: statusCode);
+
+    private static string WebAuthnFailureRedirect(bool pendingFlow) =>
+        pendingFlow
+            ? BuildRedirectPath("/login/2fa", error: UniformFailure)
+            : BuildRedirectPath("/account", error: UniformFailure);
+
     private static async Task SignInAsync(
         HttpContext context,
         IAdminSessionStore sessions,
@@ -575,6 +1013,9 @@ public static class AdminAuthEndpoints
         return await context.Request.ReadFormAsync(context.RequestAborted).ConfigureAwait(false);
     }
 
+    private static async Task ValidateAntiforgeryAsync(HttpContext context, IAntiforgery antiforgery) =>
+        await antiforgery.ValidateRequestAsync(context).ConfigureAwait(false);
+
     private static async ValueTask<AdminUser?> GetCurrentUserAsync(HttpContext context, IAdminUserStore users)
     {
         if (!TryGetCurrentUserId(context.User, out var userId))
@@ -608,13 +1049,18 @@ public static class AdminAuthEndpoints
         return session.StepUpAt.Value.Add(options.StepUpValidity) >= DateTimeOffset.UtcNow;
     }
 
-    private static IResult Redirect(string path, string? status = null, string? error = null)
+    private static IResult Redirect(string path, string? status = null, string? error = null) =>
+        Results.Redirect(BuildRedirectPath(path, status, error));
+
+    private static string BuildRedirectPath(string path, string? status = null, string? error = null)
     {
         var query = status is not null
             ? $"status={Uri.EscapeDataString(status)}"
             : error is not null
                 ? $"error={Uri.EscapeDataString(error)}"
                 : string.Empty;
-        return Results.Redirect(string.IsNullOrEmpty(query) ? path : $"{path}?{query}");
+        return string.IsNullOrEmpty(query) ? path : $"{path}?{query}";
     }
+
+    private sealed record WebAuthnRegistrationCompleteRequest(string? Name, JsonElement? Response);
 }

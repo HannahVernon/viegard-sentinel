@@ -319,6 +319,29 @@ public sealed class AdminRecoveryCodeRow
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public sealed class AdminWebAuthnCredentialRow
+{
+    public Guid Id { get; set; }
+
+    public Guid UserId { get; set; }
+
+    public byte[] CredentialId { get; set; } = [];
+
+    public byte[] PublicKey { get; set; } = [];
+
+    public long SignCount { get; set; }
+
+    public Guid Aaguid { get; set; }
+
+    public string? Transports { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset? LastUsedAt { get; set; }
+}
+
 public sealed class AdminSessionRow
 {
     public Guid Id { get; set; }

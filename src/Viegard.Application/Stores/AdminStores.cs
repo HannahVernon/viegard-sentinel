@@ -26,6 +26,29 @@ public interface IAdminUserStore
     ValueTask ReplaceRecoveryCodesAsync(Guid userId, IReadOnlyList<AdminRecoveryCode> codes, CancellationToken cancellationToken = default);
 
     ValueTask<bool> TryMarkRecoveryCodeUsedAsync(Guid codeId, DateTimeOffset usedAt, CancellationToken cancellationToken = default);
+
+    ValueTask<bool> AddWebAuthnCredentialAsync(
+        AdminWebAuthnCredential credential,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<IReadOnlyList<AdminWebAuthnCredential>> ListWebAuthnCredentialsAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<AdminWebAuthnCredential?> GetWebAuthnCredentialByCredentialIdAsync(
+        byte[] credentialId,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<bool> UpdateWebAuthnCredentialUsageAsync(
+        Guid id,
+        long signCount,
+        DateTimeOffset lastUsedAt,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<bool> DeleteWebAuthnCredentialAsync(
+        Guid userId,
+        Guid credentialId,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence port for revocable server-side admin sessions.</summary>

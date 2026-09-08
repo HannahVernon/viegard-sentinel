@@ -51,6 +51,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<AdminRecoveryCodeRow> AdminRecoveryCodes => Set<AdminRecoveryCodeRow>();
 
+    public DbSet<AdminWebAuthnCredentialRow> AdminWebAuthnCredentials => Set<AdminWebAuthnCredentialRow>();
+
     public DbSet<AdminSessionRow> AdminSessions => Set<AdminSessionRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -217,6 +219,17 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.UserId);
             entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AdminWebAuthnCredentialRow>(entity =>
+        {
+            entity.ToTable("admin_webauthn_credentials");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.CredentialId).IsUnique();
+            entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.Property(e => e.CredentialId).HasColumnType("bytea");
+            entity.Property(e => e.PublicKey).HasColumnType("bytea");
         });
 
         modelBuilder.Entity<AdminSessionRow>(entity =>

@@ -101,15 +101,18 @@ section {
 }
 
 .recovery-codes,
-.sessions {
+.sessions,
+.security-keys {
     padding-left: 1.25rem;
 }
 
-.sessions li {
+.sessions li,
+.security-keys li {
     margin-bottom: 1rem;
 }
 
-.sessions span {
+.sessions span,
+.security-keys span {
     display: block;
 }
 

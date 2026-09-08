@@ -85,8 +85,17 @@ builder.Services.AddSingleton<RecoveryCodeService>();
 builder.Services.AddSingleton<AdminPasswordService>();
 builder.Services.AddSingleton<PendingTwoFactorCookie>();
 builder.Services.AddSingleton<RecoveryCodesCookie>();
+builder.Services.AddSingleton<WebAuthnStateCookie>();
+builder.Services.AddSingleton<WebAuthnConfigurationProvider>();
+builder.Services.AddSingleton<IWebAuthnService, Fido2WebAuthnService>();
 builder.Services.AddSingleton<AdminAuthAuditor>();
 builder.Services.AddScoped<AdminCookieAuthenticationEvents>();
+
+builder.Services
+    .AddOptions<AdminWebAuthnOptions>()
+    .Bind(builder.Configuration.GetSection(AdminWebAuthnOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<AdminWebAuthnOptions>, AdminWebAuthnOptionsValidator>();
 
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -208,9 +217,8 @@ if (exposureMode == AdminExposureModes.Proxy)
 
 app.Use(async (context, next) =>
 {
-    // No client-side script ships at all (static SSR, plain form posts),
-    // so script-src needs no inline allowance.  The template stylesheet
-    // still uses inline styles and data: images.
+    // WebAuthn uses a small first-party external script only; no inline
+    // script or unsafe-inline allowance is needed.
     context.Response.Headers["Content-Security-Policy"] =
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
@@ -266,6 +274,7 @@ app.Use(async (context, next) =>
         && !path.StartsWithSegments("/login")
         && !path.StartsWithSegments("/healthz")
         && !path.StartsWithSegments("/_framework")
+        && !path.StartsWithSegments("/js")
         && !path.StartsWithSegments("/app.css")
         && !path.StartsWithSegments("/Viegard.AdminApi.styles.css"))
     {
@@ -305,7 +314,10 @@ static bool IsAnonymousAllowedPath(PathString path) =>
     || path.StartsWithSegments("/healthz")
     || path.StartsWithSegments("/_framework")
     || path.StartsWithSegments("/_content")
+    || path.StartsWithSegments("/js")
     || path.StartsWithSegments("/app.css")
     || path.StartsWithSegments("/Viegard.AdminApi.styles.css")
     || path.Equals("/auth/login", StringComparison.OrdinalIgnoreCase)
-    || path.Equals("/auth/totp", StringComparison.OrdinalIgnoreCase);
+    || path.Equals("/auth/totp", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/auth/webauthn/assert/options", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/auth/webauthn/assert", StringComparison.OrdinalIgnoreCase);

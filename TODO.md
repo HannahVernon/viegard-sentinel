@@ -82,10 +82,10 @@ When Hannah answers a question, remove or update the item here and record the ou
 - [ ] **Policy threshold calibration after deployment**: review dry-run decisions against real traffic, then adjust provisional D-0027 thresholds and durations before any unattended action is approved.
 - [ ] **Phase 6: Local AI** - optional inference enrichment, llama.cpp adapter, local dev inference install.
 - [ ] **Phase 7: Actions** - action providers, dry-run first; real actions only after explicit approval.
-- [ ] **Phase 8: Administration** - IN PROGRESS: auth (increment 1), WebAuthn (increment 2), read-only views + signature editing (increment 3, 2026-09-14: /queues /incidents /decisions /events /audit /signatures with keyset pagination, server-side list filters, and sortable headings), per-user display preferences, and total-count pagination indicators are live.  REMAINING: in-process ACME, per-service UIDs, Data Protection key encryption at rest, further D-0029 slices.
+- [ ] **Phase 8: Administration** - IN PROGRESS: auth (increment 1), WebAuthn (increment 2), read-only views + signature editing (increment 3, 2026-09-14: /queues /incidents /decisions /events /audit /signatures with keyset pagination, server-side list filters, and sortable headings), per-user display preferences, and total-count pagination indicators are live.  REMAINING: per-service UIDs, Data Protection key encryption at rest, further D-0029 slices; in-process ACME deferred per D-0034 to a future admin-UI domain/certificate management slice.
   - [x] **Increment 1: admin authentication foundation** - local bootstrap user, password change, first-party TOTP, recovery codes, cookie auth with server-side sessions, IP binding, AllowedSources, exposure/TLS guardrails, auth auditing, and auth-failure pipeline events.
   - [x] **Increment 2: WebAuthn/FIDO2** - DONE 2026-09-08: Fido2 4.0.1 and Fido2.Models 4.0.1 are pinned in AdminApi only, behind `IWebAuthnService`; hardware-key enrollment, sign-in, step-up, deletion, persistence, audit events, docs, and tests are implemented.
-  - [ ] **Increment 3: ACME certificate automation** - compare LettuceEncrypt vs Certes with supply-chain review before adding a dependency; add HTTP-01 challenge handling and renewal.
+  - [x] **Increment 3: ACME certificate automation** - DONE 2026-09-14 per D-0034: host certbot + deploy hook (documented in docs/deployment.md; verified end-to-end on the live deployment with `certbot renew --dry-run --run-deploy-hooks`).  In-process ACME (LettuceEncrypt/Certes) deferred to a future admin-UI domain/certificate management slice; library supply-chain review happens then.
 - [ ] **Phase 9: Hardening** - security, dependency, prompt-injection, authorization reviews; failure-mode, rollback, and load testing.
 
 ## Known defect
@@ -94,6 +94,7 @@ When Hannah answers a question, remove or update the item here and record the ou
 
 ## Deferred
 
+- [ ] **Full domain-name change support** (requested by Hannah 2026-09-14, alongside D-0034): make moving the admin's public domain a supported operation, eventually configurable from the admin UI (domain names for ACME validation/issuance).  Scope when picked up: TLS certificate re-issuance (the deferred in-process ACME slice), WebAuthn relying-party ID change with a lockout-safe key re-enrollment flow, cookie/session domain, AllowedSources/origins, deployment configuration, DNS cutover, and the certbot deploy-hook path (until in-process ACME exists).  Interim deliverable: a documented runbook.
 - [ ] **Mobile push notification technology** (deferred by Hannah 2026-08-18, D-0015): further consideration of privacy implications needed.  Browser Web Push transits third-party relays (FCM/Apple/Mozilla) with E2E-encrypted payloads but cloud-visible delivery metadata; self-hosted alternatives (ntfy/UnifiedPush) exist.  The notification port stays pluggable for whichever mechanism is chosen.
 
 - [ ] Additional data sources (Windows Event Log, Docker logs, SSH logs, SQL Server logs, MikroTik logs, application logs) until explicitly approved.

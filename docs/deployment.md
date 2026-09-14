@@ -161,6 +161,8 @@ chmod 755 /etc/letsencrypt/renewal-hooks/deploy/viegard.sh
 
 If port 80 on the dedicated address is occupied or NAT-translated, certbot standalone accepts `--http-01-address <dedicated-ip> --http-01-port <port>`; the public side of the challenge is always port 80.  Remember that adding the certs volume to an existing deployment requires `docker compose up -d viegard-admin` (recreate), not `restart`.
 
+Verify the full renewal chain at any time with `certbot renew --dry-run --run-deploy-hooks` (staging validation plus real hook execution; the admin container restarts briefly).  Certificate renewal and rotation into the container is otherwise fully automated by the certbot systemd timer and the deploy hook (D-0034); no in-process ACME client is required.
+
 Prefer a self-hosted VPN such as WireGuard for routine access.  Opening `AllowedSources` to `0.0.0.0/0` exposes the admin login to the internet and should be a deliberate exception, not the default.
 
 ### AllowedSources

@@ -8,7 +8,7 @@ Thank you for your interest in Viegard.  This guide covers prerequisites, the br
 - Git
 - Docker (for container-based integration testing and deployment work)
 
-Build, test, and run commands will be documented in the README once the solution skeleton exists.
+Build with `dotnet build` and run the test suite with `dotnet test` from the repository root.  See [docs/local-development.md](docs/local-development.md) for running the full stack locally (secrets, PostgreSQL, sample data).
 
 ## Branch model
 

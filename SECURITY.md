@@ -11,7 +11,7 @@ Please include a description of the issue, steps to reproduce, the affected comp
 
 ## Supported versions
 
-Viegard is in early development and has no released versions yet.  Security fixes land on `dev` and are released via `main`.
+Viegard has no tagged releases yet; the live deployment tracks the `dev` branch.  Security fixes land on `dev` and are released via `main`.
 
 ## Scope notes
 

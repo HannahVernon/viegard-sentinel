@@ -20,7 +20,9 @@ Ledger    | Audit       | Immutable audit trail for every decision and action
 
 ## Status
 
-Viegard is in early development (Phase 1: Discovery / Phase 2: Architecture).  No functional code exists yet.  See [TODO.md](TODO.md) for the current work queue and [DECISIONS.md](DECISIONS.md) for the architectural decision record.
+Viegard is in active development and runs live on its author's home network, ingesting real SWAG/nginx syslog traffic in dry-run posture.  The pipeline (ingestion, normalization, correlation, deterministic classification, and policy evaluation) and the administrative UI (local accounts with mandatory TOTP, WebAuthn security keys, read views with server-side filtering and sorting, and runtime-editable detection signatures) are implemented.  Local AI inference (Phase 6) and real remediation actions (Phase 7) are not yet implemented; every decision is currently record-only.
+
+See [TODO.md](TODO.md) for the current work queue, [DECISIONS.md](DECISIONS.md) for the architectural decision record, and [ARCHITECTURE.md](ARCHITECTURE.md) for the system design.
 
 ## Initial goals
 
@@ -38,15 +40,19 @@ Viegard is in early development (Phase 1: Discovery / Phase 2: Architecture).  N
 ## Technology
 
 - .NET 10 (LTS), modern C#, worker/service-oriented architecture
-- Optional ASP.NET Core administrative API
+- ASP.NET Core admin UI (Blazor static SSR, no client framework) with local accounts, mandatory TOTP, and WebAuthn security keys
+- PostgreSQL 17 persistence with in-database durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`)
 - Provider-neutral local inference abstraction (llama.cpp first; Ollama, vLLM, and others via adapters)
-- Deployed as a Docker container; the core remains deployment-independent
+- Deployed as Docker containers; the core remains deployment-independent
 
 ## Documentation
 
 Document | Purpose
 ---------|--------
+[ARCHITECTURE.md](ARCHITECTURE.md) | System design: components, invariants, project layout
 [docs/deployment.md](docs/deployment.md) | Deployment runbook: compose stack, verification, and the post-deploy backup restore drill
+[docs/local-development.md](docs/local-development.md) | Running the stack locally on Windows for development
+[docs/swag-syslog-setup.md](docs/swag-syslog-setup.md) | Pointing SWAG/nginx syslog output at Viegard
 [DECISIONS.md](DECISIONS.md)   | Living architectural decision record
 [TODO.md](TODO.md)             | Unresolved questions, pending decisions, and work queue
 [AGENT-README.md](AGENT-README.md) | Orientation for AI coding agents working on this repository

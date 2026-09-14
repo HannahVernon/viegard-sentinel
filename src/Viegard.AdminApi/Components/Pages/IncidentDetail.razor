@@ -1,0 +1,130 @@
+@page "/incidents/{Id:guid}"
+@attribute [Authorize]
+@inject IIncidentStore IncidentStore
+@inject IClassificationStore ClassificationStore
+@inject IDecisionStore DecisionStore
+@inject UserDisplay Display
+
+<PageTitle>Viegard incident</PageTitle>
+
+<main class="admin-panel wide">
+    @if (_incident is null)
+    {
+        <h1>Incident not found</h1>
+        <p>The requested incident was not found.</p>
+    }
+    else
+    {
+        <h1>Incident @AdminText.ShortId(_incident.Id)</h1>
+        <dl class="detail-list">
+            <dt>Correlation key</dt><dd>@_incident.CorrelationKey</dd>
+            <dt>Window</dt><dd>@Display.Format(_incident.WindowStart) to @Display.Format(_incident.WindowEnd)</dd>
+            <dt>State</dt><dd>@_incident.State</dd>
+        </dl>
+
+        <section>
+            <h2>Events</h2>
+            <ul>
+                @foreach (var eventId in _incident.EventIds)
+                {
+                    <li><a href="/events/@eventId">@AdminText.ShortId(eventId)</a></li>
+                }
+            </ul>
+        </section>
+
+        <section>
+            <h2>Evidence</h2>
+            @if (_incident.Evidence.Count == 0)
+            {
+                <p>No evidence is recorded.</p>
+            }
+            else
+            {
+                <table class="data-table">
+                    <thead><tr><th>Score</th><th>Event</th><th>Description</th></tr></thead>
+                    <tbody>
+                        @foreach (var item in _incident.Evidence)
+                        {
+                            <tr>
+                                <td>@item.Score</td>
+                                <td>
+                                    @if (item.EventId is not null)
+                                    {
+                                        <a href="/events/@item.EventId">@AdminText.ShortId(item.EventId.Value)</a>
+                                    }
+                                </td>
+                                <td>@AdminText.Limit(item.Description)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        <section>
+            <h2>Classifications and decisions</h2>
+            @if (_classificationRows.Count == 0)
+            {
+                <p>No related classifications are recorded.</p>
+            }
+            else
+            {
+                @foreach (var row in _classificationRows)
+                {
+                    <article class="card">
+                        <h3>@row.Classification.Category severity @row.Classification.Severity</h3>
+                        <p>Classifier @row.Classification.ClassifierId, confidence @row.Classification.Confidence.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture), created @Display.Format(row.Classification.CreatedAt).</p>
+                        <ul>
+                            @foreach (var reason in row.Classification.Reasons)
+                            {
+                                <li>@AdminText.Limit(reason)</li>
+                            }
+                        </ul>
+                        @if (row.Decisions.Count > 0)
+                        {
+                            <h4>Decisions</h4>
+                            <ul>
+                                @foreach (var decision in row.Decisions)
+                                {
+                                    <li><a href="/decisions/@decision.Id">@decision.Outcome</a> at @Display.Format(decision.CreatedAt)</li>
+                                }
+                            </ul>
+                        }
+                    </article>
+                }
+            }
+        </section>
+    }
+</main>
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private Incident? _incident;
+    private IReadOnlyList<ClassificationRow> _classificationRows = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _incident = await IncidentStore.GetAsync(Id).ConfigureAwait(false);
+        if (_incident is null)
+        {
+            return;
+        }
+
+        var classifications = await ClassificationStore
+            .ListForSubjectAsync(ClassificationSubjectKind.Incident, _incident.Id)
+            .ConfigureAwait(false);
+        var rows = new List<ClassificationRow>();
+        foreach (var classification in classifications)
+        {
+            var decisions = await DecisionStore.ListForClassificationAsync(classification.Id).ConfigureAwait(false);
+            rows.Add(new ClassificationRow(classification, decisions));
+        }
+
+        _classificationRows = rows;
+    }
+
+    private sealed record ClassificationRow(Classification Classification, IReadOnlyList<Decision> Decisions);
+}

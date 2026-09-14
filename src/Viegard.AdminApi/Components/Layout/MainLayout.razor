@@ -1,3 +1,41 @@
 @inherits LayoutComponentBase
+@inject IQueueTelemetryStore QueueTelemetry
+
+<AuthorizeView>
+    <Authorized>
+        <header class="admin-header">
+            <a class="brand" href="/"><img class="brand-mark" src="img/raven.png" alt="" />Viegard</a>
+            <nav class="admin-nav" aria-label="Admin navigation">
+                <a href="/queues">Dashboard/Queues</a>
+                <a href="/incidents">Incidents</a>
+                <a href="/decisions">Decisions</a>
+                <a href="/events">Events</a>
+                <a href="/audit">Audit</a>
+                <a href="/signatures">Signatures</a>
+                <a href="/account">Account</a>
+            </nav>
+            <div class="header-side">
+                <a class="status-dot-link" href="/queues" title="Worst queue traffic light across all instances; refreshes every 30 seconds.">
+                    <span class="status-dot @_statusCss" data-status-dot></span><span data-status-label>@_statusLabel</span>
+                </a>
+                <form method="post" action="/auth/logout" class="logout-form">
+                    <AntiforgeryToken />
+                    <button type="submit" class="button-quiet">Sign out</button>
+                </form>
+            </div>
+        </header>
+    </Authorized>
+</AuthorizeView>
 
 @Body
+
+@code {
+    private string _statusCss = "status-dot-muted";
+    private string _statusLabel = "No data";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var snapshots = await QueueTelemetry.GetLatestAsync().ConfigureAwait(false);
+        (_statusCss, _statusLabel) = QueueStatusBadge.Summarize(snapshots, DateTimeOffset.UtcNow);
+    }
+}

@@ -1,0 +1,77 @@
+﻿@page "/queues"
+@attribute [Authorize]
+@inject IQueueTelemetryStore QueueTelemetry
+@inject UserDisplay Display
+
+<PageTitle>Viegard queues</PageTitle>
+
+<main class="admin-panel">
+    <h1>Dashboard/Queues</h1>
+
+    @if (_rows.Count == 0)
+    {
+        <p>No queue telemetry has been published yet.</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Instance</th>
+                    <th>Queue</th>
+                    <th>Light</th>
+                    <th>Depth</th>
+                    <th>In-flight</th>
+                    <th>Oldest pending age</th>
+                    <th>Dead letters</th>
+                    <th>Totals</th>
+                    <th>Captured</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    <tr>
+                        <td>@row.Snapshot.InstanceId</td>
+                        <td>@row.Snapshot.QueueName</td>
+                        <td><span class="@AdminText.LightCss(row.Status.Light)">@row.Status.Light</span></td>
+                        <td>@row.Snapshot.Depth</td>
+                        <td>@row.Snapshot.InFlight</td>
+                        <td>@OldestAge(row.Snapshot)</td>
+                        <td>@row.Snapshot.DeadLetterCount</td>
+                        <td>@row.Snapshot.TotalEnqueued / @row.Snapshot.TotalCompleted / @row.Snapshot.TotalAbandoned</td>
+                        <td>@Display.Format(row.Snapshot.CapturedAt)</td>
+                    </tr>
+                    @if (row.Status.Light != TrafficLight.Green)
+                    {
+                        <tr class="details-row">
+                            <td colspan="9">@string.Join(" ", row.Status.Reasons)</td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    }
+</main>
+
+@code {
+    private readonly QueueHealthEvaluator _evaluator = new(new QueueHealthThresholds());
+    private IReadOnlyList<QueueRow> _rows = [];
+    private DateTimeOffset _now;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _now = DateTimeOffset.UtcNow;
+        var snapshots = await QueueTelemetry.GetLatestAsync().ConfigureAwait(false);
+        _rows = snapshots
+            .Select(s => new QueueRow(s, _evaluator.Evaluate(s, _now)))
+            .ToList();
+    }
+
+    private string OldestAge(QueueTelemetrySnapshot snapshot) => snapshot.OldestPendingEnqueuedAt is null
+        ? ""
+        : (_now - snapshot.OldestPendingEnqueuedAt.Value).ToString("g");
+
+    private sealed record QueueRow(QueueTelemetrySnapshot Snapshot, QueueHealthStatus Status);
+}

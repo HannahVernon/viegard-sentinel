@@ -1,0 +1,81 @@
+@page "/events/{Id:guid}"
+@attribute [Authorize]
+@inject IEventStore EventStore
+@inject UserDisplay Display
+
+<PageTitle>Viegard event</PageTitle>
+
+<main class="admin-panel wide">
+    @if (_event is null)
+    {
+        <h1>Event not found</h1>
+        <p>The requested event was not found.</p>
+    }
+    else
+    {
+        <h1>Event @AdminText.ShortId(_event.Id)</h1>
+        <dl class="detail-list">
+            <dt>Occurred</dt><dd>@Display.Format(_event.OccurredAt)</dd>
+            <dt>Source</dt><dd>@_event.SourceId (@_event.SourceType)</dd>
+            <dt>Raw observation</dt><dd>@AdminText.ShortId(_event.RawObservationId)</dd>
+            <dt>Payload type</dt><dd>@AdminText.PayloadTypeName(_event.Payload)</dd>
+        </dl>
+
+        <section>
+            <h2>Entities</h2>
+            @if (_event.Entities.Count == 0)
+            {
+                <p>No entities are recorded.</p>
+            }
+            else
+            {
+                <table class="data-table">
+                    <thead><tr><th>Kind</th><th>Value</th></tr></thead>
+                    <tbody>
+                        @foreach (var entity in _event.Entities)
+                        {
+                            <tr><td>@entity.Kind</td><td>@AdminText.Limit(entity.Value)</td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        <section>
+            <h2>Payload</h2>
+            @if (_fields.Count > 0)
+            {
+                <table class="data-table key-value-table">
+                    <tbody>
+                        @foreach (var field in _fields)
+                        {
+                            <tr><th>@field.Name</th><td>@field.Value</td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            else
+            {
+                <pre class="json-block">@AdminText.PayloadJson(_event.Payload)</pre>
+            }
+        </section>
+    }
+</main>
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private NormalizedEvent? _event;
+    private IReadOnlyList<PayloadField> _fields = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _event = await EventStore.GetAsync(Id).ConfigureAwait(false);
+        if (_event is not null)
+        {
+            _fields = AdminText.PayloadFields(_event.Payload, Display.Format);
+        }
+    }
+}

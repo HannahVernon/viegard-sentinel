@@ -41,6 +41,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<SourceOffsetRow> SourceOffsets => Set<SourceOffsetRow>();
 
+    public DbSet<CustomSignatureRow> CustomSignatures => Set<CustomSignatureRow>();
+
     public DbSet<QueueMessageRow> QueueMessages => Set<QueueMessageRow>();
 
     public DbSet<QueueCounterRow> QueueCounters => Set<QueueCounterRow>();
@@ -52,6 +54,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
     public DbSet<AdminRecoveryCodeRow> AdminRecoveryCodes => Set<AdminRecoveryCodeRow>();
 
     public DbSet<AdminWebAuthnCredentialRow> AdminWebAuthnCredentials => Set<AdminWebAuthnCredentialRow>();
+
+    public DbSet<AdminUserPreferencesRow> AdminUserPreferences => Set<AdminUserPreferencesRow>();
 
     public DbSet<AdminSessionRow> AdminSessions => Set<AdminSessionRow>();
 
@@ -184,6 +188,17 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => new { e.SourceId, e.Key });
         });
 
+        modelBuilder.Entity<CustomSignatureRow>(entity =>
+        {
+            entity.ToTable("custom_signatures");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Name).IsUnique();
+            entity.Property(e => e.Name).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxNameLength);
+            entity.Property(e => e.Pattern).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxPatternLength);
+            entity.Property(e => e.Category).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxCategoryLength);
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxUpdatedByLength);
+        });
+
         modelBuilder.Entity<QueueMessageRow>(entity =>
         {
             entity.ToTable("queue_messages");
@@ -230,6 +245,13 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.Property(e => e.CredentialId).HasColumnType("bytea");
             entity.Property(e => e.PublicKey).HasColumnType("bytea");
+        });
+
+        modelBuilder.Entity<AdminUserPreferencesRow>(entity =>
+        {
+            entity.ToTable("admin_user_preferences");
+            entity.HasKey(e => e.UserId);
+            entity.HasOne<AdminUserRow>().WithOne().HasForeignKey<AdminUserPreferencesRow>(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<AdminSessionRow>(entity =>

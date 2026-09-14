@@ -198,7 +198,13 @@
         }
 
         const credential = await navigator.credentials.get({ publicKey: prepareGetOptions(options) });
-        await postJson("/auth/webauthn/assert", token, credentialToJson(credential), button);
+        const payload = credentialToJson(credential);
+        const returnTo = button.getAttribute("data-webauthn-return");
+        if (returnTo) {
+            payload.returnTo = returnTo;
+        }
+
+        await postJson("/auth/webauthn/assert", token, payload, button);
     }
 
     document.addEventListener("DOMContentLoaded", () => {

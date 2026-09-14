@@ -1,0 +1,55 @@
+@* Step-up verification overlay.  Uses the native HTML popover API: no
+   script is needed to open or close it, so the CSP and static-SSR posture
+   are unchanged.  The security-key button reuses the existing
+   data-webauthn-assert wiring from webauthn.js.  PopoverId must be unique
+   when several prompts render on one page. *@
+
+<button type="button" class="step-up-trigger" popovertarget="@PopoverId">Verify now</button>
+
+<div id="@PopoverId" popover class="step-up-popover">
+    <h2>Step-up verification</h2>
+    <p class="small">Confirm a second factor to unlock sensitive changes for the next few minutes.</p>
+
+    <form method="post" action="/auth/step-up">
+        <AntiforgeryToken />
+        <input type="hidden" name="returnTo" value="@ReturnTo" />
+        <label>
+            TOTP code
+            <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
+        </label>
+        <button type="submit">Verify</button>
+    </form>
+
+    @if (ShowSecurityKey)
+    {
+        <form class="secondary-form">
+            <AntiforgeryToken />
+            <button type="button" data-webauthn-assert data-webauthn-return="@ReturnTo" data-webauthn-message="#@(PopoverId)-message">
+                Verify with security key
+            </button>
+        </form>
+        <p id="@(PopoverId)-message" class="message error" hidden></p>
+    }
+
+    <form class="secondary-form">
+        <button type="button" class="button-quiet" popovertarget="@PopoverId" popovertargetaction="hide">Cancel</button>
+    </form>
+</div>
+
+@* Works on any browser: pre-popover engines get a plain link to the
+   always-present step-up section on the account page. *@
+<a class="step-up-fallback small" href="/account#step-up">or verify on the account page</a>
+
+@code {
+    /// <summary>Relative path to return to after verification.</summary>
+    [Parameter]
+    public string ReturnTo { get; set; } = "/account";
+
+    /// <summary>Whether the current user has enrolled security keys.</summary>
+    [Parameter]
+    public bool ShowSecurityKey { get; set; }
+
+    /// <summary>Unique popover element id when multiple prompts share a page.</summary>
+    [Parameter]
+    public string PopoverId { get; set; } = "step-up-popover";
+}

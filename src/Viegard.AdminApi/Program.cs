@@ -6,9 +6,11 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
+using Viegard.AdminApi;
 using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Components;
 using Viegard.AdminApi.Configuration;
+using Viegard.AdminApi.Signatures;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
 using Viegard.Application.Queues;
@@ -80,6 +82,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddRazorComponents();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddDataProtection();
+builder.Services.AddScoped<UserDisplay>();
 builder.Services.AddSingleton<TotpService>();
 builder.Services.AddSingleton<RecoveryCodeService>();
 builder.Services.AddSingleton<AdminPasswordService>();
@@ -89,6 +92,7 @@ builder.Services.AddSingleton<WebAuthnStateCookie>();
 builder.Services.AddSingleton<WebAuthnConfigurationProvider>();
 builder.Services.AddSingleton<IWebAuthnService, Fido2WebAuthnService>();
 builder.Services.AddSingleton<AdminAuthAuditor>();
+builder.Services.AddSingleton<AdminConfigAuditor>();
 builder.Services.AddScoped<AdminCookieAuthenticationEvents>();
 
 builder.Services
@@ -184,6 +188,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
+        builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");
@@ -298,7 +303,14 @@ app.UseAntiforgery();
 
 app.MapGet("/healthz", () => Results.Ok(new { status = "healthy", service = "viegard-admin" }))
     .AllowAnonymous();
+app.MapGet("/status/queues", async (IQueueTelemetryStore telemetry, CancellationToken cancellationToken) =>
+{
+    var snapshots = await telemetry.GetLatestAsync(cancellationToken).ConfigureAwait(false);
+    var (css, label) = QueueStatusBadge.Summarize(snapshots, DateTimeOffset.UtcNow);
+    return Results.Json(new { css, label });
+}).RequireAuthorization();
 app.MapAdminAuthEndpoints();
+app.MapAdminSignatureEndpoints();
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>();
 

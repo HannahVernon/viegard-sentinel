@@ -1,0 +1,110 @@
+<nav class="pagination" aria-label="Pagination">
+    <div class="pagination-pages">
+        @if (CurrentCursor is not null)
+        {
+            <a class="button-link" href="@BuildHref(PreviousCursor, null, SafeTake)">Previous</a>
+        }
+        else
+        {
+            <span class="button-link disabled" aria-disabled="true">Previous</span>
+        }
+
+        <span class="page-indicator">Page @PageNumber of @TotalPages</span>
+
+        @if (NextCursor is not null)
+        {
+            <a class="button-link" href="@BuildHref(NextCursor, CurrentCursor, SafeTake)">Next</a>
+        }
+        else
+        {
+            <span class="button-link disabled" aria-disabled="true">Next</span>
+        }
+    </div>
+
+    <form method="get" action="@BasePath" class="page-size">
+        @* Changing size restarts from the newest rows; cursor state from
+           another size would be misleading. *@
+        @foreach (var filter in ActiveFilters)
+        {
+            <input type="hidden" name="@filter.Key" value="@filter.Value" />
+        }
+        <label for="page-size-select">Page size</label>
+        <select id="page-size-select" name="take">
+            @foreach (var size in Sizes)
+            {
+                <option value="@size" selected="@(size == SafeTake)">@size</option>
+            }
+        </select>
+        <button type="submit" class="button-link">Apply</button>
+    </form>
+</nav>
+
+@code {
+    public const int DefaultPageSize = 50;
+    private static readonly int[] Sizes = [25, 50, 100, 200];
+
+    [Parameter]
+    public string BasePath { get; set; } = "/";
+
+    [Parameter]
+    public Guid? CurrentCursor { get; set; }
+
+    [Parameter]
+    public Guid? PreviousCursor { get; set; }
+
+    [Parameter]
+    public Guid? NextCursor { get; set; }
+
+    [Parameter]
+    public int Take { get; set; } = DefaultPageSize;
+
+    [Parameter]
+    public long TotalCount { get; set; }
+
+    [Parameter]
+    public long Preceding { get; set; }
+
+    [Parameter]
+    public IReadOnlyDictionary<string, string?>? Filters { get; set; }
+
+    private int SafeTake => ClampPageSize(Take);
+
+    private long PageNumber => PaginationMath.PageNumber(Preceding, SafeTake);
+
+    private long TotalPages => PaginationMath.TotalPages(TotalCount, SafeTake);
+
+    private IEnumerable<KeyValuePair<string, string>> ActiveFilters => Filters is null
+        ? []
+        : Filters
+            .Where(filter => !string.IsNullOrWhiteSpace(filter.Key) && !string.IsNullOrWhiteSpace(filter.Value))
+            .Select(filter => new KeyValuePair<string, string>(filter.Key, filter.Value!));
+
+    /// <summary>
+    /// Server-side clamp for the operator-supplied page size, so a crafted
+    /// take value can never request an unbounded page.
+    /// </summary>
+    public static int ClampPageSize(int? take) =>
+        take is null ? DefaultPageSize : Math.Clamp(take.Value, 10, 200);
+
+    private string BuildHref(Guid? cursor, Guid? previous, int take)
+    {
+        var parts = new List<string>();
+        if (cursor is not null)
+        {
+            parts.Add($"cursor={Uri.EscapeDataString(cursor.Value.ToString())}");
+        }
+
+        if (previous is not null)
+        {
+            parts.Add($"prev={Uri.EscapeDataString(previous.Value.ToString())}");
+        }
+
+        parts.Add($"take={ClampPageSize(take)}");
+        foreach (var filter in ActiveFilters)
+        {
+            parts.Add($"{Uri.EscapeDataString(filter.Key)}={Uri.EscapeDataString(filter.Value)}");
+        }
+
+        return parts.Count == 0 ? BasePath : $"{BasePath}?{string.Join("&", parts)}";
+    }
+}

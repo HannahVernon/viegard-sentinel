@@ -49,6 +49,11 @@ public interface IAdminUserStore
         Guid userId,
         Guid credentialId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Returns stored preferences, or defaults when none are saved.</summary>
+    ValueTask<AdminUserPreferences> GetPreferencesAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    ValueTask SavePreferencesAsync(AdminUserPreferences preferences, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence port for revocable server-side admin sessions.</summary>

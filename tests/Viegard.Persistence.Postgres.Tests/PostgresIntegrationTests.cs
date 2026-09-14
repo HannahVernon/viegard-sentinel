@@ -1,7 +1,13 @@
 using Microsoft.EntityFrameworkCore;
-using Viegard.Domain.Admin;
-using Viegard.Domain.Events;
+using Viegard.Application.Stores;
 using Viegard.Domain;
+using Viegard.Domain.Admin;
+using Viegard.Domain.Audit;
+using Viegard.Domain.Classifications;
+using Viegard.Domain.Configuration;
+using Viegard.Domain.Decisions;
+using Viegard.Domain.Events;
+using Viegard.Domain.Incidents;
 using Viegard.Persistence.Postgres.Queues;
 using Viegard.Persistence.Postgres.Stores;
 
@@ -169,11 +175,12 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var resolver = new ReferenceResolver(factory);
         var store = new PostgresEventStore(factory, resolver);
         var observationStore = new PostgresRawObservationStore(factory, resolver);
+        var sourceKey = $"it:source-{ViegardId.New():N}";
 
         var observation = new RawObservation
         {
             Id = Guid.NewGuid(),
-            SourceId = "it:source",
+            SourceId = sourceKey,
             SourceType = "syslog",
             ObservedAt = DateTimeOffset.UtcNow,
             PayloadReference = $"it/{Guid.NewGuid():N}",
@@ -183,7 +190,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var normalizedEvent = new NormalizedEvent
         {
             Id = Guid.NewGuid(),
-            SourceId = "it:source",
+            SourceId = sourceKey,
             SourceType = "syslog",
             OccurredAt = DateTimeOffset.UtcNow,
             Entities = [new EntityRef(EntityKind.IpAddress, "203.0.113.7")],
@@ -197,10 +204,130 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var http = Assert.IsType<HttpRequestEvent>(restored.Payload);
         Assert.Equal("/.env", http.Uri);
         Assert.Equal(normalizedEvent.Entities, restored.Entities);
-        Assert.Equal("it:source", restored.SourceId);
+        Assert.Equal(sourceKey, restored.SourceId);
         Assert.Equal("syslog", restored.SourceType);
 
         Assert.Equal("raw-payload", await observationStore.GetPayloadAsync(observation.PayloadReference));
+
+        var filtered = await store.ListPageAsync(beforeId: null, pageSize: 10, filter: new EventListFilter(sourceKey));
+        Assert.Equal(normalizedEvent.Id, Assert.Single(filtered.Items).Id);
+        Assert.Equal(1, filtered.TotalCount);
+        Assert.Equal(0, filtered.Preceding);
+    }
+
+    [PostgresFact]
+    public async Task Admin_list_sorts_use_keyset_ordering_for_the_filtered_result_set()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var resolver = new ReferenceResolver(factory);
+        var prefix = $"it-sort-{ViegardId.New():N}";
+        var now = DateTimeOffset.UtcNow;
+
+        var eventStore = new PostgresEventStore(factory, resolver);
+        var eventB = Event($"{prefix}-source-b", now.AddMinutes(2));
+        var eventA = Event($"{prefix}-source-a", now.AddMinutes(1));
+        var eventC = Event($"{prefix}-source-c", now.AddMinutes(3));
+        foreach (var item in new[] { eventB, eventA, eventC })
+        {
+            await eventStore.AddAsync(item);
+        }
+
+        var eventFilter = new EventListFilter(prefix);
+        var eventSort = new ListSort<EventSortColumn>(EventSortColumn.Source, SortDirection.Asc);
+        var eventPage1 = await eventStore.ListPageAsync(beforeId: null, pageSize: 2, filter: eventFilter, sort: eventSort);
+        var eventPage2 = await eventStore.ListPageAsync(eventPage1.NextCursor, pageSize: 2, filter: eventFilter, sort: eventSort);
+        Assert.Equal([eventA.Id, eventB.Id], eventPage1.Items.Select(e => e.Id));
+        Assert.Equal(eventC.Id, Assert.Single(eventPage2.Items).Id);
+        Assert.Equal(3, eventPage1.TotalCount);
+        Assert.Equal(2, eventPage2.Preceding);
+
+        var incidentStore = new PostgresIncidentStore(factory);
+        var incidentB = Incident($"{prefix}-incident-b", now.AddMinutes(2));
+        var incidentA = Incident($"{prefix}-incident-a", now.AddMinutes(1));
+        var incidentC = Incident($"{prefix}-incident-c", now.AddMinutes(3));
+        foreach (var item in new[] { incidentB, incidentA, incidentC })
+        {
+            await incidentStore.UpsertAsync(item);
+        }
+
+        var incidentFilter = new IncidentListFilter(prefix, null);
+        var incidentSort = new ListSort<IncidentSortColumn>(IncidentSortColumn.CorrelationKey, SortDirection.Asc);
+        var incidentPage1 = await incidentStore.ListPageAsync(beforeId: null, pageSize: 2, filter: incidentFilter, sort: incidentSort);
+        var incidentPage2 = await incidentStore.ListPageAsync(incidentPage1.NextCursor, pageSize: 2, filter: incidentFilter, sort: incidentSort);
+        Assert.Equal([incidentA.Id, incidentB.Id], incidentPage1.Items.Select(i => i.Id));
+        Assert.Equal(incidentC.Id, Assert.Single(incidentPage2.Items).Id);
+        Assert.Equal(3, incidentPage1.TotalCount);
+        Assert.Equal(2, incidentPage2.Preceding);
+
+        var classificationStore = new PostgresClassificationStore(factory, resolver);
+        var decisionStore = new PostgresDecisionStore(factory, resolver);
+        var classificationB = CreateClassification($"{prefix}-classification-b", "middle", 5, now.AddMinutes(2));
+        var classificationA = CreateClassification($"{prefix}-classification-a", "alpha", 2, now.AddMinutes(1));
+        var classificationC = CreateClassification($"{prefix}-classification-c", "zeta", 8, now.AddMinutes(3));
+        foreach (var item in new[] { classificationB, classificationA, classificationC })
+        {
+            await classificationStore.AddAsync(item);
+        }
+
+        var decisionB = Decision(classificationB.Id, $"{prefix}-policy-b", DecisionOutcome.RequireApproval, prefix, now.AddMinutes(2));
+        var decisionA = Decision(classificationA.Id, $"{prefix}-policy-a", DecisionOutcome.DryRun, prefix, now.AddMinutes(1));
+        var decisionC = Decision(classificationC.Id, $"{prefix}-policy-c", DecisionOutcome.Permit, prefix, now.AddMinutes(3));
+        foreach (var item in new[] { decisionB, decisionA, decisionC })
+        {
+            await decisionStore.AddAsync(item);
+        }
+
+        var decisionFilter = new DecisionListFilter(prefix, null);
+        var policySorted = await decisionStore.ListPageAsync(
+            beforeId: null,
+            pageSize: 10,
+            filter: decisionFilter,
+            sort: new ListSort<DecisionSortColumn>(DecisionSortColumn.Policy, SortDirection.Asc));
+        Assert.Equal([decisionA.Id, decisionB.Id, decisionC.Id], policySorted.Items.Select(d => d.Id));
+
+        var classificationSort = new ListSort<DecisionSortColumn>(DecisionSortColumn.Classification, SortDirection.Asc);
+        var decisionPage1 = await decisionStore.ListPageAsync(beforeId: null, pageSize: 2, filter: decisionFilter, sort: classificationSort);
+        var decisionPage2 = await decisionStore.ListPageAsync(decisionPage1.NextCursor, pageSize: 2, filter: decisionFilter, sort: classificationSort);
+        Assert.Equal([decisionA.Id, decisionB.Id], decisionPage1.Items.Select(d => d.Id));
+        Assert.Equal(decisionC.Id, Assert.Single(decisionPage2.Items).Id);
+        Assert.Equal(3, decisionPage1.TotalCount);
+        Assert.Equal(2, decisionPage2.Preceding);
+
+        var auditLedger = new PostgresAuditLedger(factory, resolver);
+        var auditNone = AuditRecord($"{prefix} audit none", null, now.AddMinutes(1));
+        var auditA = AuditRecord($"{prefix} audit a", $"{prefix}-audit-a", now.AddMinutes(2));
+        var auditB = AuditRecord($"{prefix} audit b", $"{prefix}-audit-b", now.AddMinutes(3));
+        foreach (var item in new[] { auditB, auditNone, auditA })
+        {
+            await auditLedger.AppendAsync(item);
+        }
+
+        var auditFilter = new AuditListFilter(prefix, null);
+        var auditSort = new ListSort<AuditSortColumn>(AuditSortColumn.Source, SortDirection.Asc);
+        var auditPage1 = await auditLedger.ListPageAsync(beforeId: null, pageSize: 2, filter: auditFilter, sort: auditSort);
+        var auditPage2 = await auditLedger.ListPageAsync(auditPage1.NextCursor, pageSize: 2, filter: auditFilter, sort: auditSort);
+        Assert.Equal([auditNone.Id, auditA.Id], auditPage1.Items.Select(a => a.Id));
+        Assert.Equal(auditB.Id, Assert.Single(auditPage2.Items).Id);
+        Assert.Equal(3, auditPage1.TotalCount);
+        Assert.Equal(2, auditPage2.Preceding);
+
+        var signatureStore = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var signatureB = CustomSignature($"{prefix}-signature-b");
+        var signatureA = CustomSignature($"{prefix}-signature-a");
+        var signatureC = CustomSignature($"{prefix}-signature-c");
+        foreach (var item in new[] { signatureB, signatureA, signatureC })
+        {
+            await signatureStore.UpsertAsync(item);
+        }
+
+        var signatureFilter = new SignatureListFilter(prefix);
+        var signatureSort = new ListSort<SignatureSortColumn>(SignatureSortColumn.Name, SortDirection.Asc);
+        var signaturePage1 = await signatureStore.ListPageAsync(beforeId: null, pageSize: 2, filter: signatureFilter, sort: signatureSort);
+        var signaturePage2 = await signatureStore.ListPageAsync(signaturePage1.NextCursor, pageSize: 2, filter: signatureFilter, sort: signatureSort);
+        Assert.Equal([signatureA.Id, signatureB.Id], signaturePage1.Items.Select(s => s.Id));
+        Assert.Equal(signatureC.Id, Assert.Single(signaturePage2.Items).Id);
+        Assert.Equal(3, signaturePage1.TotalCount);
+        Assert.Equal(2, signaturePage2.Preceding);
     }
 
     [PostgresFact]
@@ -302,6 +429,125 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var (_, typeAfter) = await resolver.GetSourceAsync(id);
         Assert.Equal("imap", typeAfter);
     }
+
+    [PostgresFact]
+    public async Task Custom_signature_store_round_trips_and_deletes()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var signature = CustomSignature($"it-roundtrip-{ViegardId.New():N}");
+
+        var saved = await store.UpsertAsync(signature);
+        var restored = await store.GetAsync(saved.Id);
+
+        Assert.NotNull(restored);
+        Assert.Equal(signature.Name, restored.Name);
+        Assert.Equal(1, restored.Version);
+
+        var updated = await store.UpsertAsync(saved with { Pattern = "second", UpdatedBy = "it" });
+        Assert.Equal(2, updated.Version);
+        Assert.Equal("second", (await store.GetAsync(updated.Id))!.Pattern);
+
+        var deleted = await store.DeleteAsync(updated.Id);
+        Assert.NotNull(deleted);
+        Assert.Null(await store.GetAsync(updated.Id));
+    }
+
+    [PostgresFact]
+    public async Task Custom_signature_store_notify_wakes_waiter()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var listener = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var writer = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var wait = listener.WaitForChangeAsync(
+            listener.CurrentChangeVersion,
+            TimeSpan.FromSeconds(10),
+            CancellationToken.None).AsTask();
+
+        await Task.Delay(300);
+        await writer.UpsertAsync(CustomSignature($"it-notify-{ViegardId.New():N}"));
+
+        var version = await wait.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.True(version > 0);
+    }
+
+    private static CustomSignature CustomSignature(string name) => new()
+    {
+        Id = ViegardId.New(),
+        Name = name,
+        Enabled = true,
+        Target = CustomSignatureTarget.HttpQuery,
+        MatchType = CustomSignatureMatchType.Contains,
+        Pattern = "ref=aftership",
+        Category = "referral-bot",
+        Severity = 3,
+        EvidenceWeight = 1.0,
+        CreatedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedBy = "it",
+        Version = 0,
+    };
+
+    private static NormalizedEvent Event(string sourceKey, DateTimeOffset occurredAt) => new()
+    {
+        Id = ViegardId.New(),
+        SourceId = sourceKey,
+        SourceType = "syslog",
+        OccurredAt = occurredAt,
+        Entities = [],
+        Payload = new HttpRequestEvent { RemoteAddress = "203.0.113.7", Uri = $"/{sourceKey}" },
+        RawObservationId = ViegardId.New(),
+    };
+
+    private static Incident Incident(string correlationKey, DateTimeOffset windowStart) => new()
+    {
+        Id = ViegardId.New(),
+        CorrelationKey = correlationKey,
+        WindowStart = windowStart,
+        WindowEnd = windowStart.AddMinutes(1),
+        EventIds = [ViegardId.New()],
+        Evidence = [],
+        State = IncidentState.Open,
+    };
+
+    private static Classification CreateClassification(string classifierId, string category, int severity, DateTimeOffset createdAt) => new()
+    {
+        Id = ViegardId.New(),
+        SubjectKind = ClassificationSubjectKind.Incident,
+        SubjectId = ViegardId.New(),
+        ClassifierId = classifierId,
+        Category = category,
+        Confidence = 0.9,
+        Severity = severity,
+        Reasons = ["integration test"],
+        CreatedAt = createdAt,
+    };
+
+    private static Decision Decision(
+        Guid classificationId,
+        string policyId,
+        DecisionOutcome outcome,
+        string prefix,
+        DateTimeOffset createdAt) => new()
+    {
+        Id = ViegardId.New(),
+        ClassificationId = classificationId,
+        PolicyId = policyId,
+        PolicyVersion = "1",
+        Outcome = outcome,
+        Rationale = $"{prefix} decision rationale",
+        Guardrails = [],
+        CreatedAt = createdAt,
+    };
+
+    private static AuditRecord AuditRecord(string summary, string? sourceId, DateTimeOffset timestamp) => new()
+    {
+        Id = ViegardId.New(),
+        Timestamp = timestamp,
+        Stage = PipelineStage.Admin,
+        Summary = summary,
+        SourceId = sourceId,
+    };
 
     private sealed class TestDbContextFactory(Npgsql.NpgsqlDataSource dataSource) : IDbContextFactory<ViegardDbContext>
     {

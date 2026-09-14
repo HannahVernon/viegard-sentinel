@@ -246,6 +246,35 @@ public sealed class SourceOffsetRow
     public string Value { get; set; } = string.Empty;
 }
 
+public sealed class CustomSignatureRow
+{
+    public Guid Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public bool Enabled { get; set; }
+
+    public int Target { get; set; }
+
+    public int MatchType { get; set; }
+
+    public string Pattern { get; set; } = string.Empty;
+
+    public string Category { get; set; } = string.Empty;
+
+    public int Severity { get; set; }
+
+    public double EvidenceWeight { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+
+    public int Version { get; set; }
+}
+
 public sealed class QueueMessageRow
 {
     public long Id { get; set; }
@@ -340,6 +369,17 @@ public sealed class AdminWebAuthnCredentialRow
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset? LastUsedAt { get; set; }
+}
+
+public sealed class AdminUserPreferencesRow
+{
+    public Guid UserId { get; set; }
+
+    public string TimeZoneId { get; set; } = "UTC";
+
+    public int PageSize { get; set; } = 50;
+
+    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public sealed class AdminSessionRow

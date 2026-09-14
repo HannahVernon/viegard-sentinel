@@ -217,6 +217,30 @@ namespace Viegard.Persistence.Postgres.Migrations
                     b.ToTable("admin_totp_secrets", (string)null);
                 });
 
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminUserPreferencesRow", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("PageSize")
+                        .HasColumnType("integer")
+                        .HasColumnName("page_size");
+
+                    b.Property<string>("TimeZoneId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("time_zone_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("admin_user_preferences", (string)null);
+                });
+
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminUserRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -503,6 +527,77 @@ namespace Viegard.Persistence.Postgres.Migrations
                     b.HasIndex("ClassificationId");
 
                     b.ToTable("corrections", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.CustomSignatureRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("category");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<double>("EvidenceWeight")
+                        .HasColumnType("double precision")
+                        .HasColumnName("evidence_weight");
+
+                    b.Property<int>("MatchType")
+                        .HasColumnType("integer")
+                        .HasColumnName("match_type");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Pattern")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("pattern");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("integer")
+                        .HasColumnName("severity");
+
+                    b.Property<int>("Target")
+                        .HasColumnType("integer")
+                        .HasColumnName("target");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("updated_by");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("custom_signatures", (string)null);
                 });
 
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.DecisionRow", b =>
@@ -892,6 +987,15 @@ namespace Viegard.Persistence.Postgres.Migrations
                     b.HasOne("Viegard.Persistence.Postgres.Model.AdminUserRow", null)
                         .WithOne()
                         .HasForeignKey("Viegard.Persistence.Postgres.Model.AdminTotpSecretRow", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminUserPreferencesRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.AdminUserRow", null)
+                        .WithOne()
+                        .HasForeignKey("Viegard.Persistence.Postgres.Model.AdminUserPreferencesRow", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

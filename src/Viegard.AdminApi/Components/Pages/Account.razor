@@ -1,4 +1,4 @@
-﻿@page "/account"
+@page "/account"
 @attribute [Authorize]
 @inject IHttpContextAccessor HttpContextAccessor
 @inject IAdminUserStore Users
@@ -6,10 +6,22 @@
 @inject TotpService Totp
 @inject RecoveryCodesCookie RecoveryCodesCookie
 @inject IOptions<AdminAuthOptions> AuthOptions
+@inject UserDisplay Display
 
 <PageTitle>Account</PageTitle>
 
-<main class="account-panel">
+<main class="account-panel wide page-layout">
+    <nav class="page-index" aria-label="Account sections">
+        <a class="index-default-link" href="/account#overview">Overview</a>
+        <a href="/account#password">Change password</a>
+        <a href="/account#step-up">Step-up verification</a>
+        <a href="/account#totp">TOTP</a>
+        <a href="/account#security-keys">Security keys</a>
+        <a href="/account#recovery-codes">Recovery codes</a>
+        <a href="/account#preferences">Preferences</a>
+        <a href="/account#sessions">Active sessions</a>
+    </nav>
+    <div class="page-content">
     <h1>Admin account</h1>
 
     @if (!string.IsNullOrWhiteSpace(Error))
@@ -27,7 +39,7 @@
     }
     else
     {
-        <section>
+        <section id="overview" class="indexed index-default">
             <h2>Signed in as @_user.Username</h2>
             @if (_user.MustChangePassword)
             {
@@ -37,6 +49,14 @@
             {
                 <p class="message error">TOTP enrollment is required before using the admin interface.</p>
             }
+            <dl class="detail-list">
+                <dt>TOTP</dt><dd>@(_user.TotpEnrolled ? "Enrolled" : "Not enrolled")</dd>
+                <dt>Security keys</dt><dd>@_webAuthnCredentials.Count enrolled</dd>
+                <dt>Step-up</dt><dd>@(_stepUpFresh ? "Verified for this session" : "Not verified; sensitive changes will prompt")</dd>
+                <dt>Active sessions</dt><dd>@_sessions.Count(s => s.RevokedAt is null)</dd>
+                <dt>Account created</dt><dd>@Display.Format(_user.CreatedAt)</dd>
+                <dt>Password changed</dt><dd>@Display.Format(_user.PasswordChangedAt)</dd>
+            </dl>
         </section>
 
         @if (_newRecoveryCodes.Count > 0)
@@ -53,7 +73,7 @@
             </section>
         }
 
-        <section>
+        <section id="password" class="indexed">
             <h2>Change password</h2>
             <form method="post" action="/auth/password/change">
                 <AntiforgeryToken />
@@ -73,7 +93,7 @@
             </form>
         </section>
 
-        <section>
+        <section id="step-up" class="indexed">
             <h2>Step-up verification</h2>
             @if (_stepUpFresh)
             {
@@ -103,10 +123,10 @@
             }
         </section>
 
-        @if (!_user.TotpEnrolled || _stepUpFresh)
-        {
-            <section>
-                <h2>@(_user.TotpEnrolled ? "Re-enroll TOTP" : "Enroll TOTP")</h2>
+        <section id="totp" class="indexed">
+            <h2>@(_user.TotpEnrolled ? "Re-enroll TOTP" : "Enroll TOTP")</h2>
+            @if (!_user.TotpEnrolled || _stepUpFresh)
+            {
                 <p>Enter this secret manually in your authenticator app, then verify the current code.</p>
                 <pre class="secret-block">@_setupSecret</pre>
                 <p class="small">otpauth URI:</p>
@@ -120,10 +140,17 @@
                     </label>
                     <button type="submit">@(_user.TotpEnrolled ? "Replace TOTP" : "Enroll TOTP")</button>
                 </form>
-            </section>
-        }
+            }
+            else
+            {
+                <div class="step-up-strip">
+                    <span>Re-enrolling TOTP requires step-up verification.</span>
+                    <StepUpPrompt ReturnTo="/account#totp" ShowSecurityKey="_webAuthnCredentials.Count > 0" PopoverId="step-up-popover-totp" />
+                </div>
+            }
+        </section>
 
-        <section>
+        <section id="security-keys" class="indexed">
             <h2>Security keys</h2>
             @if (_webAuthnCredentials.Count == 0)
             {
@@ -136,11 +163,11 @@
                     {
                         <li>
                             <strong>@credential.Name</strong>
-                            <span>Created @credential.CreatedAt.UtcDateTime.ToString("u")</span>
+                            <span>Created @Display.Format(credential.CreatedAt)</span>
                             <span>
                                 Last used @(credential.LastUsedAt is null
                                     ? "never"
-                                    : credential.LastUsedAt.Value.UtcDateTime.ToString("u"))
+                                    : Display.Format(credential.LastUsedAt.Value))
                             </span>
                             @if (_stepUpFresh)
                             {
@@ -174,19 +201,58 @@
             }
             else
             {
-                <p>Step-up verification is required before enrolling or removing security keys.</p>
+                <div class="step-up-strip">
+                    <span>Enrolling or removing security keys requires step-up verification.</span>
+                    <StepUpPrompt ReturnTo="/account#security-keys" ShowSecurityKey="_webAuthnCredentials.Count > 0" PopoverId="step-up-popover-keys" />
+                </div>
             }
         </section>
 
-        <section>
+        <section id="recovery-codes" class="indexed">
             <h2>Recovery codes</h2>
-            <form method="post" action="/auth/recovery-codes/regenerate">
+            @if (_stepUpFresh)
+            {
+                <form method="post" action="/auth/recovery-codes/regenerate">
+                    <AntiforgeryToken />
+                    <button type="submit">Regenerate recovery codes</button>
+                </form>
+            }
+            else
+            {
+                <div class="step-up-strip">
+                    <span>Regenerating recovery codes requires step-up verification.</span>
+                    <StepUpPrompt ReturnTo="/account#recovery-codes" ShowSecurityKey="_webAuthnCredentials.Count > 0" PopoverId="step-up-popover-codes" />
+                </div>
+            }
+        </section>
+
+        <section id="preferences" class="indexed">
+            <h2>Preferences</h2>
+            <form method="post" action="/account/preferences" class="edit-form">
                 <AntiforgeryToken />
-                <button type="submit">Regenerate recovery codes</button>
+                <label>
+                    Time zone
+                    <select name="timeZoneId">
+                        @foreach (var zone in _timeZones)
+                        {
+                            <option value="@zone.Id" selected="@(zone.Id == _preferences.TimeZoneId)">@zone.Label</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    Default page size
+                    <select name="pageSize">
+                        @foreach (var size in PageSizeOptions)
+                        {
+                            <option value="@size" selected="@(size == _preferences.PageSize)">@size</option>
+                        }
+                    </select>
+                </label>
+                <button type="submit">Save preferences</button>
             </form>
         </section>
 
-        <section>
+        <section id="sessions" class="indexed">
             <h2>Active sessions</h2>
             <form method="post" action="/auth/sessions/revoke">
                 <AntiforgeryToken />
@@ -199,7 +265,7 @@
                     <li>
                         <strong>@session.Ip</strong>
                         <span>@session.UserAgent</span>
-                        <span>Last seen @session.LastSeenAt.UtcDateTime.ToString("u")</span>
+                        <span>Last seen @Display.Format(session.LastSeenAt)</span>
                         @if (session.RevokedAt is null)
                         {
                             <form method="post" action="/auth/sessions/revoke">
@@ -210,20 +276,21 @@
                         }
                         else
                         {
-                            <span>Revoked @session.RevokedAt.Value.UtcDateTime.ToString("u")</span>
+                            <span>Revoked @Display.Format(session.RevokedAt.Value)</span>
                         }
                     </li>
                 }
             </ul>
         </section>
 
-        <section>
+        <section id="sign-out">
             <form method="post" action="/auth/logout">
                 <AntiforgeryToken />
                 <button type="submit">Sign out</button>
             </form>
         </section>
     }
+    </div>
 </main>
 
 @code {
@@ -232,9 +299,12 @@
     private IReadOnlyList<AdminSession> _sessions = [];
     private IReadOnlyList<AdminWebAuthnCredential> _webAuthnCredentials = [];
     private IReadOnlyList<string> _newRecoveryCodes = [];
+    private AdminUserPreferences _preferences = new() { UserId = Guid.Empty, UpdatedAt = DateTimeOffset.UtcNow };
+    private IReadOnlyList<TimeZoneOption> _timeZones = BuildTimeZoneOptions("UTC");
     private string _setupSecret = string.Empty;
     private string _otpUri = string.Empty;
     private bool _stepUpFresh;
+    private static readonly int[] PageSizeOptions = [25, 50, 100, 200];
 
     [SupplyParameterFromQuery(Name = "error")]
     public string? Error { get; set; }
@@ -244,6 +314,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await Display.InitializeAsync().ConfigureAwait(false);
         var context = HttpContextAccessor.HttpContext;
         if (context is null)
         {
@@ -262,6 +333,13 @@
             return;
         }
 
+        _preferences = await Users.GetPreferencesAsync(userId, context.RequestAborted).ConfigureAwait(false);
+        _timeZones = BuildTimeZoneOptions(_preferences.TimeZoneId);
+        if (!_timeZones.Any(z => z.Id == _preferences.TimeZoneId))
+        {
+            _preferences = _preferences with { TimeZoneId = "UTC" };
+        }
+
         _sessions = await Sessions.ListForUserAsync(userId, context.RequestAborted).ConfigureAwait(false);
         _webAuthnCredentials = await Users.ListWebAuthnCredentialsAsync(userId, context.RequestAborted).ConfigureAwait(false);
         var sessionIdClaim = context.User.FindFirstValue(AdminCookieNames.SessionIdClaim);
@@ -278,4 +356,35 @@
             _otpUri = Totp.BuildOtpAuthUri(_user.Username, _setupSecret);
         }
     }
+
+    private static IReadOnlyList<TimeZoneOption> BuildTimeZoneOptions(string selectedTimeZoneId)
+    {
+        var zones = TimeZoneInfo.GetSystemTimeZones().ToList();
+        if (!zones.Any(z => z.Id == "UTC"))
+        {
+            zones.Add(TimeZoneInfo.Utc);
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedTimeZoneId)
+            && !zones.Any(z => z.Id == selectedTimeZoneId)
+            && AdminUserPreferencesValidator.TryResolveTimeZone(selectedTimeZoneId, out var selectedTimeZone))
+        {
+            zones.Add(selectedTimeZone);
+        }
+
+        return zones
+            .OrderBy(z => z.BaseUtcOffset)
+            .ThenBy(z => z.Id, StringComparer.Ordinal)
+            .Select(z => new TimeZoneOption(z.Id, $"{FormatUtcOffset(z.BaseUtcOffset)} {z.DisplayName}"))
+            .ToList();
+    }
+
+    private static string FormatUtcOffset(TimeSpan offset)
+    {
+        var sign = offset < TimeSpan.Zero ? '-' : '+';
+        var absolute = offset.Duration();
+        return $"(UTC{sign}{(int)absolute.TotalHours:00}:{absolute.Minutes:00})";
+    }
+
+    private sealed record TimeZoneOption(string Id, string Label);
 }

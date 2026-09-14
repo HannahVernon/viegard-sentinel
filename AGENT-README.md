@@ -67,6 +67,7 @@ Phases 1-5 complete with provisional policy thresholds from D-0027 and determini
 - Primary repo: Forgejo `hannah-vernon/viegard-sentinel`; GitHub mirror `HannahVernon/viegard-sentinel`.  Vulnerabilities: see SECURITY.md.
 
 ## Changes
+- 2026-09-14: viegard-deploy.sh gains a configure command: generates docker-compose.generated.yml (TLS block, admin allowlist, retention defaults, syslog) layered UNDER the operator's docker-compose.yml via COMPOSE_FILE in .env, so operator declarations always win; verified merge semantics with docker compose config.
 - 2026-09-14: Added deploy/viegard-deploy.sh: scripted install/upgrade/status for a Debian host (branch switch dev/main, idempotent secrets, certbot + D-0034 hook wiring, liveness verification); documented in docs/deployment.md.
 - 2026-09-14: D-0035: retention worker (singleton `maintenance` role): per-table configurable purge periods (unset = keep forever), batched parameterized deletes, open-incident/live-session guards, corrections never purged, audited cycles, supporting indexes.
 - 2026-09-14: D-0034: adopted host certbot + deploy hook as the ACME mechanism (verified end-to-end on the live deployment); deferred in-process ACME to a future admin-UI domain/certificate management slice; recorded full domain-change support as a deferred item.

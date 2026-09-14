@@ -7,6 +7,31 @@ This runbook covers deploying the Viegard stack with Docker Compose and verifyin
 - Docker Engine with the Compose plugin
 - A clone of this repository on the host
 
+## Scripted deployment
+
+`deploy/viegard-deploy.sh` automates this runbook end to end on a Debian host.  The manual sections below remain the reference for what the script does and for deployments that need to deviate.
+
+```bash
+# Fresh host, loopback-only admin (default):
+sudo ./viegard-deploy.sh install
+
+# Fresh host with direct TLS (issues the certificate via host certbot and
+# installs the D-0034 renewal hook):
+sudo ./viegard-deploy.sh install --domain admin.example.com --email you@example.com
+
+# Upgrade an existing deployment (pulls the tracked branch, rebuilds only
+# when new commits arrived, verifies liveness after):
+sudo ./viegard-deploy.sh upgrade
+
+# Track main instead of dev (main is the future release branch):
+sudo ./viegard-deploy.sh upgrade --branch main
+
+# Health, cert expiry, and latest-backup overview:
+./viegard-deploy.sh status
+```
+
+Safety properties: secrets are generated only when missing and never overwritten or printed; an existing `docker-compose.yml` is never touched; certificate issuance is skipped when the certificate already exists; re-running `install` is safe.  The script does not edit `docker-compose.yml` for you - after a fresh install it prints a checklist of the operator-specific settings (exposure mode, WebAuthn relying party, AllowedSources, retention periods, data sources).
+
 ## 1. Prepare secrets and directories
 
 Each secret is one file in `deploy/secrets/`; the file name is the secret name (D-0006).  These directories are gitignored and must never be committed.

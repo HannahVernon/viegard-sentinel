@@ -247,6 +247,7 @@ input,
 
 input:focus,
 .edit-form select:focus,
+.page-size select:focus,
 button:focus-visible,
 a:focus-visible {
     outline: 2px solid var(--accent);
@@ -540,6 +541,52 @@ section {
     display: flex;
     gap: 1rem;
     margin-top: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.pagination-pages {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.page-indicator {
+    color: var(--muted);
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.page-size {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.page-size label {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.page-size select {
+    display: block;
+    width: auto;
+    padding: 0.35rem 0.5rem;
+    margin: 0;
+    background: var(--bg-raised);
+    color: var(--ink);
+    border: 1px solid var(--panel-border);
+    border-radius: 0.4rem;
+    box-sizing: border-box;
+}
+
+.page-size button {
+    margin-top: 0;
 }
 
 .actions-cell form {
@@ -569,6 +616,12 @@ section {
 .button-link:hover {
     border-color: var(--accent);
     color: var(--accent-strong);
+}
+
+.button-link.disabled {
+    color: var(--muted);
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .inline-checkbox {

@@ -60,7 +60,7 @@ public sealed class AdminConfigAuditorTests
             Guid? beforeId,
             int pageSize,
             CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult(new KeysetPage<AuditRecord>(Records, null));
+            ValueTask.FromResult(new KeysetPage<AuditRecord>(Records, null, Records.Count, 0));
     }
 
     private sealed class SilentLogger<T> : ILogger<T>

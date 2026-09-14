@@ -3,6 +3,7 @@
 @inject IIncidentStore IncidentStore
 @inject IClassificationStore ClassificationStore
 @inject IDecisionStore DecisionStore
+@inject UserDisplay Display
 
 <PageTitle>Viegard incident</PageTitle>
 
@@ -17,7 +18,7 @@
         <h1>Incident @AdminText.ShortId(_incident.Id)</h1>
         <dl class="detail-list">
             <dt>Correlation key</dt><dd>@_incident.CorrelationKey</dd>
-            <dt>Window</dt><dd>@AdminText.Utc(_incident.WindowStart) to @AdminText.Utc(_incident.WindowEnd)</dd>
+            <dt>Window</dt><dd>@Display.Format(_incident.WindowStart) to @Display.Format(_incident.WindowEnd)</dd>
             <dt>State</dt><dd>@_incident.State</dd>
         </dl>
 
@@ -72,7 +73,7 @@
                 {
                     <article class="card">
                         <h3>@row.Classification.Category severity @row.Classification.Severity</h3>
-                        <p>Classifier @row.Classification.ClassifierId, confidence @row.Classification.Confidence, created @AdminText.Utc(row.Classification.CreatedAt).</p>
+                        <p>Classifier @row.Classification.ClassifierId, confidence @row.Classification.Confidence, created @Display.Format(row.Classification.CreatedAt).</p>
                         <ul>
                             @foreach (var reason in row.Classification.Reasons)
                             {
@@ -85,7 +86,7 @@
                             <ul>
                                 @foreach (var decision in row.Decisions)
                                 {
-                                    <li><a href="/decisions/@decision.Id">@decision.Outcome</a> at @AdminText.Utc(decision.CreatedAt)</li>
+                                    <li><a href="/decisions/@decision.Id">@decision.Outcome</a> at @Display.Format(decision.CreatedAt)</li>
                                 }
                             </ul>
                         }
@@ -105,6 +106,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await Display.InitializeAsync().ConfigureAwait(false);
         _incident = await IncidentStore.GetAsync(Id).ConfigureAwait(false);
         if (_incident is null)
         {

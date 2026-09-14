@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject IDecisionStore DecisionStore
 @inject IClassificationStore ClassificationStore
+@inject UserDisplay Display
 
 <PageTitle>Viegard decisions</PageTitle>
 
@@ -28,7 +29,7 @@
                 @foreach (var row in _rows)
                 {
                     <tr>
-                        <td><a href="/decisions/@row.Decision.Id">@AdminText.Utc(row.Decision.CreatedAt)</a></td>
+                        <td><a href="/decisions/@row.Decision.Id">@Display.Format(row.Decision.CreatedAt)</a></td>
                         <td>@row.Decision.PolicyId @row.Decision.PolicyVersion</td>
                         <td><span class="@AdminText.OutcomeCss(row.Decision.Outcome)">@row.Decision.Outcome</span></td>
                         <td>@ClassificationSummary(row.Classification)</td>
@@ -37,13 +38,18 @@
                 }
             </tbody>
         </table>
-        <KeysetPagination BasePath="/decisions" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" />
+        <KeysetPagination BasePath="/decisions" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" />
     }
 </main>
 
 @code {
-    private KeysetPage<Decision> _page = new([], null);
+    private KeysetPage<Decision> _page = new([], null, 0, 0);
     private IReadOnlyList<DecisionRow> _rows = [];
+
+    private int _take = KeysetPagination.DefaultPageSize;
+
+    [SupplyParameterFromQuery(Name = "take")]
+    public int? Take { get; set; }
 
     [SupplyParameterFromQuery(Name = "cursor")]
     public Guid? Cursor { get; set; }
@@ -53,7 +59,9 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _page = await DecisionStore.ListPageAsync(Cursor, 50).ConfigureAwait(false);
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _take = Take is null ? Display.DefaultPageSize : KeysetPagination.ClampPageSize(Take);
+        _page = await DecisionStore.ListPageAsync(Cursor, _take).ConfigureAwait(false);
         var rows = new List<DecisionRow>();
         foreach (var decision in _page.Items)
         {

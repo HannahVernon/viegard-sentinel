@@ -100,7 +100,13 @@ public sealed class PostgresEventStore(IDbContextFactory<ViegardDbContext> facto
         }
 
         var nextCursor = rows.Count > safePageSize && domains.Count > 0 ? domains[^1].Id : (Guid?)null;
-        return new KeysetPage<NormalizedEvent>(domains, nextCursor);
+        // COUNT(*) is acceptable for these operator-only admin lists at the
+        // expected scale, and keeps the page indicator honest.
+        var totalCount = await db.Events.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        var preceding = domains.Count == 0
+            ? 0
+            : await db.Events.LongCountAsync(e => e.Id.CompareTo(domains[0].Id) > 0, cancellationToken).ConfigureAwait(false);
+        return new KeysetPage<NormalizedEvent>(domains, nextCursor, totalCount, preceding);
     }
 }
 
@@ -156,7 +162,13 @@ public sealed class PostgresIncidentStore(IDbContextFactory<ViegardDbContext> fa
             .ConfigureAwait(false);
         var items = rows.Take(safePageSize).Select(r => r.ToDomain()).ToList();
         var nextCursor = rows.Count > safePageSize && items.Count > 0 ? items[^1].Id : (Guid?)null;
-        return new KeysetPage<Incident>(items, nextCursor);
+        // COUNT(*) is acceptable for these operator-only admin lists at the
+        // expected scale, and keeps the page indicator honest.
+        var totalCount = await db.Incidents.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        var preceding = items.Count == 0
+            ? 0
+            : await db.Incidents.LongCountAsync(i => i.Id.CompareTo(items[0].Id) > 0, cancellationToken).ConfigureAwait(false);
+        return new KeysetPage<Incident>(items, nextCursor, totalCount, preceding);
     }
 }
 
@@ -227,7 +239,13 @@ public sealed class PostgresClassificationStore(IDbContextFactory<ViegardDbConte
         }
 
         var nextCursor = rows.Count > safePageSize && items.Count > 0 ? items[^1].Id : (Guid?)null;
-        return new KeysetPage<Classification>(items, nextCursor);
+        // COUNT(*) is acceptable for these operator-only admin lists at the
+        // expected scale, and keeps the page indicator honest.
+        var totalCount = await db.Classifications.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        var preceding = items.Count == 0
+            ? 0
+            : await db.Classifications.LongCountAsync(c => c.Id.CompareTo(items[0].Id) > 0, cancellationToken).ConfigureAwait(false);
+        return new KeysetPage<Classification>(items, nextCursor, totalCount, preceding);
     }
 }
 
@@ -297,7 +315,13 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
         }
 
         var nextCursor = rows.Count > safePageSize && items.Count > 0 ? items[^1].Id : (Guid?)null;
-        return new KeysetPage<Decision>(items, nextCursor);
+        // COUNT(*) is acceptable for these operator-only admin lists at the
+        // expected scale, and keeps the page indicator honest.
+        var totalCount = await db.Decisions.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        var preceding = items.Count == 0
+            ? 0
+            : await db.Decisions.LongCountAsync(d => d.Id.CompareTo(items[0].Id) > 0, cancellationToken).ConfigureAwait(false);
+        return new KeysetPage<Decision>(items, nextCursor, totalCount, preceding);
     }
 }
 
@@ -400,7 +424,13 @@ public sealed class PostgresAuditLedger(IDbContextFactory<ViegardDbContext> fact
         }
 
         var nextCursor = rows.Count > safePageSize && items.Count > 0 ? items[^1].Id : (Guid?)null;
-        return new KeysetPage<AuditRecord>(items, nextCursor);
+        // COUNT(*) is acceptable for these operator-only admin lists at the
+        // expected scale, and keeps the page indicator honest.
+        var totalCount = await db.AuditRecords.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        var preceding = items.Count == 0
+            ? 0
+            : await db.AuditRecords.LongCountAsync(a => a.Id.CompareTo(items[0].Id) > 0, cancellationToken).ConfigureAwait(false);
+        return new KeysetPage<AuditRecord>(items, nextCursor, totalCount, preceding);
     }
 }
 
@@ -830,6 +860,50 @@ public sealed class PostgresAdminUserStore(IDbContextFactory<ViegardDbContext> f
             .ExecuteDeleteAsync(cancellationToken)
             .ConfigureAwait(false);
         return deleted == 1;
+    }
+
+    public async ValueTask<AdminUserPreferences> GetPreferencesAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await db.AdminUserPreferences.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken)
+            .ConfigureAwait(false);
+        return row?.ToDomain() ?? new AdminUserPreferences
+        {
+            UserId = userId,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+    }
+
+    public async ValueTask SavePreferencesAsync(
+        AdminUserPreferences preferences,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        var normalized = preferences with
+        {
+            TimeZoneId = preferences.TimeZoneId.Trim(),
+            PageSize = Math.Clamp(
+                preferences.PageSize,
+                AdminUserPreferences.MinPageSize,
+                AdminUserPreferences.MaxPageSize),
+            UpdatedAt = preferences.UpdatedAt.ToUniversalTime(),
+        };
+
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var existing = await db.AdminUserPreferences
+            .FirstOrDefaultAsync(p => p.UserId == normalized.UserId, cancellationToken)
+            .ConfigureAwait(false);
+        if (existing is null)
+        {
+            db.AdminUserPreferences.Add(normalized.ToRow());
+        }
+        else
+        {
+            db.Entry(existing).CurrentValues.SetValues(normalized.ToRow());
+        }
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static string NormalizeUsername(string username) =>

@@ -69,7 +69,11 @@ public sealed class CustomSignatureTests
         var page2 = await store.ListPageAsync(page1.NextCursor, pageSize: 2);
 
         Assert.Equal([third.Id, second.Id], page1.Items.Select(i => i.Id));
+        Assert.Equal(3, page1.TotalCount);
+        Assert.Equal(0, page1.Preceding);
         Assert.Equal(first.Id, Assert.Single(page2.Items).Id);
+        Assert.Equal(3, page2.TotalCount);
+        Assert.Equal(2, page2.Preceding);
         Assert.Null(page2.NextCursor);
     }
 

@@ -116,6 +116,66 @@ public sealed class AdminAuthTests
     }
 
     [Fact]
+    public async Task In_memory_preferences_return_defaults_when_missing_and_round_trip()
+    {
+        var store = new InMemoryAdminUserStore();
+        var userId = ViegardId.New();
+        var before = DateTimeOffset.UtcNow;
+
+        var missing = await store.GetPreferencesAsync(userId);
+
+        Assert.Equal(userId, missing.UserId);
+        Assert.Equal("UTC", missing.TimeZoneId);
+        Assert.Equal(AdminUserPreferences.DefaultPageSize, missing.PageSize);
+        Assert.InRange(missing.UpdatedAt, before, DateTimeOffset.UtcNow);
+
+        var savedAt = DateTimeOffset.Parse("2026-09-14T16:30:00-05:00");
+        await store.SavePreferencesAsync(new AdminUserPreferences
+        {
+            UserId = userId,
+            TimeZoneId = " UTC ",
+            PageSize = AdminUserPreferences.MaxPageSize + 100,
+            UpdatedAt = savedAt,
+        });
+
+        var saved = await store.GetPreferencesAsync(userId);
+        Assert.Equal("UTC", saved.TimeZoneId);
+        Assert.Equal(AdminUserPreferences.MaxPageSize, saved.PageSize);
+        Assert.Equal(savedAt.ToUniversalTime(), saved.UpdatedAt);
+    }
+
+    [Fact]
+    public void Preferences_validation_accepts_utc_and_rejects_unknown_time_zone()
+    {
+        var userId = ViegardId.New();
+        var updatedAt = DateTimeOffset.UtcNow;
+
+        var accepted = AdminUserPreferencesValidator.TryNormalize(
+            userId,
+            "UTC",
+            AdminUserPreferences.MaxPageSize + 1,
+            updatedAt,
+            out var preferences,
+            out var acceptedError);
+
+        Assert.True(accepted);
+        Assert.Equal(string.Empty, acceptedError);
+        Assert.Equal("UTC", preferences.TimeZoneId);
+        Assert.Equal(AdminUserPreferences.MaxPageSize, preferences.PageSize);
+
+        var rejected = AdminUserPreferencesValidator.TryNormalize(
+            userId,
+            "not-a-real-time-zone",
+            50,
+            updatedAt,
+            out _,
+            out var rejectedError);
+
+        Assert.False(rejected);
+        Assert.Contains("not recognized", rejectedError, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task In_memory_sessions_support_expiry_revocation_and_activity_refresh()
     {
         var store = new InMemoryAdminSessionStore();

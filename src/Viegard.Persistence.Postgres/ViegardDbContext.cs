@@ -55,6 +55,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<AdminWebAuthnCredentialRow> AdminWebAuthnCredentials => Set<AdminWebAuthnCredentialRow>();
 
+    public DbSet<AdminUserPreferencesRow> AdminUserPreferences => Set<AdminUserPreferencesRow>();
+
     public DbSet<AdminSessionRow> AdminSessions => Set<AdminSessionRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -243,6 +245,13 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
             entity.Property(e => e.CredentialId).HasColumnType("bytea");
             entity.Property(e => e.PublicKey).HasColumnType("bytea");
+        });
+
+        modelBuilder.Entity<AdminUserPreferencesRow>(entity =>
+        {
+            entity.ToTable("admin_user_preferences");
+            entity.HasKey(e => e.UserId);
+            entity.HasOne<AdminUserRow>().WithOne().HasForeignKey<AdminUserPreferencesRow>(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<AdminSessionRow>(entity =>

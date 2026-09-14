@@ -353,6 +353,7 @@ public sealed class InMemoryAdminUserStore : IAdminUserStore
     private readonly ConcurrentDictionary<Guid, AdminRecoveryCode> _recoveryCodes = new();
     private readonly ConcurrentDictionary<Guid, AdminWebAuthnCredential> _webAuthnCredentials = new();
     private readonly ConcurrentDictionary<string, Guid> _webAuthnCredentialIds = new();
+    private readonly ConcurrentDictionary<Guid, AdminUserPreferences> _preferences = new();
 
     public ValueTask<bool> AnyUsersAsync(CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(!_users.IsEmpty);
@@ -548,6 +549,28 @@ public sealed class InMemoryAdminUserStore : IAdminUserStore
         }
     }
 
+    public ValueTask<AdminUserPreferences> GetPreferencesAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(_preferences.GetValueOrDefault(userId) ?? new AdminUserPreferences
+        {
+            UserId = userId,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+
+    public ValueTask SavePreferencesAsync(AdminUserPreferences preferences, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+        _preferences[preferences.UserId] = preferences with
+        {
+            TimeZoneId = preferences.TimeZoneId.Trim(),
+            PageSize = Math.Clamp(
+                preferences.PageSize,
+                AdminUserPreferences.MinPageSize,
+                AdminUserPreferences.MaxPageSize),
+            UpdatedAt = preferences.UpdatedAt.ToUniversalTime(),
+        };
+        return ValueTask.CompletedTask;
+    }
+
     private static string NormalizeUsername(string username) =>
         username.Trim().ToLowerInvariant();
 
@@ -654,15 +677,21 @@ internal static class InMemoryPaging
         Func<T, Guid> getId)
     {
         var safePageSize = Math.Clamp(pageSize, 1, 200);
-        var pagePlusOne = source
-            .Where(item => beforeId is null || getId(item).CompareTo(beforeId.Value) < 0)
+        var ordered = source
             .OrderByDescending(getId)
+            .ToList();
+        var totalCount = ordered.Count;
+        var pagePlusOne = ordered
+            .Where(item => beforeId is null || getId(item).CompareTo(beforeId.Value) < 0)
             .Take(safePageSize + 1)
             .ToList();
         var items = pagePlusOne.Take(safePageSize).ToList();
         var nextCursor = pagePlusOne.Count > safePageSize && items.Count > 0
             ? getId(items[^1])
             : (Guid?)null;
-        return new KeysetPage<T>(items, nextCursor);
+        var preceding = items.Count == 0
+            ? 0
+            : ordered.LongCount(item => getId(item).CompareTo(getId(items[0])) > 0);
+        return new KeysetPage<T>(items, nextCursor, totalCount, preceding);
     }
 }

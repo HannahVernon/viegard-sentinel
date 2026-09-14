@@ -18,6 +18,7 @@ public enum AdminAuthEventKind
     WebAuthnFailed,
     WebAuthnRemoved,
     WebAuthnCloneWarning,
+    PreferencesChanged,
 }
 
 /// <summary>Security event emitted by the admin authentication boundary.</summary>

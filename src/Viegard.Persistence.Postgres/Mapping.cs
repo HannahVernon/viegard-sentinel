@@ -309,6 +309,22 @@ internal static class Mapping
         CreatedAt = row.CreatedAt,
     };
 
+    public static AdminUserPreferencesRow ToRow(this AdminUserPreferences preferences) => new()
+    {
+        UserId = preferences.UserId,
+        TimeZoneId = preferences.TimeZoneId,
+        PageSize = preferences.PageSize,
+        UpdatedAt = Utc(preferences.UpdatedAt),
+    };
+
+    public static AdminUserPreferences ToDomain(this AdminUserPreferencesRow row) => new()
+    {
+        UserId = row.UserId,
+        TimeZoneId = row.TimeZoneId,
+        PageSize = row.PageSize,
+        UpdatedAt = row.UpdatedAt,
+    };
+
     public static AdminWebAuthnCredentialRow ToRow(this AdminWebAuthnCredential credential) => new()
     {
         Id = credential.Id,

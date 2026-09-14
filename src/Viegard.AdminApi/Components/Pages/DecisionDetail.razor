@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject IDecisionStore DecisionStore
 @inject IClassificationStore ClassificationStore
+@inject UserDisplay Display
 
 <PageTitle>Viegard decision</PageTitle>
 
@@ -15,7 +16,7 @@
     {
         <h1>Decision @AdminText.ShortId(_decision.Id)</h1>
         <dl class="detail-list">
-            <dt>Created</dt><dd>@AdminText.Utc(_decision.CreatedAt)</dd>
+            <dt>Created</dt><dd>@Display.Format(_decision.CreatedAt)</dd>
             <dt>Policy</dt><dd>@_decision.PolicyId @_decision.PolicyVersion</dd>
             <dt>Outcome</dt><dd><span class="@AdminText.OutcomeCss(_decision.Outcome)">@_decision.Outcome</span></dd>
             <dt>Classification</dt><dd>@ClassificationText</dd>
@@ -74,6 +75,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await Display.InitializeAsync().ConfigureAwait(false);
         _decision = await DecisionStore.GetAsync(Id).ConfigureAwait(false);
         if (_decision is not null)
         {

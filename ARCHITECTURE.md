@@ -117,7 +117,8 @@ The admin API never calls into the pipeline process.  It reads shared persistenc
 Viegard.slnx                   Solution (XML solution format; .NET 10 SDK default)
 Directory.Build.props          NuGetAudit, nullable, warnings-as-errors, LangVersion
 src/
-  Viegard.Domain/              Entities, value objects, enums; zero external dependencies
+  Viegard.Domain/              Entities, value objects, enums, admin preferences;
+                               zero external dependencies
   Viegard.Application/         Ports (interfaces), deterministic classification,
                                pipeline orchestration, policy engine, prompt assembly,
                                schema validation, guardrails, admin auth helpers
@@ -137,9 +138,11 @@ src/
   Viegard.PipelineHost/        Worker service executable, including ingestion,
                                correlation, classification, and policy workers
   Viegard.AdminApi/            Admin API executable, auth endpoints, WebAuthn adapter,
-                               static SSR pages, first-party WebAuthn JS bridge
+                               static SSR pages, display preferences, keyset
+                               pagination UI, first-party WebAuthn JS bridge
 tests/
-  Viegard.AdminApi.Tests/      Admin API adapter and WebAuthn option tests
+  Viegard.AdminApi.Tests/      Admin API adapter, WebAuthn option, display, and
+                               pagination tests
   Viegard.Domain.Tests/
   Viegard.Application.Tests/   Policy, guardrails, deterministic classification,
                                schema validation, prompt injection

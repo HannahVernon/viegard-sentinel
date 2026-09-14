@@ -82,6 +82,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddRazorComponents();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddDataProtection();
+builder.Services.AddScoped<UserDisplay>();
 builder.Services.AddSingleton<TotpService>();
 builder.Services.AddSingleton<RecoveryCodeService>();
 builder.Services.AddSingleton<AdminPasswordService>();

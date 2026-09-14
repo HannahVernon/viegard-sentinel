@@ -371,6 +371,17 @@ public sealed class AdminWebAuthnCredentialRow
     public DateTimeOffset? LastUsedAt { get; set; }
 }
 
+public sealed class AdminUserPreferencesRow
+{
+    public Guid UserId { get; set; }
+
+    public string TimeZoneId { get; set; } = "UTC";
+
+    public int PageSize { get; set; } = 50;
+
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
 public sealed class AdminSessionRow
 {
     public Guid Id { get; set; }

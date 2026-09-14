@@ -1,6 +1,7 @@
 @page "/incidents"
 @attribute [Authorize]
 @inject IIncidentStore IncidentStore
+@inject UserDisplay Display
 
 <PageTitle>Viegard incidents</PageTitle>
 
@@ -29,19 +30,24 @@
                     <tr>
                         <td><a href="/incidents/@incident.Id">@AdminText.ShortId(incident.Id)</a></td>
                         <td>@AdminText.OneLine(incident.CorrelationKey)</td>
-                        <td>@AdminText.Utc(incident.WindowStart) to @AdminText.Utc(incident.WindowEnd)</td>
+                        <td>@Display.Format(incident.WindowStart) to @Display.Format(incident.WindowEnd)</td>
                         <td>@incident.State</td>
                         <td>@incident.EventIds.Count</td>
                     </tr>
                 }
             </tbody>
         </table>
-        <KeysetPagination BasePath="/incidents" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" />
+        <KeysetPagination BasePath="/incidents" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" />
     }
 </main>
 
 @code {
-    private KeysetPage<Incident> _page = new([], null);
+    private KeysetPage<Incident> _page = new([], null, 0, 0);
+
+    private int _take = KeysetPagination.DefaultPageSize;
+
+    [SupplyParameterFromQuery(Name = "take")]
+    public int? Take { get; set; }
 
     [SupplyParameterFromQuery(Name = "cursor")]
     public Guid? Cursor { get; set; }
@@ -51,6 +57,8 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _page = await IncidentStore.ListPageAsync(Cursor, 50).ConfigureAwait(false);
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _take = Take is null ? Display.DefaultPageSize : KeysetPagination.ClampPageSize(Take);
+        _page = await IncidentStore.ListPageAsync(Cursor, _take).ConfigureAwait(false);
     }
 }

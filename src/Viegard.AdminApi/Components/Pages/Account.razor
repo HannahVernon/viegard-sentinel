@@ -6,6 +6,7 @@
 @inject TotpService Totp
 @inject RecoveryCodesCookie RecoveryCodesCookie
 @inject IOptions<AdminAuthOptions> AuthOptions
+@inject UserDisplay Display
 
 <PageTitle>Account</PageTitle>
 
@@ -136,11 +137,11 @@
                     {
                         <li>
                             <strong>@credential.Name</strong>
-                            <span>Created @credential.CreatedAt.UtcDateTime.ToString("u")</span>
+                            <span>Created @Display.Format(credential.CreatedAt)</span>
                             <span>
                                 Last used @(credential.LastUsedAt is null
                                     ? "never"
-                                    : credential.LastUsedAt.Value.UtcDateTime.ToString("u"))
+                                    : Display.Format(credential.LastUsedAt.Value))
                             </span>
                             @if (_stepUpFresh)
                             {
@@ -187,6 +188,32 @@
         </section>
 
         <section>
+            <h2>Preferences</h2>
+            <form method="post" action="/account/preferences" class="edit-form">
+                <AntiforgeryToken />
+                <label>
+                    Time zone
+                    <select name="timeZoneId">
+                        @foreach (var zone in _timeZones)
+                        {
+                            <option value="@zone.Id" selected="@(zone.Id == _preferences.TimeZoneId)">@zone.Label</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    Default page size
+                    <select name="pageSize">
+                        @foreach (var size in PageSizeOptions)
+                        {
+                            <option value="@size" selected="@(size == _preferences.PageSize)">@size</option>
+                        }
+                    </select>
+                </label>
+                <button type="submit">Save preferences</button>
+            </form>
+        </section>
+
+        <section>
             <h2>Active sessions</h2>
             <form method="post" action="/auth/sessions/revoke">
                 <AntiforgeryToken />
@@ -199,7 +226,7 @@
                     <li>
                         <strong>@session.Ip</strong>
                         <span>@session.UserAgent</span>
-                        <span>Last seen @session.LastSeenAt.UtcDateTime.ToString("u")</span>
+                        <span>Last seen @Display.Format(session.LastSeenAt)</span>
                         @if (session.RevokedAt is null)
                         {
                             <form method="post" action="/auth/sessions/revoke">
@@ -210,7 +237,7 @@
                         }
                         else
                         {
-                            <span>Revoked @session.RevokedAt.Value.UtcDateTime.ToString("u")</span>
+                            <span>Revoked @Display.Format(session.RevokedAt.Value)</span>
                         }
                     </li>
                 }
@@ -232,9 +259,12 @@
     private IReadOnlyList<AdminSession> _sessions = [];
     private IReadOnlyList<AdminWebAuthnCredential> _webAuthnCredentials = [];
     private IReadOnlyList<string> _newRecoveryCodes = [];
+    private AdminUserPreferences _preferences = new() { UserId = Guid.Empty, UpdatedAt = DateTimeOffset.UtcNow };
+    private IReadOnlyList<TimeZoneOption> _timeZones = BuildTimeZoneOptions("UTC");
     private string _setupSecret = string.Empty;
     private string _otpUri = string.Empty;
     private bool _stepUpFresh;
+    private static readonly int[] PageSizeOptions = [25, 50, 100, 200];
 
     [SupplyParameterFromQuery(Name = "error")]
     public string? Error { get; set; }
@@ -244,6 +274,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await Display.InitializeAsync().ConfigureAwait(false);
         var context = HttpContextAccessor.HttpContext;
         if (context is null)
         {
@@ -262,6 +293,13 @@
             return;
         }
 
+        _preferences = await Users.GetPreferencesAsync(userId, context.RequestAborted).ConfigureAwait(false);
+        _timeZones = BuildTimeZoneOptions(_preferences.TimeZoneId);
+        if (!_timeZones.Any(z => z.Id == _preferences.TimeZoneId))
+        {
+            _preferences = _preferences with { TimeZoneId = "UTC" };
+        }
+
         _sessions = await Sessions.ListForUserAsync(userId, context.RequestAborted).ConfigureAwait(false);
         _webAuthnCredentials = await Users.ListWebAuthnCredentialsAsync(userId, context.RequestAborted).ConfigureAwait(false);
         var sessionIdClaim = context.User.FindFirstValue(AdminCookieNames.SessionIdClaim);
@@ -278,4 +316,35 @@
             _otpUri = Totp.BuildOtpAuthUri(_user.Username, _setupSecret);
         }
     }
+
+    private static IReadOnlyList<TimeZoneOption> BuildTimeZoneOptions(string selectedTimeZoneId)
+    {
+        var zones = TimeZoneInfo.GetSystemTimeZones().ToList();
+        if (!zones.Any(z => z.Id == "UTC"))
+        {
+            zones.Add(TimeZoneInfo.Utc);
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedTimeZoneId)
+            && !zones.Any(z => z.Id == selectedTimeZoneId)
+            && AdminUserPreferencesValidator.TryResolveTimeZone(selectedTimeZoneId, out var selectedTimeZone))
+        {
+            zones.Add(selectedTimeZone);
+        }
+
+        return zones
+            .OrderBy(z => z.BaseUtcOffset)
+            .ThenBy(z => z.Id, StringComparer.Ordinal)
+            .Select(z => new TimeZoneOption(z.Id, $"{FormatUtcOffset(z.BaseUtcOffset)} {z.DisplayName}"))
+            .ToList();
+    }
+
+    private static string FormatUtcOffset(TimeSpan offset)
+    {
+        var sign = offset < TimeSpan.Zero ? '-' : '+';
+        var absolute = offset.Duration();
+        return $"(UTC{sign}{(int)absolute.TotalHours:00}:{absolute.Minutes:00})";
+    }
+
+    private sealed record TimeZoneOption(string Id, string Label);
 }

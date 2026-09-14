@@ -39,6 +39,9 @@ public static class AdminAuthEndpoints
         app.MapPost("/auth/password/change", ChangePasswordAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
+        app.MapPost("/account/preferences", SavePreferencesAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
         app.MapPost("/auth/totp/enroll", EnrollTotpAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
@@ -359,6 +362,43 @@ public static class AdminAuthEndpoints
         await auditor.RecordAsync(AdminAuthEventKind.PasswordChanged, updated.Username, context, cancellationToken: context.RequestAborted)
             .ConfigureAwait(false);
         return Redirect("/account", status: "Password changed.");
+    }
+
+    private static async Task<IResult> SavePreferencesAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IAdminUserStore users,
+        AdminAuthAuditor auditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!int.TryParse(form["pageSize"].ToString(), out var pageSize))
+        {
+            return Redirect("/account", error: "Page size must be a number.");
+        }
+
+        if (!AdminUserPreferencesValidator.TryNormalize(
+            user.Id,
+            form["timeZoneId"].ToString(),
+            pageSize,
+            DateTimeOffset.UtcNow,
+            out var preferences,
+            out var error))
+        {
+            return Redirect("/account", error: error);
+        }
+
+        // Preferences only affect display formatting, not authentication or
+        // authorization, so they intentionally do not require step-up.
+        await users.SavePreferencesAsync(preferences, context.RequestAborted).ConfigureAwait(false);
+        await auditor.RecordAsync(AdminAuthEventKind.PreferencesChanged, user.Username, context, cancellationToken: context.RequestAborted)
+            .ConfigureAwait(false);
+        return Redirect("/account", status: "Preferences saved.");
     }
 
     private static async Task<IResult> EnrollTotpAsync(

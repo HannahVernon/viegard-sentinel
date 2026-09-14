@@ -1,6 +1,7 @@
 ﻿@page "/queues"
 @attribute [Authorize]
 @inject IQueueTelemetryStore QueueTelemetry
+@inject UserDisplay Display
 
 <PageTitle>Viegard queues</PageTitle>
 
@@ -39,7 +40,7 @@
                         <td>@OldestAge(row.Snapshot)</td>
                         <td>@row.Snapshot.DeadLetterCount</td>
                         <td>@row.Snapshot.TotalEnqueued / @row.Snapshot.TotalCompleted / @row.Snapshot.TotalAbandoned</td>
-                        <td>@AdminText.Utc(row.Snapshot.CapturedAt)</td>
+                        <td>@Display.Format(row.Snapshot.CapturedAt)</td>
                     </tr>
                     @if (row.Status.Light != TrafficLight.Green)
                     {
@@ -60,6 +61,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await Display.InitializeAsync().ConfigureAwait(false);
         _now = DateTimeOffset.UtcNow;
         var snapshots = await QueueTelemetry.GetLatestAsync().ConfigureAwait(false);
         _rows = snapshots

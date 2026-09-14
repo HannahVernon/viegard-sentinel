@@ -1,6 +1,7 @@
 @page "/audit"
 @attribute [Authorize]
 @inject IAuditLedger AuditLedger
+@inject UserDisplay Display
 
 <PageTitle>Viegard audit</PageTitle>
 
@@ -27,7 +28,7 @@
                 @foreach (var record in _page.Items)
                 {
                     <tr>
-                        <td>@AdminText.Utc(record.Timestamp)</td>
+                        <td>@Display.Format(record.Timestamp)</td>
                         <td>@record.Stage</td>
                         <td>@AdminText.OneLine(record.Summary, 260)</td>
                         <td>@record.SourceId</td>
@@ -68,12 +69,17 @@
                 }
             </tbody>
         </table>
-        <KeysetPagination BasePath="/audit" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" />
+        <KeysetPagination BasePath="/audit" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" />
     }
 </main>
 
 @code {
-    private KeysetPage<AuditRecord> _page = new([], null);
+    private KeysetPage<AuditRecord> _page = new([], null, 0, 0);
+
+    private int _take = KeysetPagination.DefaultPageSize;
+
+    [SupplyParameterFromQuery(Name = "take")]
+    public int? Take { get; set; }
 
     [SupplyParameterFromQuery(Name = "cursor")]
     public Guid? Cursor { get; set; }
@@ -83,6 +89,8 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _page = await AuditLedger.ListPageAsync(Cursor, 50).ConfigureAwait(false);
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _take = Take is null ? Display.DefaultPageSize : KeysetPagination.ClampPageSize(Take);
+        _page = await AuditLedger.ListPageAsync(Cursor, _take).ConfigureAwait(false);
     }
 }

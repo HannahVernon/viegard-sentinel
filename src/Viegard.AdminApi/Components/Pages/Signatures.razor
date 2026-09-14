@@ -6,6 +6,7 @@
 @inject IAdminSessionStore Sessions
 @inject IHttpContextAccessor HttpContextAccessor
 @inject IOptions<AdminAuthOptions> AuthOptions
+@inject UserDisplay Display
 
 <PageTitle>Viegard signatures</PageTitle>
 
@@ -63,7 +64,7 @@
                             <td>@signature.Category</td>
                             <td>@signature.Severity</td>
                             <td><span class="@(signature.Enabled ? "badge badge-green" : "badge")">@(signature.Enabled ? "Enabled" : "Disabled")</span></td>
-                            <td>@signature.UpdatedBy at @AdminText.Utc(signature.UpdatedAt)</td>
+                            <td>@signature.UpdatedBy at @Display.Format(signature.UpdatedAt)</td>
                             <td>@signature.Version</td>
                             <td class="actions-cell">
                                 <a class="button-link" href="/signatures?editId=@signature.Id">Edit</a>
@@ -158,6 +159,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await Display.InitializeAsync().ConfigureAwait(false);
         _signatures = await SignatureStore.ListAsync().ConfigureAwait(false);
         if (EditId is not null)
         {

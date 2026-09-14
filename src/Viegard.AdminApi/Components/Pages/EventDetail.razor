@@ -1,6 +1,7 @@
 @page "/events/{Id:guid}"
 @attribute [Authorize]
 @inject IEventStore EventStore
+@inject UserDisplay Display
 
 <PageTitle>Viegard event</PageTitle>
 
@@ -14,7 +15,7 @@
     {
         <h1>Event @AdminText.ShortId(_event.Id)</h1>
         <dl class="detail-list">
-            <dt>Occurred</dt><dd>@AdminText.Utc(_event.OccurredAt)</dd>
+            <dt>Occurred</dt><dd>@Display.Format(_event.OccurredAt)</dd>
             <dt>Source</dt><dd>@_event.SourceId (@_event.SourceType)</dd>
             <dt>Raw observation</dt><dd>@AdminText.ShortId(_event.RawObservationId)</dd>
             <dt>Payload type</dt><dd>@AdminText.PayloadTypeName(_event.Payload)</dd>
@@ -70,10 +71,11 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await Display.InitializeAsync().ConfigureAwait(false);
         _event = await EventStore.GetAsync(Id).ConfigureAwait(false);
         if (_event is not null)
         {
-            _fields = AdminText.PayloadFields(_event.Payload);
+            _fields = AdminText.PayloadFields(_event.Payload, Display.Format);
         }
     }
 }

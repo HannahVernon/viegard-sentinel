@@ -4,7 +4,17 @@
 
 - You are running commands from the repository root on Windows PowerShell.  Paths in commands use Windows separators.
 - PostgreSQL is optional for an empty admin UI smoke test, but it is required if the PipelineHost and AdminApi should share data.
-- The configuration secret provider accepts secret names containing letters, digits, hyphens, underscores, and non-leading dots.  The examples below use the default secret names.
+- These steps use the **file secret provider** with a local throwaway directory, matching the production pattern.
+
+## Local secrets
+
+Create a directory with one file per secret (contents are the secret values; local throwaways only):
+
+```powershell
+New-Item -ItemType Directory -Path C:\temp\viegard-local-secrets -Force | Out-Null
+Set-Content -Path C:\temp\viegard-local-secrets\viegard-db-password -Value 'replace-with-local-password' -NoNewline
+Set-Content -Path C:\temp\viegard-local-secrets\viegard-admin-bootstrap-password -Value 'replace-with-a-20-character-local-password' -NoNewline
+```
 
 ## Empty admin UI with in-memory persistence
 
@@ -14,11 +24,11 @@ This mode verifies that the static SSR admin pages render on loopback with empty
 $env:ASPNETCORE_ENVIRONMENT = "Development"
 $env:ASPNETCORE_URLS = "http://127.0.0.1:8080"
 $env:Viegard__Persistence__Provider = "inmemory"
-$env:Viegard__Secrets__Provider = "configuration"
+$env:Viegard__Secrets__Provider = "file"
+$env:Viegard__Secrets__Directory = "C:\temp\viegard-local-secrets"
 $env:Viegard__Admin__Exposure = "loopback"
 $env:Viegard__Admin__Bootstrap__Username = "admin"
 $env:Viegard__Admin__Bootstrap__PasswordSecretName = "viegard-admin-bootstrap-password"
-[Environment]::SetEnvironmentVariable("viegard-admin-bootstrap-password", "replace-with-a-20-character-local-password", "Process")
 dotnet run --project .\src\Viegard.AdminApi --no-launch-profile
 ```
 
@@ -26,40 +36,31 @@ Open `http://127.0.0.1:8080` or the URL printed by Kestrel.  The admin pages sho
 
 ## Shared local PostgreSQL for end-to-end data
 
-Start the existing WSL Docker PostgreSQL container:
+Start the existing WSL Docker PostgreSQL container **and keep a WSL session alive**: the WSL VM idles out shortly after the last session exits, taking Docker's port forward with it.  Leave this running in its own window:
 
 ```powershell
-wsl -d Debian -u root -- docker start viegard-test-pg
+wsl -d Debian -u root -- sh -c "service docker start >/dev/null 2>&1; docker start viegard-test-pg >/dev/null 2>&1; exec sleep infinity"
 ```
 
 Use `Host=127.0.0.1`, not `localhost`.  The WSL Docker port forward is IPv4-only on this workstation, and `localhost` can resolve to IPv6 first.
 
-Configure both projects with the same database settings.  Replace the password value with the disposable local database password.
+Configure both projects with the same database settings via user-secrets (these are ordinary configuration values; the passwords live in the secrets directory above):
 
 ```powershell
-dotnet user-secrets set --project .\src\Viegard.PipelineHost "Viegard:Secrets:Provider" "configuration"
-dotnet user-secrets set --project .\src\Viegard.PipelineHost "Viegard:Persistence:Provider" "postgres"
-dotnet user-secrets set --project .\src\Viegard.PipelineHost "Viegard:Database:Host" "127.0.0.1"
-dotnet user-secrets set --project .\src\Viegard.PipelineHost "Viegard:Database:Port" "5433"
-dotnet user-secrets set --project .\src\Viegard.PipelineHost "Viegard:Database:Name" "viegard_test"
-dotnet user-secrets set --project .\src\Viegard.PipelineHost "Viegard:Database:Username" "viegard_test"
-dotnet user-secrets set --project .\src\Viegard.PipelineHost "Viegard:Database:Schema" "viegard"
-dotnet user-secrets set --project .\src\Viegard.PipelineHost "Viegard:Database:PasswordSecretName" "viegard-db-password"
-dotnet user-secrets set --project .\src\Viegard.PipelineHost "viegard-db-password" "replace-with-local-password"
-
-dotnet user-secrets set --project .\src\Viegard.AdminApi "Viegard:Secrets:Provider" "configuration"
-dotnet user-secrets set --project .\src\Viegard.AdminApi "Viegard:Persistence:Provider" "postgres"
-dotnet user-secrets set --project .\src\Viegard.AdminApi "Viegard:Database:Host" "127.0.0.1"
-dotnet user-secrets set --project .\src\Viegard.AdminApi "Viegard:Database:Port" "5433"
-dotnet user-secrets set --project .\src\Viegard.AdminApi "Viegard:Database:Name" "viegard_test"
-dotnet user-secrets set --project .\src\Viegard.AdminApi "Viegard:Database:Username" "viegard_test"
-dotnet user-secrets set --project .\src\Viegard.AdminApi "Viegard:Database:Schema" "viegard"
-dotnet user-secrets set --project .\src\Viegard.AdminApi "Viegard:Database:PasswordSecretName" "viegard-db-password"
-dotnet user-secrets set --project .\src\Viegard.AdminApi "viegard-db-password" "replace-with-local-password"
+foreach ($proj in '.\src\Viegard.PipelineHost', '.\src\Viegard.AdminApi') {
+    dotnet user-secrets set --project $proj "Viegard:Secrets:Provider" "file"
+    dotnet user-secrets set --project $proj "Viegard:Secrets:Directory" "C:\temp\viegard-local-secrets"
+    dotnet user-secrets set --project $proj "Viegard:Persistence:Provider" "postgres"
+    dotnet user-secrets set --project $proj "Viegard:Database:Host" "127.0.0.1"
+    dotnet user-secrets set --project $proj "Viegard:Database:Port" "5433"
+    dotnet user-secrets set --project $proj "Viegard:Database:Name" "viegard_test"
+    dotnet user-secrets set --project $proj "Viegard:Database:Username" "viegard_test"
+    dotnet user-secrets set --project $proj "Viegard:Database:Schema" "viegard"
+    dotnet user-secrets set --project $proj "Viegard:Database:PasswordSecretName" "viegard-db-password"
+}
 dotnet user-secrets set --project .\src\Viegard.AdminApi "Viegard:Admin:Exposure" "loopback"
 dotnet user-secrets set --project .\src\Viegard.AdminApi "Viegard:Admin:Bootstrap:Username" "admin"
 dotnet user-secrets set --project .\src\Viegard.AdminApi "Viegard:Admin:Bootstrap:PasswordSecretName" "viegard-admin-bootstrap-password"
-dotnet user-secrets set --project .\src\Viegard.AdminApi "viegard-admin-bootstrap-password" "replace-with-a-20-character-local-password"
 ```
 
 Run the PipelineHost in one PowerShell window.  This enables syslog on loopback and all singleton processing roles for local testing.

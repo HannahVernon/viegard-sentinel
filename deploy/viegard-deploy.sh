@@ -17,9 +17,12 @@
 #
 # install options:
 #   --repo-url <url>  Clone source (default the public Forgejo repository)
-#   --domain <host>   Admin host name for direct TLS.  Enables certificate
-#                     issuance via host certbot plus the D-0034 renewal hook.
-#                     Omit for loopback-only exposure (default).
+#   --domain <host>   Admin host name for direct TLS.  Issues a Let's
+#                     Encrypt certificate via host certbot and installs a
+#                     renewal hook that copies each renewed certificate
+#                     into the stack and restarts the admin service
+#                     (decision record D-0034 in DECISIONS.md).  Omit for
+#                     loopback-only exposure (default).
 #   --email <addr>    ACME registration email (required with --domain)
 #
 # Secrets are generated only when missing and are never overwritten or
@@ -229,8 +232,8 @@ Post-install checklist (edit deploy/docker-compose.yml, then
     (docs/swag-syslog-setup.md for SWAG; firewall UDP 5514 via the
     DOCKER-USER chain per docs/deployment.md).
  4. Retention is fail-safe OFF: configure Viegard__Retention__* and add
-    the singleton 'maintenance' role to enable purging (D-0035 examples
-    in docs/deployment.md).
+    the singleton 'maintenance' role to enable purging (example values
+    in the Data retention section of docs/deployment.md).
  5. Run the backup restore drill (docs/deployment.md section 4) once the
     first dump appears in deploy/backups/postgres/.
 ------------------------------------------------------------------------

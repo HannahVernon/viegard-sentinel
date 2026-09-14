@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Viegard.Domain.Admin;
+using Viegard.Domain.Configuration;
 using Viegard.Domain.Events;
 using Viegard.Domain;
 using Viegard.Persistence.Postgres.Queues;
@@ -302,6 +303,64 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var (_, typeAfter) = await resolver.GetSourceAsync(id);
         Assert.Equal("imap", typeAfter);
     }
+
+    [PostgresFact]
+    public async Task Custom_signature_store_round_trips_and_deletes()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var signature = CustomSignature($"it-roundtrip-{ViegardId.New():N}");
+
+        var saved = await store.UpsertAsync(signature);
+        var restored = await store.GetAsync(saved.Id);
+
+        Assert.NotNull(restored);
+        Assert.Equal(signature.Name, restored.Name);
+        Assert.Equal(1, restored.Version);
+
+        var updated = await store.UpsertAsync(saved with { Pattern = "second", UpdatedBy = "it" });
+        Assert.Equal(2, updated.Version);
+        Assert.Equal("second", (await store.GetAsync(updated.Id))!.Pattern);
+
+        var deleted = await store.DeleteAsync(updated.Id);
+        Assert.NotNull(deleted);
+        Assert.Null(await store.GetAsync(updated.Id));
+    }
+
+    [PostgresFact]
+    public async Task Custom_signature_store_notify_wakes_waiter()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var listener = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var writer = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var wait = listener.WaitForChangeAsync(
+            listener.CurrentChangeVersion,
+            TimeSpan.FromSeconds(10),
+            CancellationToken.None).AsTask();
+
+        await Task.Delay(300);
+        await writer.UpsertAsync(CustomSignature($"it-notify-{ViegardId.New():N}"));
+
+        var version = await wait.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.True(version > 0);
+    }
+
+    private static CustomSignature CustomSignature(string name) => new()
+    {
+        Id = ViegardId.New(),
+        Name = name,
+        Enabled = true,
+        Target = CustomSignatureTarget.HttpQuery,
+        MatchType = CustomSignatureMatchType.Contains,
+        Pattern = "ref=aftership",
+        Category = "referral-bot",
+        Severity = 3,
+        EvidenceWeight = 1.0,
+        CreatedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedBy = "it",
+        Version = 0,
+    };
 
     private sealed class TestDbContextFactory(Npgsql.NpgsqlDataSource dataSource) : IDbContextFactory<ViegardDbContext>
     {

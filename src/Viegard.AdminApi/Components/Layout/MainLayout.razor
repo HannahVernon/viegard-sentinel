@@ -1,3 +1,20 @@
 @inherits LayoutComponentBase
 
+<AuthorizeView>
+    <Authorized>
+        <header class="admin-header">
+            <a class="brand" href="/">Viegard</a>
+            <nav class="admin-nav" aria-label="Admin navigation">
+                <a href="/queues">Dashboard/Queues</a>
+                <a href="/incidents">Incidents</a>
+                <a href="/decisions">Decisions</a>
+                <a href="/events">Events</a>
+                <a href="/audit">Audit</a>
+                <a href="/signatures">Signatures</a>
+                <a href="/account">Account</a>
+            </nav>
+        </header>
+    </Authorized>
+</AuthorizeView>
+
 @Body

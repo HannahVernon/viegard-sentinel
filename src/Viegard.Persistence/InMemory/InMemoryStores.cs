@@ -6,6 +6,7 @@ using Viegard.Domain.Actions;
 using Viegard.Domain.Admin;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Classifications;
+using Viegard.Domain.Configuration;
 using Viegard.Domain.Decisions;
 using Viegard.Domain.Events;
 using Viegard.Domain.Feedback;
@@ -51,6 +52,12 @@ public sealed class InMemoryEventStore : IEventStore
 
     public ValueTask<NormalizedEvent?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(_events.GetValueOrDefault(id));
+
+    public ValueTask<KeysetPage<NormalizedEvent>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(InMemoryPaging.Page(_events.Values, beforeId, pageSize, e => e.Id));
 }
 
 public sealed class InMemoryIncidentStore : IIncidentStore
@@ -72,6 +79,12 @@ public sealed class InMemoryIncidentStore : IIncidentStore
             .Where(i => i.State == IncidentState.Open && i.CorrelationKey == correlationKey)
             .OrderByDescending(i => i.WindowEnd)
             .FirstOrDefault());
+
+    public ValueTask<KeysetPage<Incident>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(InMemoryPaging.Page(_incidents.Values, beforeId, pageSize, i => i.Id));
 }
 
 public sealed class InMemoryClassificationStore : IClassificationStore
@@ -87,6 +100,21 @@ public sealed class InMemoryClassificationStore : IClassificationStore
 
     public ValueTask<Classification?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(_classifications.GetValueOrDefault(id));
+
+    public ValueTask<IReadOnlyList<Classification>> ListForSubjectAsync(
+        ClassificationSubjectKind subjectKind,
+        Guid subjectId,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult<IReadOnlyList<Classification>>(_classifications.Values
+            .Where(c => c.SubjectKind == subjectKind && c.SubjectId == subjectId)
+            .OrderByDescending(c => c.Id)
+            .ToList());
+
+    public ValueTask<KeysetPage<Classification>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(InMemoryPaging.Page(_classifications.Values, beforeId, pageSize, c => c.Id));
 }
 
 public sealed class InMemoryDecisionStore : IDecisionStore
@@ -102,6 +130,20 @@ public sealed class InMemoryDecisionStore : IDecisionStore
 
     public ValueTask<Decision?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(_decisions.GetValueOrDefault(id));
+
+    public ValueTask<IReadOnlyList<Decision>> ListForClassificationAsync(
+        Guid classificationId,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult<IReadOnlyList<Decision>>(_decisions.Values
+            .Where(d => d.ClassificationId == classificationId)
+            .OrderByDescending(d => d.Id)
+            .ToList());
+
+    public ValueTask<KeysetPage<Decision>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(InMemoryPaging.Page(_decisions.Values, beforeId, pageSize, d => d.Id));
 }
 
 public sealed class InMemoryActionStore : IActionStore
@@ -147,7 +189,160 @@ public sealed class InMemoryAuditLedger : IAuditLedger
         return ValueTask.CompletedTask;
     }
 
+    public ValueTask<KeysetPage<AuditRecord>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(InMemoryPaging.Page(_records.ToArray(), beforeId, pageSize, r => r.Id));
+
     public IReadOnlyList<AuditRecord> Snapshot() => _records.ToArray();
+}
+
+public sealed class InMemoryCustomSignatureStore : ICustomSignatureStore
+{
+    private readonly object _sync = new();
+    private readonly ConcurrentDictionary<Guid, CustomSignature> _signatures = new();
+    private readonly List<TaskCompletionSource<long>> _waiters = [];
+    private long _changeVersion;
+    private bool _seedChecked;
+
+    public long CurrentChangeVersion => Volatile.Read(ref _changeVersion);
+
+    public ValueTask<IReadOnlyList<CustomSignature>> ListAsync(CancellationToken cancellationToken = default)
+    {
+        EnsureSeeded();
+        return ValueTask.FromResult<IReadOnlyList<CustomSignature>>(_signatures.Values
+            .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(s => s.Id)
+            .ToList());
+    }
+
+    public ValueTask<CustomSignature?> GetAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        EnsureSeeded();
+        return ValueTask.FromResult(_signatures.GetValueOrDefault(id));
+    }
+
+    public ValueTask<CustomSignature> UpsertAsync(CustomSignature signature, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(signature);
+        var normalized = CustomSignatureValidator.Normalize(signature);
+        var validation = CustomSignatureValidator.Validate(normalized);
+        if (!validation.IsValid)
+        {
+            throw new InvalidOperationException(CustomSignatureValidator.UniformError(validation));
+        }
+
+        EnsureSeeded();
+        lock (_sync)
+        {
+            var duplicate = _signatures.Values.Any(s =>
+                s.Id != normalized.Id && string.Equals(s.Name, normalized.Name, StringComparison.OrdinalIgnoreCase));
+            if (duplicate)
+            {
+                throw new InvalidOperationException("A signature with that name already exists.");
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var saved = _signatures.TryGetValue(normalized.Id, out var existing)
+                ? normalized with
+                {
+                    CreatedAt = existing.CreatedAt,
+                    UpdatedAt = now,
+                    Version = existing.Version + 1,
+                }
+                : normalized with
+                {
+                    CreatedAt = normalized.CreatedAt == default ? now : normalized.CreatedAt.ToUniversalTime(),
+                    UpdatedAt = now,
+                    Version = 1,
+                };
+
+            _signatures[saved.Id] = saved;
+            SignalChanged();
+            return ValueTask.FromResult(saved);
+        }
+    }
+
+    public ValueTask<CustomSignature?> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (!_signatures.TryRemove(id, out var removed))
+            {
+                return ValueTask.FromResult<CustomSignature?>(null);
+            }
+
+            SignalChanged();
+            return ValueTask.FromResult<CustomSignature?>(removed);
+        }
+    }
+
+    public async ValueTask<long> WaitForChangeAsync(
+        long lastSeenVersion,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        TaskCompletionSource<long> waiter;
+        lock (_sync)
+        {
+            var current = CurrentChangeVersion;
+            if (current != lastSeenVersion)
+            {
+                return current;
+            }
+
+            waiter = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _waiters.Add(waiter);
+        }
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var registration = timeoutCts.Token.Register(() => waiter.TrySetResult(CurrentChangeVersion));
+        timeoutCts.CancelAfter(timeout);
+        var result = await waiter.Task.ConfigureAwait(false);
+
+        lock (_sync)
+        {
+            _waiters.Remove(waiter);
+        }
+
+        return result;
+    }
+
+    private void EnsureSeeded()
+    {
+        if (_seedChecked)
+        {
+            return;
+        }
+
+        lock (_sync)
+        {
+            if (_seedChecked)
+            {
+                return;
+            }
+
+            if (_signatures.IsEmpty)
+            {
+                var now = DateTimeOffset.UtcNow;
+                var seed = CustomSignatureSeeds.AftershipReferralBot(now);
+                _signatures[seed.Id] = seed;
+                SignalChanged();
+            }
+
+            _seedChecked = true;
+        }
+    }
+
+    private void SignalChanged()
+    {
+        var version = Interlocked.Increment(ref _changeVersion);
+        foreach (var waiter in _waiters.ToArray())
+        {
+            waiter.TrySetResult(version);
+        }
+    }
 }
 
 public sealed class InMemoryAdminUserStore : IAdminUserStore
@@ -447,5 +642,27 @@ public sealed class InMemoryAdminSessionStore : IAdminSessionStore
         }
 
         return ValueTask.CompletedTask;
+    }
+}
+
+internal static class InMemoryPaging
+{
+    public static KeysetPage<T> Page<T>(
+        IEnumerable<T> source,
+        Guid? beforeId,
+        int pageSize,
+        Func<T, Guid> getId)
+    {
+        var safePageSize = Math.Clamp(pageSize, 1, 200);
+        var pagePlusOne = source
+            .Where(item => beforeId is null || getId(item).CompareTo(beforeId.Value) < 0)
+            .OrderByDescending(getId)
+            .Take(safePageSize + 1)
+            .ToList();
+        var items = pagePlusOne.Take(safePageSize).ToList();
+        var nextCursor = pagePlusOne.Count > safePageSize && items.Count > 0
+            ? getId(items[^1])
+            : (Guid?)null;
+        return new KeysetPage<T>(items, nextCursor);
     }
 }

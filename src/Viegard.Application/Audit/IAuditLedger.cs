@@ -1,4 +1,5 @@
 using Viegard.Domain.Audit;
+using Viegard.Application.Stores;
 
 namespace Viegard.Application.Audit;
 
@@ -10,4 +11,9 @@ namespace Viegard.Application.Audit;
 public interface IAuditLedger
 {
     ValueTask AppendAsync(AuditRecord record, CancellationToken cancellationToken = default);
+
+    ValueTask<KeysetPage<AuditRecord>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        CancellationToken cancellationToken = default);
 }

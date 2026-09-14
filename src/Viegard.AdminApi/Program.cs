@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Components;
 using Viegard.AdminApi.Configuration;
+using Viegard.AdminApi.Signatures;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
 using Viegard.Application.Queues;
@@ -89,6 +90,7 @@ builder.Services.AddSingleton<WebAuthnStateCookie>();
 builder.Services.AddSingleton<WebAuthnConfigurationProvider>();
 builder.Services.AddSingleton<IWebAuthnService, Fido2WebAuthnService>();
 builder.Services.AddSingleton<AdminAuthAuditor>();
+builder.Services.AddSingleton<AdminConfigAuditor>();
 builder.Services.AddScoped<AdminCookieAuthenticationEvents>();
 
 builder.Services
@@ -184,6 +186,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
+        builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");
@@ -299,6 +302,7 @@ app.UseAntiforgery();
 app.MapGet("/healthz", () => Results.Ok(new { status = "healthy", service = "viegard-admin" }))
     .AllowAnonymous();
 app.MapAdminAuthEndpoints();
+app.MapAdminSignatureEndpoints();
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>();
 

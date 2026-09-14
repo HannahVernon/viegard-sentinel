@@ -1,0 +1,40 @@
+<nav class="pagination" aria-label="Pagination">
+    @if (CurrentCursor is not null)
+    {
+        <a href="@BuildHref(PreviousCursor, null)">Previous</a>
+    }
+    @if (NextCursor is not null)
+    {
+        <a href="@BuildHref(NextCursor, CurrentCursor)">Next</a>
+    }
+</nav>
+
+@code {
+    [Parameter]
+    public string BasePath { get; set; } = "/";
+
+    [Parameter]
+    public Guid? CurrentCursor { get; set; }
+
+    [Parameter]
+    public Guid? PreviousCursor { get; set; }
+
+    [Parameter]
+    public Guid? NextCursor { get; set; }
+
+    private string BuildHref(Guid? cursor, Guid? previous)
+    {
+        var parts = new List<string>();
+        if (cursor is not null)
+        {
+            parts.Add($"cursor={Uri.EscapeDataString(cursor.Value.ToString())}");
+        }
+
+        if (previous is not null)
+        {
+            parts.Add($"prev={Uri.EscapeDataString(previous.Value.ToString())}");
+        }
+
+        return parts.Count == 0 ? BasePath : $"{BasePath}?{string.Join("&", parts)}";
+    }
+}

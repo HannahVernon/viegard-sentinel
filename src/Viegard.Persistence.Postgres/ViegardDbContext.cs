@@ -41,6 +41,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<SourceOffsetRow> SourceOffsets => Set<SourceOffsetRow>();
 
+    public DbSet<CustomSignatureRow> CustomSignatures => Set<CustomSignatureRow>();
+
     public DbSet<QueueMessageRow> QueueMessages => Set<QueueMessageRow>();
 
     public DbSet<QueueCounterRow> QueueCounters => Set<QueueCounterRow>();
@@ -182,6 +184,17 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
         {
             entity.ToTable("source_offsets");
             entity.HasKey(e => new { e.SourceId, e.Key });
+        });
+
+        modelBuilder.Entity<CustomSignatureRow>(entity =>
+        {
+            entity.ToTable("custom_signatures");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Name).IsUnique();
+            entity.Property(e => e.Name).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxNameLength);
+            entity.Property(e => e.Pattern).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxPatternLength);
+            entity.Property(e => e.Category).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxCategoryLength);
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxUpdatedByLength);
         });
 
         modelBuilder.Entity<QueueMessageRow>(entity =>

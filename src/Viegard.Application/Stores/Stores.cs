@@ -25,6 +25,11 @@ public interface IEventStore
     ValueTask AddAsync(NormalizedEvent normalizedEvent, CancellationToken cancellationToken = default);
 
     ValueTask<NormalizedEvent?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+
+    ValueTask<KeysetPage<NormalizedEvent>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence port for incidents (Roost).</summary>
@@ -35,6 +40,11 @@ public interface IIncidentStore
     ValueTask<Incident?> GetAsync(Guid id, CancellationToken cancellationToken = default);
 
     ValueTask<Incident?> FindOpenByCorrelationKeyAsync(string correlationKey, CancellationToken cancellationToken = default);
+
+    ValueTask<KeysetPage<Incident>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence port for classifications (Roost).</summary>
@@ -43,6 +53,16 @@ public interface IClassificationStore
     ValueTask AddAsync(Classification classification, CancellationToken cancellationToken = default);
 
     ValueTask<Classification?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+
+    ValueTask<IReadOnlyList<Classification>> ListForSubjectAsync(
+        ClassificationSubjectKind subjectKind,
+        Guid subjectId,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<KeysetPage<Classification>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence port for policy decisions (Roost).</summary>
@@ -51,6 +71,15 @@ public interface IDecisionStore
     ValueTask AddAsync(Decision decision, CancellationToken cancellationToken = default);
 
     ValueTask<Decision?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+
+    ValueTask<IReadOnlyList<Decision>> ListForClassificationAsync(
+        Guid classificationId,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<KeysetPage<Decision>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence port for action records (Roost).</summary>

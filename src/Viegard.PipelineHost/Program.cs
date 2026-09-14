@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Viegard.Application.Audit;
 using Viegard.Application.Classifiers;
+using Viegard.Application.Configuration;
 using Viegard.Application.Correlation;
 using Viegard.Application.Detection;
 using Viegard.Application.Policy;
@@ -98,6 +99,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
+        builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");
@@ -197,6 +199,14 @@ if (configuredRoles.Contains(RoleNames.Sources, StringComparer.OrdinalIgnoreCase
 // The correlation worker runs only in the singleton correlation role (D-0011).
 if (configuredRoles.Contains(RoleNames.Correlation, StringComparer.OrdinalIgnoreCase))
 {
+    builder.Services.AddSingleton<ICustomSignatureRuleDiagnostics, LoggingCustomSignatureRuleDiagnostics>();
+    builder.Services.AddSingleton(sp =>
+        new CustomSignatureRuleSource(
+            sp.GetRequiredService<ICustomSignatureStore>(),
+            sp.GetRequiredService<IOptions<DetectionOptions>>().Value,
+            sp.GetRequiredService<ICustomSignatureRuleDiagnostics>()));
+    builder.Services.AddSingleton<IDetectionRule>(sp => sp.GetRequiredService<CustomSignatureRuleSource>());
+    builder.Services.AddHostedService<CustomSignatureRefreshWorker>();
     builder.Services.AddSingleton<IDetectionRule>(sp =>
         new SensitivePathHttpDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
     builder.Services.AddSingleton<IDetectionRule>(sp =>

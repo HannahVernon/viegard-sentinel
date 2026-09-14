@@ -1,0 +1,71 @@
+@page "/decisions"
+@attribute [Authorize]
+@inject IDecisionStore DecisionStore
+@inject IClassificationStore ClassificationStore
+
+<PageTitle>Viegard decisions</PageTitle>
+
+<main class="admin-panel wide">
+    <h1>Decisions</h1>
+
+    @if (_rows.Count == 0)
+    {
+        <p>No decisions are available.</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Created</th>
+                    <th>Policy</th>
+                    <th>Outcome</th>
+                    <th>Classification</th>
+                    <th>Rationale</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    <tr>
+                        <td><a href="/decisions/@row.Decision.Id">@AdminText.Utc(row.Decision.CreatedAt)</a></td>
+                        <td>@row.Decision.PolicyId @row.Decision.PolicyVersion</td>
+                        <td><span class="@AdminText.OutcomeCss(row.Decision.Outcome)">@row.Decision.Outcome</span></td>
+                        <td>@ClassificationSummary(row.Classification)</td>
+                        <td>@AdminText.OneLine(row.Decision.Rationale, 220)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <KeysetPagination BasePath="/decisions" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" />
+    }
+</main>
+
+@code {
+    private KeysetPage<Decision> _page = new([], null);
+    private IReadOnlyList<DecisionRow> _rows = [];
+
+    [SupplyParameterFromQuery(Name = "cursor")]
+    public Guid? Cursor { get; set; }
+
+    [SupplyParameterFromQuery(Name = "prev")]
+    public Guid? Prev { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _page = await DecisionStore.ListPageAsync(Cursor, 50).ConfigureAwait(false);
+        var rows = new List<DecisionRow>();
+        foreach (var decision in _page.Items)
+        {
+            rows.Add(new DecisionRow(decision, await ClassificationStore.GetAsync(decision.ClassificationId).ConfigureAwait(false)));
+        }
+
+        _rows = rows;
+    }
+
+    private static string ClassificationSummary(Classification? classification) => classification is null
+        ? "not found"
+        : $"{classification.Category} severity {classification.Severity}";
+
+    private sealed record DecisionRow(Decision Decision, Classification? Classification);
+}

@@ -3,6 +3,7 @@ using Viegard.Domain.Admin;
 using Viegard.Domain.Actions;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Classifications;
+using Viegard.Domain.Configuration;
 using Viegard.Domain.Decisions;
 using Viegard.Domain.Events;
 using Viegard.Domain.Feedback;
@@ -364,5 +365,54 @@ internal static class Mapping
         UserAgent = row.UserAgent,
         RevokedAt = row.RevokedAt,
         StepUpAt = row.StepUpAt,
+    };
+
+    public static CustomSignatureRow ToRow(this CustomSignature signature) => new()
+    {
+        Id = signature.Id,
+        Name = signature.Name,
+        Enabled = signature.Enabled,
+        Target = (int)signature.Target,
+        MatchType = (int)signature.MatchType,
+        Pattern = signature.Pattern,
+        Category = signature.Category,
+        Severity = signature.Severity,
+        EvidenceWeight = signature.EvidenceWeight,
+        CreatedAt = Utc(signature.CreatedAt),
+        UpdatedAt = Utc(signature.UpdatedAt),
+        UpdatedBy = signature.UpdatedBy,
+        Version = signature.Version,
+    };
+
+    public static CustomSignature ToDomain(this CustomSignatureRow row) => new()
+    {
+        Id = row.Id,
+        Name = row.Name,
+        Enabled = row.Enabled,
+        Target = (CustomSignatureTarget)row.Target,
+        MatchType = (CustomSignatureMatchType)row.MatchType,
+        Pattern = row.Pattern,
+        Category = row.Category,
+        Severity = row.Severity,
+        EvidenceWeight = row.EvidenceWeight,
+        CreatedAt = row.CreatedAt,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+        Version = row.Version,
+    };
+
+    public static AuditRecord ToDomain(this AuditRecordRow row, string? sourceKey) => new()
+    {
+        Id = row.Id,
+        Timestamp = row.Timestamp,
+        Stage = (PipelineStage)row.Stage,
+        Summary = row.Summary,
+        SourceId = sourceKey,
+        EventId = row.EventId,
+        IncidentId = row.IncidentId,
+        ClassificationId = row.ClassificationId,
+        DecisionId = row.DecisionId,
+        ActionId = row.ActionId,
+        DetailJson = row.DetailJson,
     };
 }

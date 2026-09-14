@@ -77,6 +77,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAuditLedger, PostgresAuditLedger>();
         services.AddSingleton<IQueueTelemetryStore, PostgresQueueTelemetryStore>();
         services.AddSingleton<ISourceOffsetStore, PostgresSourceOffsetStore>();
+        services.AddSingleton<ICustomSignatureStore, PostgresCustomSignatureStore>();
 
         // Durable events queue and command queue (broker-semantics port).
         services.AddSingleton<IWorkQueue<Guid>>(sp =>

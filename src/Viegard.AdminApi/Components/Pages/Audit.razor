@@ -1,0 +1,81 @@
+@page "/audit"
+@attribute [Authorize]
+@inject IAuditLedger AuditLedger
+
+<PageTitle>Viegard audit</PageTitle>
+
+<main class="admin-panel wide">
+    <h1>Audit</h1>
+
+    @if (_page.Items.Count == 0)
+    {
+        <p>No audit records are available.</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Stage</th>
+                    <th>Summary</th>
+                    <th>Source</th>
+                    <th>Links</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var record in _page.Items)
+                {
+                    <tr>
+                        <td>@AdminText.Utc(record.Timestamp)</td>
+                        <td>@record.Stage</td>
+                        <td>@AdminText.OneLine(record.Summary, 260)</td>
+                        <td>@record.SourceId</td>
+                        <td>
+                            @if (record.EventId is not null)
+                            {
+                                <a href="/events/@record.EventId">event @AdminText.ShortId(record.EventId.Value)</a>
+                            }
+                            @if (record.IncidentId is not null)
+                            {
+                                <a href="/incidents/@record.IncidentId">incident @AdminText.ShortId(record.IncidentId.Value)</a>
+                            }
+                            @if (record.DecisionId is not null)
+                            {
+                                <a href="/decisions/@record.DecisionId">decision @AdminText.ShortId(record.DecisionId.Value)</a>
+                            }
+                            @if (record.ClassificationId is not null)
+                            {
+                                <span>classification @AdminText.ShortId(record.ClassificationId.Value)</span>
+                            }
+                            @if (record.ActionId is not null)
+                            {
+                                <span>action @AdminText.ShortId(record.ActionId.Value)</span>
+                            }
+                        </td>
+                    </tr>
+                    @if (!string.IsNullOrWhiteSpace(record.DetailJson))
+                    {
+                        <tr class="details-row"><td colspan="5"><pre class="json-block">@AdminText.Limit(record.DetailJson)</pre></td></tr>
+                    }
+                }
+            </tbody>
+        </table>
+        <KeysetPagination BasePath="/audit" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" />
+    }
+</main>
+
+@code {
+    private KeysetPage<AuditRecord> _page = new([], null);
+
+    [SupplyParameterFromQuery(Name = "cursor")]
+    public Guid? Cursor { get; set; }
+
+    [SupplyParameterFromQuery(Name = "prev")]
+    public Guid? Prev { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _page = await AuditLedger.ListPageAsync(Cursor, 50).ConfigureAwait(false);
+    }
+}

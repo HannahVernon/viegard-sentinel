@@ -1,0 +1,153 @@
+@page "/signatures"
+@attribute [Authorize]
+@inject ICustomSignatureStore SignatureStore
+
+<PageTitle>Viegard signatures</PageTitle>
+
+<main class="admin-panel wide">
+    <h1>Detection signatures</h1>
+
+    @if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <p class="message error">@Error</p>
+    }
+    @if (!string.IsNullOrWhiteSpace(Status))
+    {
+        <p class="message">@Status</p>
+    }
+
+    <section>
+        <h2>@(_editing is null ? "Add signature" : "Edit signature")</h2>
+        <form method="post" action="/signatures/save" class="edit-form">
+            <AntiforgeryToken />
+            <input type="hidden" name="id" value="@(_editing?.Id.ToString() ?? string.Empty)" />
+            <label>
+                Name
+                <input name="name" maxlength="@CustomSignature.MaxNameLength" required value="@(_editing?.Name ?? string.Empty)" />
+            </label>
+            <label>
+                Target
+                <select name="target">
+                    @foreach (var target in Enum.GetValues<CustomSignatureTarget>())
+                    {
+                        <option value="@target" selected="@(target == (_editing?.Target ?? CustomSignatureTarget.HttpQuery))">@target</option>
+                    }
+                </select>
+            </label>
+            <label>
+                Match type
+                <select name="matchType">
+                    @foreach (var matchType in Enum.GetValues<CustomSignatureMatchType>())
+                    {
+                        <option value="@matchType" selected="@(matchType == (_editing?.MatchType ?? CustomSignatureMatchType.Contains))">@matchType</option>
+                    }
+                </select>
+            </label>
+            <label>
+                Pattern
+                <input name="pattern" maxlength="@CustomSignature.MaxPatternLength" required value="@(_editing?.Pattern ?? string.Empty)" />
+            </label>
+            <label>
+                Category
+                <input name="category" maxlength="@CustomSignature.MaxCategoryLength" required value="@(_editing?.Category ?? string.Empty)" />
+            </label>
+            <label>
+                Severity
+                <input name="severity" type="number" min="0" max="10" required value="@(_editing?.Severity.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "3")" />
+            </label>
+            <label>
+                Evidence weight
+                <input name="evidenceWeight" type="number" min="0" max="1" step="0.01" required value="@((_editing?.EvidenceWeight ?? 1.0).ToString(System.Globalization.CultureInfo.InvariantCulture))" />
+            </label>
+            <label class="inline-checkbox">
+                <input name="enabled" type="checkbox" value="true" checked="@(_editing?.Enabled ?? true)" />
+                Enabled
+            </label>
+            <button type="submit">Save signature</button>
+            @if (_editing is not null)
+            {
+                <a class="button-link" href="/signatures">Cancel edit</a>
+            }
+        </form>
+    </section>
+
+    <section>
+        <h2>Configured signatures</h2>
+        @if (_signatures.Count == 0)
+        {
+            <p>No signatures are configured.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Target</th>
+                        <th>Match</th>
+                        <th>Pattern</th>
+                        <th>Category</th>
+                        <th>Severity</th>
+                        <th>Enabled</th>
+                        <th>Updated</th>
+                        <th>Version</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var signature in _signatures)
+                    {
+                        <tr>
+                            <td>@signature.Name</td>
+                            <td>@signature.Target</td>
+                            <td>@signature.MatchType</td>
+                            <td>@AdminText.OneLine(signature.Pattern, 160)</td>
+                            <td>@signature.Category</td>
+                            <td>@signature.Severity</td>
+                            <td><span class="@(signature.Enabled ? "badge badge-green" : "badge")">@(signature.Enabled ? "Enabled" : "Disabled")</span></td>
+                            <td>@signature.UpdatedBy at @AdminText.Utc(signature.UpdatedAt)</td>
+                            <td>@signature.Version</td>
+                            <td class="actions-cell">
+                                <a href="/signatures?editId=@signature.Id">Edit</a>
+                                <form method="post" action="/signatures/toggle">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="id" value="@signature.Id" />
+                                    <button type="submit">@(signature.Enabled ? "Disable" : "Enable")</button>
+                                </form>
+                                <form method="post" action="/signatures/delete">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="id" value="@signature.Id" />
+                                    <button type="submit">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+</main>
+
+@code {
+    private IReadOnlyList<CustomSignature> _signatures = [];
+    private CustomSignature? _editing;
+
+    [SupplyParameterFromQuery(Name = "editId")]
+    public Guid? EditId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _signatures = await SignatureStore.ListAsync().ConfigureAwait(false);
+        if (EditId is not null)
+        {
+            _editing = _signatures.FirstOrDefault(s => s.Id == EditId.Value)
+                ?? await SignatureStore.GetAsync(EditId.Value).ConfigureAwait(false);
+        }
+    }
+}

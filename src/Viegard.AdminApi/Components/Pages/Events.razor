@@ -1,0 +1,54 @@
+@page "/events"
+@attribute [Authorize]
+@inject IEventStore EventStore
+
+<PageTitle>Viegard events</PageTitle>
+
+<main class="admin-panel wide">
+    <h1>Events</h1>
+
+    @if (_page.Items.Count == 0)
+    {
+        <p>No events are available.</p>
+    }
+    else
+    {
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Occurred</th>
+                    <th>Source</th>
+                    <th>Payload</th>
+                    <th>Summary</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in _page.Items)
+                {
+                    <tr>
+                        <td><a href="/events/@item.Id">@AdminText.Utc(item.OccurredAt)</a></td>
+                        <td>@item.SourceId (@item.SourceType)</td>
+                        <td>@AdminText.PayloadTypeName(item.Payload)</td>
+                        <td>@AdminText.PayloadSummary(item.Payload)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <KeysetPagination BasePath="/events" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" />
+    }
+</main>
+
+@code {
+    private KeysetPage<NormalizedEvent> _page = new([], null);
+
+    [SupplyParameterFromQuery(Name = "cursor")]
+    public Guid? Cursor { get; set; }
+
+    [SupplyParameterFromQuery(Name = "prev")]
+    public Guid? Prev { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _page = await EventStore.ListPageAsync(Cursor, 50).ConfigureAwait(false);
+    }
+}

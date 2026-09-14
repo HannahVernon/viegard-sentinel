@@ -1,0 +1,46 @@
+@* Step-up verification overlay.  Uses the native HTML popover API: no
+   script is needed to open or close it, so the CSP and static-SSR posture
+   are unchanged.  The security-key button reuses the existing
+   data-webauthn-assert wiring from webauthn.js. *@
+
+<button type="button" class="step-up-trigger" popovertarget="step-up-popover">Verify now</button>
+
+<div id="step-up-popover" popover class="step-up-popover">
+    <h2>Step-up verification</h2>
+    <p class="small">Confirm a second factor to unlock sensitive changes for the next few minutes.</p>
+
+    <form method="post" action="/auth/step-up">
+        <AntiforgeryToken />
+        <input type="hidden" name="returnTo" value="@ReturnTo" />
+        <label>
+            TOTP code
+            <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
+        </label>
+        <button type="submit">Verify</button>
+    </form>
+
+    @if (ShowSecurityKey)
+    {
+        <form class="secondary-form">
+            <AntiforgeryToken />
+            <button type="button" data-webauthn-assert data-webauthn-return="@ReturnTo" data-webauthn-message="#step-up-popover-message">
+                Verify with security key
+            </button>
+        </form>
+        <p id="step-up-popover-message" class="message error" hidden></p>
+    }
+
+    <form class="secondary-form">
+        <button type="button" class="button-quiet" popovertarget="step-up-popover" popovertargetaction="hide">Cancel</button>
+    </form>
+</div>
+
+@code {
+    /// <summary>Relative path to return to after verification.</summary>
+    [Parameter]
+    public string ReturnTo { get; set; } = "/account";
+
+    /// <summary>Whether the current user has enrolled security keys.</summary>
+    [Parameter]
+    public bool ShowSecurityKey { get; set; }
+}

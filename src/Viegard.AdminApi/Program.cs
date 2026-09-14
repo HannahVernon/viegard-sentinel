@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
+using Viegard.AdminApi;
 using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Components;
 using Viegard.AdminApi.Configuration;
@@ -301,6 +302,12 @@ app.UseAntiforgery();
 
 app.MapGet("/healthz", () => Results.Ok(new { status = "healthy", service = "viegard-admin" }))
     .AllowAnonymous();
+app.MapGet("/status/queues", async (IQueueTelemetryStore telemetry, CancellationToken cancellationToken) =>
+{
+    var snapshots = await telemetry.GetLatestAsync(cancellationToken).ConfigureAwait(false);
+    var (css, label) = QueueStatusBadge.Summarize(snapshots, DateTimeOffset.UtcNow);
+    return Results.Json(new { css, label });
+}).RequireAuthorization();
 app.MapAdminAuthEndpoints();
 app.MapAdminSignatureEndpoints();
 app.MapStaticAssets().AllowAnonymous();

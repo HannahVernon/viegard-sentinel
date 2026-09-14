@@ -1,6 +1,11 @@
 @page "/signatures"
 @attribute [Authorize]
+@using System.Security.Claims
 @inject ICustomSignatureStore SignatureStore
+@inject IAdminUserStore Users
+@inject IAdminSessionStore Sessions
+@inject IHttpContextAccessor HttpContextAccessor
+@inject IOptions<AdminAuthOptions> AuthOptions
 
 <PageTitle>Viegard signatures</PageTitle>
 
@@ -16,6 +21,69 @@
         <p class="message">@Status</p>
     }
 
+    @if (!_stepUpFresh)
+    {
+        <div class="step-up-strip">
+            <span>Editing signatures requires step-up verification.</span>
+            <StepUpPrompt ReturnTo="/signatures" ShowSecurityKey="_hasSecurityKeys" />
+        </div>
+    }
+
+    <section>
+        <h2>Configured signatures</h2>
+        @if (_signatures.Count == 0)
+        {
+            <p>No signatures are configured.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Target</th>
+                        <th>Match</th>
+                        <th>Pattern</th>
+                        <th>Category</th>
+                        <th>Severity</th>
+                        <th>Enabled</th>
+                        <th>Updated</th>
+                        <th>Version</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var signature in _signatures)
+                    {
+                        <tr>
+                            <td>@signature.Name</td>
+                            <td>@signature.Target</td>
+                            <td>@signature.MatchType</td>
+                            <td>@AdminText.OneLine(signature.Pattern, 160)</td>
+                            <td>@signature.Category</td>
+                            <td>@signature.Severity</td>
+                            <td><span class="@(signature.Enabled ? "badge badge-green" : "badge")">@(signature.Enabled ? "Enabled" : "Disabled")</span></td>
+                            <td>@signature.UpdatedBy at @AdminText.Utc(signature.UpdatedAt)</td>
+                            <td>@signature.Version</td>
+                            <td class="actions-cell">
+                                <a class="button-link" href="/signatures?editId=@signature.Id">Edit</a>
+                                <form method="post" action="/signatures/toggle">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="id" value="@signature.Id" />
+                                    <button type="submit">@(signature.Enabled ? "Disable" : "Enable")</button>
+                                </form>
+                                <form method="post" action="/signatures/delete">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="id" value="@signature.Id" />
+                                    <button type="submit">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
     <section>
         <h2>@(_editing is null ? "Add signature" : "Edit signature")</h2>
         <form method="post" action="/signatures/save" class="edit-form">
@@ -71,66 +139,13 @@
         </form>
     </section>
 
-    <section>
-        <h2>Configured signatures</h2>
-        @if (_signatures.Count == 0)
-        {
-            <p>No signatures are configured.</p>
-        }
-        else
-        {
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Target</th>
-                        <th>Match</th>
-                        <th>Pattern</th>
-                        <th>Category</th>
-                        <th>Severity</th>
-                        <th>Enabled</th>
-                        <th>Updated</th>
-                        <th>Version</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var signature in _signatures)
-                    {
-                        <tr>
-                            <td>@signature.Name</td>
-                            <td>@signature.Target</td>
-                            <td>@signature.MatchType</td>
-                            <td>@AdminText.OneLine(signature.Pattern, 160)</td>
-                            <td>@signature.Category</td>
-                            <td>@signature.Severity</td>
-                            <td><span class="@(signature.Enabled ? "badge badge-green" : "badge")">@(signature.Enabled ? "Enabled" : "Disabled")</span></td>
-                            <td>@signature.UpdatedBy at @AdminText.Utc(signature.UpdatedAt)</td>
-                            <td>@signature.Version</td>
-                            <td class="actions-cell">
-                                <a href="/signatures?editId=@signature.Id">Edit</a>
-                                <form method="post" action="/signatures/toggle">
-                                    <AntiforgeryToken />
-                                    <input type="hidden" name="id" value="@signature.Id" />
-                                    <button type="submit">@(signature.Enabled ? "Disable" : "Enable")</button>
-                                </form>
-                                <form method="post" action="/signatures/delete">
-                                    <AntiforgeryToken />
-                                    <input type="hidden" name="id" value="@signature.Id" />
-                                    <button type="submit">Delete</button>
-                                </form>
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        }
-    </section>
 </main>
 
 @code {
     private IReadOnlyList<CustomSignature> _signatures = [];
     private CustomSignature? _editing;
+    private bool _stepUpFresh;
+    private bool _hasSecurityKeys;
 
     [SupplyParameterFromQuery(Name = "editId")]
     public Guid? EditId { get; set; }
@@ -148,6 +163,24 @@
         {
             _editing = _signatures.FirstOrDefault(s => s.Id == EditId.Value)
                 ?? await SignatureStore.GetAsync(EditId.Value).ConfigureAwait(false);
+        }
+
+        var context = HttpContextAccessor.HttpContext;
+        if (context is null)
+        {
+            return;
+        }
+
+        if (Guid.TryParse(context.User.FindFirstValue(AdminCookieNames.SessionIdClaim), out var sessionId))
+        {
+            var session = await Sessions.GetAsync(sessionId).ConfigureAwait(false);
+            _stepUpFresh = session?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
+        }
+
+        if (Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+        {
+            var credentials = await Users.ListWebAuthnCredentialsAsync(userId).ConfigureAwait(false);
+            _hasSecurityKeys = credentials.Count > 0;
         }
     }
 }

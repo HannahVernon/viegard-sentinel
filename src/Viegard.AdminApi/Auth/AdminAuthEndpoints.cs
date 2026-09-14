@@ -730,10 +730,15 @@ public static class AdminAuthEndpoints
             return JsonRedirect(BuildRedirectPath("/login", error: UniformFailure), StatusCodes.Status401Unauthorized);
         }
 
+        var stepUpReturn = SafeReturnPath(
+            document.RootElement.TryGetProperty("returnTo", out var returnToProperty)
+            && returnToProperty.ValueKind == JsonValueKind.String
+                ? returnToProperty.GetString()
+                : null);
         await sessions.StampStepUpAsync(sessionId, now, context.RequestAborted).ConfigureAwait(false);
         await auditor.RecordAsync(AdminAuthEventKind.StepUpSucceeded, assertionUser.Username, context, cancellationToken: context.RequestAborted)
             .ConfigureAwait(false);
-        return JsonRedirect(BuildRedirectPath("/account", status: "Step-up verification complete."));
+        return JsonRedirect(BuildRedirectPath(stepUpReturn, status: "Step-up verification complete."));
     }
 
     private static async Task<IResult> DeleteWebAuthnCredentialAsync(
@@ -794,6 +799,7 @@ public static class AdminAuthEndpoints
 
         var secret = await users.GetTotpSecretAsync(user.Id, context.RequestAborted).ConfigureAwait(false);
         var code = form["code"].ToString();
+        var returnTo = SafeReturnPath(form["returnTo"].ToString());
         var valid = secret is not null
             && totp.VerifyCode(secret.SecretBase32, code, secret.LastAcceptedStep, out var acceptedStep)
             && await users.TrySetTotpLastAcceptedStepAsync(user.Id, acceptedStep, context.RequestAborted).ConfigureAwait(false);
@@ -805,13 +811,32 @@ public static class AdminAuthEndpoints
                 context,
                 enqueueForCorrelation: true,
                 cancellationToken: context.RequestAborted).ConfigureAwait(false);
-            return Redirect("/account", error: UniformFailure);
+            return Redirect(returnTo, error: UniformFailure);
         }
 
         await sessions.StampStepUpAsync(sessionId, DateTimeOffset.UtcNow, context.RequestAborted).ConfigureAwait(false);
         await auditor.RecordAsync(AdminAuthEventKind.StepUpSucceeded, user.Username, context, cancellationToken: context.RequestAborted)
             .ConfigureAwait(false);
-        return Redirect("/account", status: "Step-up verification complete.");
+        return Redirect(returnTo, status: "Step-up verification complete.");
+    }
+
+    /// <summary>
+    /// Constrains a caller-supplied return path to a local relative path so
+    /// the redirect can never leave the site (open-redirect guard).
+    /// </summary>
+    public static string SafeReturnPath(string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate)
+            || candidate[0] != '/'
+            || candidate.StartsWith("//", StringComparison.Ordinal)
+            || candidate.StartsWith("/\\", StringComparison.Ordinal)
+            || candidate.Contains('\r', StringComparison.Ordinal)
+            || candidate.Contains('\n', StringComparison.Ordinal))
+        {
+            return "/account";
+        }
+
+        return candidate;
     }
 
     private static async Task<IResult> RevokeSessionsAsync(

@@ -41,9 +41,12 @@
                         <td>@row.Snapshot.TotalEnqueued / @row.Snapshot.TotalCompleted / @row.Snapshot.TotalAbandoned</td>
                         <td>@AdminText.Utc(row.Snapshot.CapturedAt)</td>
                     </tr>
-                    <tr class="details-row">
-                        <td colspan="9">@string.Join(" ", row.Status.Reasons)</td>
-                    </tr>
+                    @if (row.Status.Light != TrafficLight.Green)
+                    {
+                        <tr class="details-row">
+                            <td colspan="9">@string.Join(" ", row.Status.Reasons)</td>
+                        </tr>
+                    }
                 }
             </tbody>
         </table>

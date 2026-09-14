@@ -56,7 +56,14 @@
                     </tr>
                     @if (!string.IsNullOrWhiteSpace(record.DetailJson))
                     {
-                        <tr class="details-row"><td colspan="5"><pre class="json-block">@AdminText.Limit(record.DetailJson)</pre></td></tr>
+                        <tr class="details-row">
+                            <td colspan="5">
+                                <details class="json-details">
+                                    <summary>Detail</summary>
+                                    <pre class="json-block">@AdminText.Limit(record.DetailJson)</pre>
+                                </details>
+                            </td>
+                        </tr>
                     }
                 }
             </tbody>

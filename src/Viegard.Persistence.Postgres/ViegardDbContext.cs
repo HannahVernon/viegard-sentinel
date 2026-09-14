@@ -100,6 +100,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
         {
             entity.ToTable("raw_observations");
             entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.ObservedAt);
             entity.HasIndex(e => e.PayloadReference).IsUnique();
             entity.HasIndex(e => e.SourceId);
             entity.HasOne<SourceRow>().WithMany().HasForeignKey(e => e.SourceId).OnDelete(DeleteBehavior.Restrict);
@@ -122,6 +123,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.ToTable("incidents");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.CorrelationKey, e.State });
+            entity.HasIndex(e => new { e.WindowStart, e.State });
             entity.Property(e => e.EventIdsJson).HasColumnType("jsonb");
             entity.Property(e => e.EvidenceJson).HasColumnType("jsonb");
         });
@@ -143,6 +145,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.ToTable("decisions");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.ClassificationId);
+            entity.HasIndex(e => e.CreatedAt);
             entity.HasIndex(e => e.PolicyId);
             entity.HasOne<PolicyRow>().WithMany().HasForeignKey(e => e.PolicyId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.GuardrailsJson).HasColumnType("jsonb");
@@ -154,6 +157,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.DecisionId);
             entity.HasIndex(e => e.ProviderId);
+            entity.HasIndex(e => e.RequestedAt);
             entity.HasOne<ActionProviderRow>().WithMany().HasForeignKey(e => e.ProviderId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.ParametersJson).HasColumnType("jsonb");
             entity.Property(e => e.RollbackJson).HasColumnType("jsonb");
@@ -205,6 +209,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).UseIdentityAlwaysColumn();
             entity.HasIndex(e => new { e.QueueName, e.DeadLettered, e.LeasedUntil, e.Id });
+            entity.HasIndex(e => new { e.DeadLettered, e.EnqueuedAt });
             entity.Property(e => e.PayloadJson).HasColumnType("jsonb");
         });
 
@@ -261,6 +266,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.AbsoluteExpiresAt);
             entity.HasIndex(e => e.IdleExpiresAt);
+            entity.HasIndex(e => e.RevokedAt);
             entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

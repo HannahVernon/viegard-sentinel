@@ -41,6 +41,27 @@ Every Viegard object lives in a dedicated PostgreSQL schema rather than `public`
 
 The schema is applied via the connection `search_path`, so the migrations and queue SQL are schema-agnostic.  Keeping application objects out of `public` means a `pg_dump --schema=viegard` captures exactly the application state, and other tooling added to the same database later cannot collide with Viegard tables.
 
+### Data retention
+
+Retention is fail-safe by default.  Deploying the retention worker deletes nothing until explicit per-table periods are configured under `Viegard:Retention`; any unset period means keep that table forever.  Corrections are not purgeable because training feedback is retained.
+
+Run retention from exactly one pipeline instance by adding the singleton `maintenance` host role.  The worker runs shortly after startup and then once per day.  A purge cycle that removes one or more rows writes an audit record with per-table counts and the configured periods; a no-op cycle writes no audit record.
+
+Example policy values from D-0035:
+
+```bash
+Viegard__Host__Roles__4=maintenance
+Viegard__Retention__RawObservationsDays=30
+Viegard__Retention__EventsDays=90
+Viegard__Retention__IncidentsDays=180
+Viegard__Retention__ClassificationsDays=180
+Viegard__Retention__DecisionsDays=180
+Viegard__Retention__ActionsDays=180
+Viegard__Retention__AuditRecordsDays=365
+Viegard__Retention__DeadLetteredQueueMessagesDays=30
+Viegard__Retention__ExpiredAdminSessionsDays=30
+```
+
 **Upgrading an existing deployment** that already migrated into `public`: the simplest path while the data is still expendable is to reset.  If any rows are worth keeping (for example, captured bot-signature events), export them first:
 
 ```bash
@@ -64,7 +85,7 @@ curl http://127.0.0.1:8080/healthz     # admin liveness
 docker compose logs -t --tail 30 viegard-pipeline
 ```
 
-A clean pipeline boot logs: roles (`sources, correlation, classification, policy, actions`), `Ingestion worker: no data sources configured; idle` (sources ship disabled), correlation/classification/policy workers started, and the queue telemetry publisher.  The shipped posture is dry-run ON, all action providers OFF (D-0027): the stack can observe and decide, but cannot act.
+A clean pipeline boot logs: roles (`sources, correlation, classification, policy, actions`, plus `maintenance` when retention is enabled), `Ingestion worker: no data sources configured; idle` (sources ship disabled), correlation/classification/policy workers started, and the queue telemetry publisher.  The shipped posture is dry-run ON, all action providers OFF (D-0027): the stack can observe and decide, but cannot act.
 
 ## 4. Prove the backup with a restore drill (do this first)
 

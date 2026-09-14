@@ -8,6 +8,9 @@ using Viegard.Domain.Configuration;
 using Viegard.Domain.Decisions;
 using Viegard.Domain.Events;
 using Viegard.Domain.Incidents;
+using Viegard.Application.Retention;
+using Viegard.Domain.Actions;
+using Viegard.Persistence.Postgres.Model;
 using Viegard.Persistence.Postgres.Queues;
 using Viegard.Persistence.Postgres.Stores;
 
@@ -471,6 +474,151 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.True(version > 0);
     }
 
+    [PostgresFact]
+    public async Task Retention_store_purges_only_eligible_rows()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresRetentionStore(factory);
+        var now = DateTimeOffset.UtcNow;
+        var prefix = $"it-retention-{ViegardId.New():N}";
+
+        await using var db = factory.CreateDbContext();
+        var source = new SourceRow
+        {
+            SourceKey = $"{prefix}-source",
+            SourceType = "syslog",
+            FirstSeenAt = now,
+        };
+        var classifier = new ClassifierRow
+        {
+            ClassifierKey = $"{prefix}-classifier",
+            FirstSeenAt = now,
+        };
+        var policy = new PolicyRow
+        {
+            PolicyKey = $"{prefix}-policy",
+            PolicyVersion = "1",
+            FirstSeenAt = now,
+        };
+        var provider = new ActionProviderRow
+        {
+            ProviderKey = $"{prefix}-provider",
+            FirstSeenAt = now,
+        };
+        var user = new AdminUserRow
+        {
+            Id = ViegardId.New(),
+            Username = $"{prefix}-admin",
+            PasswordHash = "hash",
+            PasswordChangedAt = now,
+            FailedLoginCount = 0,
+            LockedUntil = null,
+            MustChangePassword = false,
+            TotpEnrolled = true,
+            CreatedAt = now,
+        };
+        db.AddRange(source, classifier, policy, provider, user);
+        await db.SaveChangesAsync();
+
+        var oldRaw = RawObservation(source.Id, now.AddDays(-31), $"{prefix}/raw-old");
+        var newRaw = RawObservation(source.Id, now.AddDays(-29), $"{prefix}/raw-new");
+        var oldEventA = EventRow(source.Id, now.AddDays(-91), ViegardId.New());
+        var oldEventB = EventRow(source.Id, now.AddDays(-92), ViegardId.New());
+        var newEvent = EventRow(source.Id, now.AddDays(-89), ViegardId.New());
+        var oldOpenIncident = IncidentRow($"{prefix}-old-open", now.AddDays(-181), IncidentState.Open);
+        var oldClosedIncident = IncidentRow($"{prefix}-old-closed", now.AddDays(-181), IncidentState.Closed);
+        var newClosedIncident = IncidentRow($"{prefix}-new-closed", now.AddDays(-179), IncidentState.Closed);
+        var oldClassification = ClassificationRow(classifier.Id, now.AddDays(-181));
+        var newClassification = ClassificationRow(classifier.Id, now.AddDays(-179));
+        var oldDecision = DecisionRow(policy.Id, oldClassification.Id, now.AddDays(-181));
+        var newDecision = DecisionRow(policy.Id, newClassification.Id, now.AddDays(-179));
+        var oldAction = ActionRow(provider.Id, oldDecision.Id, now.AddDays(-181));
+        var newAction = ActionRow(provider.Id, newDecision.Id, now.AddDays(-179));
+        var oldAudit = AuditRecordRow(now.AddDays(-366), $"{prefix}-old audit");
+        var newAudit = AuditRecordRow(now.AddDays(-364), $"{prefix}-new audit");
+        var correction = new CorrectionRow
+        {
+            Id = ViegardId.New(),
+            ClassificationId = oldClassification.Id,
+            CorrectedCategory = "ham",
+            CorrectedBy = "integration",
+            Note = prefix,
+            CreatedAt = now.AddDays(-365),
+        };
+        var oldDeadLetter = QueueMessage($"{prefix}-dead-old", now.AddDays(-31), deadLettered: true);
+        var newDeadLetter = QueueMessage($"{prefix}-dead-new", now.AddDays(-29), deadLettered: true);
+        var liveQueueMessage = QueueMessage($"{prefix}-live-old", now.AddDays(-31), deadLettered: false);
+        var oldRevokedSession = AdminSession(user.Id, now.AddDays(-60), now.AddDays(60), now.AddDays(-31));
+        var newRevokedSession = AdminSession(user.Id, now.AddDays(-60), now.AddDays(60), now.AddDays(-29));
+        var oldExpiredSession = AdminSession(user.Id, now.AddDays(-60), now.AddDays(-31), revokedAt: null);
+        var newExpiredSession = AdminSession(user.Id, now.AddDays(-60), now.AddDays(-29), revokedAt: null);
+        var liveSession = AdminSession(user.Id, now, now.AddDays(1), revokedAt: null);
+
+        db.AddRange(
+            oldRaw,
+            newRaw,
+            oldEventA,
+            oldEventB,
+            newEvent,
+            oldOpenIncident,
+            oldClosedIncident,
+            newClosedIncident,
+            oldClassification,
+            newClassification,
+            oldDecision,
+            newDecision,
+            oldAction,
+            newAction,
+            oldAudit,
+            newAudit,
+            correction,
+            oldDeadLetter,
+            newDeadLetter,
+            liveQueueMessage,
+            oldRevokedSession,
+            newRevokedSession,
+            oldExpiredSession,
+            newExpiredSession,
+            liveSession);
+        await db.SaveChangesAsync();
+
+        Assert.Equal(1, await store.PurgeAsync(RetentionTarget.RawObservations, now.AddDays(-30), batchSize: 1));
+        Assert.Equal(2, await store.PurgeAsync(RetentionTarget.Events, now.AddDays(-90), batchSize: 1));
+        Assert.Equal(1, await store.PurgeAsync(RetentionTarget.Incidents, now.AddDays(-180), batchSize: 1));
+        Assert.Equal(1, await store.PurgeAsync(RetentionTarget.Classifications, now.AddDays(-180), batchSize: 1));
+        Assert.Equal(1, await store.PurgeAsync(RetentionTarget.Decisions, now.AddDays(-180), batchSize: 1));
+        Assert.Equal(1, await store.PurgeAsync(RetentionTarget.Actions, now.AddDays(-180), batchSize: 1));
+        Assert.Equal(1, await store.PurgeAsync(RetentionTarget.AuditRecords, now.AddDays(-365), batchSize: 1));
+        Assert.Equal(1, await store.PurgeAsync(RetentionTarget.DeadLetteredQueueMessages, now.AddDays(-30), batchSize: 1));
+        Assert.Equal(2, await store.PurgeAsync(RetentionTarget.ExpiredAdminSessions, now.AddDays(-30), batchSize: 1));
+
+        db.ChangeTracker.Clear();
+        Assert.False(await db.RawObservations.AnyAsync(r => r.Id == oldRaw.Id));
+        Assert.True(await db.RawObservations.AnyAsync(r => r.Id == newRaw.Id));
+        Assert.False(await db.Events.AnyAsync(e => e.Id == oldEventA.Id || e.Id == oldEventB.Id));
+        Assert.True(await db.Events.AnyAsync(e => e.Id == newEvent.Id));
+        Assert.True(await db.Incidents.AnyAsync(i => i.Id == oldOpenIncident.Id));
+        Assert.False(await db.Incidents.AnyAsync(i => i.Id == oldClosedIncident.Id));
+        Assert.True(await db.Incidents.AnyAsync(i => i.Id == newClosedIncident.Id));
+        Assert.False(await db.Classifications.AnyAsync(c => c.Id == oldClassification.Id));
+        Assert.True(await db.Classifications.AnyAsync(c => c.Id == newClassification.Id));
+        Assert.False(await db.Decisions.AnyAsync(d => d.Id == oldDecision.Id));
+        Assert.True(await db.Decisions.AnyAsync(d => d.Id == newDecision.Id));
+        Assert.False(await db.Actions.AnyAsync(a => a.Id == oldAction.Id));
+        Assert.True(await db.Actions.AnyAsync(a => a.Id == newAction.Id));
+        Assert.False(await db.AuditRecords.AnyAsync(a => a.Id == oldAudit.Id));
+        Assert.True(await db.AuditRecords.AnyAsync(a => a.Id == newAudit.Id));
+        Assert.True(await db.Corrections.AnyAsync(c => c.Id == correction.Id));
+        Assert.False(await db.QueueMessages.AnyAsync(q => q.Id == oldDeadLetter.Id));
+        Assert.True(await db.QueueMessages.AnyAsync(q => q.Id == newDeadLetter.Id));
+        Assert.True(await db.QueueMessages.AnyAsync(q => q.Id == liveQueueMessage.Id));
+        Assert.False(await db.AdminSessions.AnyAsync(s => s.Id == oldRevokedSession.Id));
+        Assert.True(await db.AdminSessions.AnyAsync(s => s.Id == newRevokedSession.Id));
+        Assert.False(await db.AdminSessions.AnyAsync(s => s.Id == oldExpiredSession.Id));
+        Assert.True(await db.AdminSessions.AnyAsync(s => s.Id == newExpiredSession.Id));
+        Assert.True(await db.AdminSessions.AnyAsync(s => s.Id == liveSession.Id));
+    }
+
     private static CustomSignature CustomSignature(string name) => new()
     {
         Id = ViegardId.New(),
@@ -547,6 +695,107 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Stage = PipelineStage.Admin,
         Summary = summary,
         SourceId = sourceId,
+    };
+
+    private static RawObservationRow RawObservation(int sourceId, DateTimeOffset observedAt, string payloadReference) => new()
+    {
+        Id = ViegardId.New(),
+        SourceId = sourceId,
+        ObservedAt = observedAt,
+        PayloadReference = payloadReference,
+        IngestOffset = null,
+        RawPayload = "raw",
+    };
+
+    private static NormalizedEventRow EventRow(int sourceId, DateTimeOffset occurredAt, Guid rawObservationId) => new()
+    {
+        Id = ViegardId.New(),
+        SourceId = sourceId,
+        OccurredAt = occurredAt,
+        EntitiesJson = "[]",
+        PayloadJson = "{}",
+        RawObservationId = rawObservationId,
+    };
+
+    private static IncidentRow IncidentRow(string correlationKey, DateTimeOffset windowStart, IncidentState state) => new()
+    {
+        Id = ViegardId.New(),
+        CorrelationKey = correlationKey,
+        WindowStart = windowStart,
+        WindowEnd = windowStart.AddMinutes(1),
+        EventIdsJson = "[]",
+        EvidenceJson = "[]",
+        State = (int)state,
+    };
+
+    private static ClassificationRow ClassificationRow(int classifierId, DateTimeOffset createdAt) => new()
+    {
+        Id = ViegardId.New(),
+        SubjectKind = (int)ClassificationSubjectKind.Incident,
+        SubjectId = ViegardId.New(),
+        ClassifierId = classifierId,
+        Category = "test",
+        Confidence = 0.5,
+        Severity = 5,
+        ReasonsJson = "[]",
+        CreatedAt = createdAt,
+    };
+
+    private static DecisionRow DecisionRow(int policyId, Guid classificationId, DateTimeOffset createdAt) => new()
+    {
+        Id = ViegardId.New(),
+        ClassificationId = classificationId,
+        PolicyId = policyId,
+        Outcome = (int)DecisionOutcome.DryRun,
+        Rationale = "retention integration",
+        GuardrailsJson = "[]",
+        CreatedAt = createdAt,
+    };
+
+    private static ActionRecordRow ActionRow(int providerId, Guid decisionId, DateTimeOffset requestedAt) => new()
+    {
+        Id = ViegardId.New(),
+        DecisionId = decisionId,
+        ProviderId = providerId,
+        OperationId = "retention-test",
+        Status = (int)ActionStatus.Succeeded,
+        RequestedAt = requestedAt,
+    };
+
+    private static AuditRecordRow AuditRecordRow(DateTimeOffset timestamp, string summary) => new()
+    {
+        Id = ViegardId.New(),
+        Timestamp = timestamp,
+        Stage = (int)PipelineStage.System,
+        Summary = summary,
+    };
+
+    private static QueueMessageRow QueueMessage(string queueName, DateTimeOffset enqueuedAt, bool deadLettered) => new()
+    {
+        QueueName = queueName,
+        PayloadJson = "{}",
+        DeliveryCount = deadLettered ? 5 : 0,
+        EnqueuedAt = enqueuedAt,
+        LeasedUntil = null,
+        DeadLettered = deadLettered,
+    };
+
+    private static AdminSessionRow AdminSession(
+        Guid userId,
+        DateTimeOffset createdAt,
+        DateTimeOffset absoluteExpiresAt,
+        DateTimeOffset? revokedAt) => new()
+    {
+        Id = ViegardId.New(),
+        UserId = userId,
+        CreatedAt = createdAt,
+        LastSeenAt = createdAt,
+        AbsoluteExpiresAt = absoluteExpiresAt,
+        IdleExpiresAt = absoluteExpiresAt,
+        Ip = "127.0.0.1",
+        IpBindingMode = "strict",
+        UserAgent = "retention-test",
+        RevokedAt = revokedAt,
     };
 
     private sealed class TestDbContextFactory(Npgsql.NpgsqlDataSource dataSource) : IDbContextFactory<ViegardDbContext>

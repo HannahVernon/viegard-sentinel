@@ -89,7 +89,7 @@ Key invariants:
 
 Deployable | Container | Responsibility
 -----------|-----------|---------------
-`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
+`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, maintenance retention, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
 `viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), server-side filtered and sortable read access to incidents, classifications, decisions, and audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no integration credentials.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
 Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, feedback, telemetry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
@@ -99,11 +99,11 @@ Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, inc
 The pipeline host executable is **role-configurable**: its configuration declares which modules the instance runs.  This makes the number of processes extensible per service without code changes.  Examples:
 
 - v1 default: one instance running every module.
-- Later: one instance per mail provider (each holding only that provider's credentials), one instance for nginx ingestion, one core instance for correlation + policy + actions.
+- Later: one instance per mail provider (each holding only that provider's credentials), one instance for nginx ingestion, one core instance for correlation + policy + actions, and one maintenance instance for retention.
 
 Rules:
 
-- **Singleton roles.**  The correlator (single writer over incident state) and the policy/action engine (guardrail counters, action rate caps, circuit breaker state must be globally consistent) run in exactly one instance.  Configuration validation rejects topologies that violate this.
+- **Singleton roles.**  The correlator (single writer over incident state), policy/action engine (guardrail counters, action rate caps, circuit breaker state must be globally consistent), and maintenance retention worker run in exactly one instance.  Configuration validation rejects topologies that violate this.
 - **Multi-instance roles.**  Data-source and classification modules fan out freely.  Each configured data-source instance (e.g., each IMAP account) is an isolated worker with its own connection, credential, ingestion offsets, and health contributor, regardless of which process hosts it.
 - **Transport follows topology.**  Modules co-located in one process communicate over in-process bounded channels; modules split across processes use a durable queue implementation of the same `IWorkQueue` port (database-backed table queue first; an external broker can replace it later, see TODO).  Module code is identical in both topologies.
 
@@ -137,7 +137,8 @@ src/
   Viegard.Actions.Fail2Ban/    Fail2Ban integration (mode TBD)
   Viegard.Notifications.Email/ Operator status/alert emails via SMTP (MailKit)
   Viegard.PipelineHost/        Worker service executable, including ingestion,
-                               correlation, classification, and policy workers
+                               correlation, classification, policy, and
+                               maintenance retention workers
   Viegard.AdminApi/            Admin API executable, auth endpoints, WebAuthn adapter,
                                static SSR pages, display preferences, keyset
                                pagination, filter, and sort UI, first-party WebAuthn JS bridge
@@ -178,6 +179,7 @@ Interface | Metaphor | Contract summary
 `IActionProvider` | Talons | Executes a closed catalog of typed operations; validates inputs; returns `ActionResult` with rollback info
 `INotificationProvider` | Talons | Operator notification delivery; initial implementation: operator email (SMTP).  Mobile push mechanism deferred pending privacy review (D-0015); the port stays pluggable for it
 `IAuditLedger` | Ledger | Append-only audit records covering every stage
+`IRetentionStore` | Roost | Batched deletes for configured data-retention targets; unset periods keep rows forever
 `ISecretProvider` | Roost | Named secret retrieval; file-mounted (prod) and user-secrets (dev) implementations
 `IHealthContributor` | - | Per-component health surfaced by both hosts
 `ICommandQueue` | - | Durable admin-to-pipeline commands

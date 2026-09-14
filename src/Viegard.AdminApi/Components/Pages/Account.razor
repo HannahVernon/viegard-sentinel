@@ -1,4 +1,4 @@
-﻿@page "/account"
+@page "/account"
 @attribute [Authorize]
 @inject IHttpContextAccessor HttpContextAccessor
 @inject IAdminUserStore Users
@@ -10,7 +10,18 @@
 
 <PageTitle>Account</PageTitle>
 
-<main class="account-panel">
+<main class="account-panel wide page-layout">
+    <nav class="page-index" aria-label="Account sections">
+        <a class="index-default-link" href="/account#overview">Overview</a>
+        <a href="/account#password">Change password</a>
+        <a href="/account#step-up">Step-up verification</a>
+        <a href="/account#totp">TOTP</a>
+        <a href="/account#security-keys">Security keys</a>
+        <a href="/account#recovery-codes">Recovery codes</a>
+        <a href="/account#preferences">Preferences</a>
+        <a href="/account#sessions">Active sessions</a>
+    </nav>
+    <div class="page-content">
     <h1>Admin account</h1>
 
     @if (!string.IsNullOrWhiteSpace(Error))
@@ -28,7 +39,7 @@
     }
     else
     {
-        <section>
+        <section id="overview" class="indexed index-default">
             <h2>Signed in as @_user.Username</h2>
             @if (_user.MustChangePassword)
             {
@@ -38,6 +49,14 @@
             {
                 <p class="message error">TOTP enrollment is required before using the admin interface.</p>
             }
+            <dl class="detail-list">
+                <dt>TOTP</dt><dd>@(_user.TotpEnrolled ? "Enrolled" : "Not enrolled")</dd>
+                <dt>Security keys</dt><dd>@_webAuthnCredentials.Count enrolled</dd>
+                <dt>Step-up</dt><dd>@(_stepUpFresh ? "Verified for this session" : "Not verified; sensitive changes will prompt")</dd>
+                <dt>Active sessions</dt><dd>@_sessions.Count(s => s.RevokedAt is null)</dd>
+                <dt>Account created</dt><dd>@Display.Format(_user.CreatedAt)</dd>
+                <dt>Password changed</dt><dd>@Display.Format(_user.PasswordChangedAt)</dd>
+            </dl>
         </section>
 
         @if (_newRecoveryCodes.Count > 0)
@@ -54,7 +73,7 @@
             </section>
         }
 
-        <section>
+        <section id="password" class="indexed">
             <h2>Change password</h2>
             <form method="post" action="/auth/password/change">
                 <AntiforgeryToken />
@@ -74,7 +93,7 @@
             </form>
         </section>
 
-        <section>
+        <section id="step-up" class="indexed">
             <h2>Step-up verification</h2>
             @if (_stepUpFresh)
             {
@@ -104,10 +123,10 @@
             }
         </section>
 
-        @if (!_user.TotpEnrolled || _stepUpFresh)
-        {
-            <section>
-                <h2>@(_user.TotpEnrolled ? "Re-enroll TOTP" : "Enroll TOTP")</h2>
+        <section id="totp" class="indexed">
+            <h2>@(_user.TotpEnrolled ? "Re-enroll TOTP" : "Enroll TOTP")</h2>
+            @if (!_user.TotpEnrolled || _stepUpFresh)
+            {
                 <p>Enter this secret manually in your authenticator app, then verify the current code.</p>
                 <pre class="secret-block">@_setupSecret</pre>
                 <p class="small">otpauth URI:</p>
@@ -121,10 +140,17 @@
                     </label>
                     <button type="submit">@(_user.TotpEnrolled ? "Replace TOTP" : "Enroll TOTP")</button>
                 </form>
-            </section>
-        }
+            }
+            else
+            {
+                <div class="step-up-strip">
+                    <span>Re-enrolling TOTP requires step-up verification.</span>
+                    <StepUpPrompt ReturnTo="/account#totp" ShowSecurityKey="_webAuthnCredentials.Count > 0" PopoverId="step-up-popover-totp" />
+                </div>
+            }
+        </section>
 
-        <section>
+        <section id="security-keys" class="indexed">
             <h2>Security keys</h2>
             @if (_webAuthnCredentials.Count == 0)
             {
@@ -175,19 +201,32 @@
             }
             else
             {
-                <p>Step-up verification is required before enrolling or removing security keys.</p>
+                <div class="step-up-strip">
+                    <span>Enrolling or removing security keys requires step-up verification.</span>
+                    <StepUpPrompt ReturnTo="/account#security-keys" ShowSecurityKey="_webAuthnCredentials.Count > 0" PopoverId="step-up-popover-keys" />
+                </div>
             }
         </section>
 
-        <section>
+        <section id="recovery-codes" class="indexed">
             <h2>Recovery codes</h2>
-            <form method="post" action="/auth/recovery-codes/regenerate">
-                <AntiforgeryToken />
-                <button type="submit">Regenerate recovery codes</button>
-            </form>
+            @if (_stepUpFresh)
+            {
+                <form method="post" action="/auth/recovery-codes/regenerate">
+                    <AntiforgeryToken />
+                    <button type="submit">Regenerate recovery codes</button>
+                </form>
+            }
+            else
+            {
+                <div class="step-up-strip">
+                    <span>Regenerating recovery codes requires step-up verification.</span>
+                    <StepUpPrompt ReturnTo="/account#recovery-codes" ShowSecurityKey="_webAuthnCredentials.Count > 0" PopoverId="step-up-popover-codes" />
+                </div>
+            }
         </section>
 
-        <section>
+        <section id="preferences" class="indexed">
             <h2>Preferences</h2>
             <form method="post" action="/account/preferences" class="edit-form">
                 <AntiforgeryToken />
@@ -213,7 +252,7 @@
             </form>
         </section>
 
-        <section>
+        <section id="sessions" class="indexed">
             <h2>Active sessions</h2>
             <form method="post" action="/auth/sessions/revoke">
                 <AntiforgeryToken />
@@ -244,13 +283,14 @@
             </ul>
         </section>
 
-        <section>
+        <section id="sign-out">
             <form method="post" action="/auth/logout">
                 <AntiforgeryToken />
                 <button type="submit">Sign out</button>
             </form>
         </section>
     }
+    </div>
 </main>
 
 @code {

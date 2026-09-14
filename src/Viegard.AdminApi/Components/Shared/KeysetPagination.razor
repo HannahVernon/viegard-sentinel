@@ -24,6 +24,10 @@
     <form method="get" action="@BasePath" class="page-size">
         @* Changing size restarts from the newest rows; cursor state from
            another size would be misleading. *@
+        @foreach (var filter in ActiveFilters)
+        {
+            <input type="hidden" name="@filter.Key" value="@filter.Value" />
+        }
         <label for="page-size-select">Page size</label>
         <select id="page-size-select" name="take">
             @foreach (var size in Sizes)
@@ -60,11 +64,20 @@
     [Parameter]
     public long Preceding { get; set; }
 
+    [Parameter]
+    public IReadOnlyDictionary<string, string?>? Filters { get; set; }
+
     private int SafeTake => ClampPageSize(Take);
 
     private long PageNumber => PaginationMath.PageNumber(Preceding, SafeTake);
 
     private long TotalPages => PaginationMath.TotalPages(TotalCount, SafeTake);
+
+    private IEnumerable<KeyValuePair<string, string>> ActiveFilters => Filters is null
+        ? []
+        : Filters
+            .Where(filter => !string.IsNullOrWhiteSpace(filter.Key) && !string.IsNullOrWhiteSpace(filter.Value))
+            .Select(filter => new KeyValuePair<string, string>(filter.Key, filter.Value!));
 
     /// <summary>
     /// Server-side clamp for the operator-supplied page size, so a crafted
@@ -87,6 +100,10 @@
         }
 
         parts.Add($"take={ClampPageSize(take)}");
+        foreach (var filter in ActiveFilters)
+        {
+            parts.Add($"{Uri.EscapeDataString(filter.Key)}={Uri.EscapeDataString(filter.Value)}");
+        }
 
         return parts.Count == 0 ? BasePath : $"{BasePath}?{string.Join("&", parts)}";
     }

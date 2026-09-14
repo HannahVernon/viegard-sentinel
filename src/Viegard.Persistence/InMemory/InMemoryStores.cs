@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
 using Viegard.Application.Stores;
@@ -56,8 +57,15 @@ public sealed class InMemoryEventStore : IEventStore
     public ValueTask<KeysetPage<NormalizedEvent>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        EventListFilter? filter = null,
+        ListSort<EventSortColumn>? sort = null,
         CancellationToken cancellationToken = default) =>
-        ValueTask.FromResult(InMemoryPaging.Page(_events.Values, beforeId, pageSize, e => e.Id));
+        ValueTask.FromResult(InMemoryPaging.Page(
+            InMemoryPaging.ApplyFilter(_events.Values, filter),
+            beforeId,
+            pageSize,
+            e => e.Id,
+            InMemoryPaging.EventComparison(sort)));
 }
 
 public sealed class InMemoryIncidentStore : IIncidentStore
@@ -83,8 +91,15 @@ public sealed class InMemoryIncidentStore : IIncidentStore
     public ValueTask<KeysetPage<Incident>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        IncidentListFilter? filter = null,
+        ListSort<IncidentSortColumn>? sort = null,
         CancellationToken cancellationToken = default) =>
-        ValueTask.FromResult(InMemoryPaging.Page(_incidents.Values, beforeId, pageSize, i => i.Id));
+        ValueTask.FromResult(InMemoryPaging.Page(
+            InMemoryPaging.ApplyFilter(_incidents.Values, filter),
+            beforeId,
+            pageSize,
+            i => i.Id,
+            InMemoryPaging.IncidentComparison(sort)));
 }
 
 public sealed class InMemoryClassificationStore : IClassificationStore
@@ -142,8 +157,15 @@ public sealed class InMemoryDecisionStore : IDecisionStore
     public ValueTask<KeysetPage<Decision>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        DecisionListFilter? filter = null,
+        ListSort<DecisionSortColumn>? sort = null,
         CancellationToken cancellationToken = default) =>
-        ValueTask.FromResult(InMemoryPaging.Page(_decisions.Values, beforeId, pageSize, d => d.Id));
+        ValueTask.FromResult(InMemoryPaging.Page(
+            InMemoryPaging.ApplyFilter(_decisions.Values, filter),
+            beforeId,
+            pageSize,
+            d => d.Id,
+            InMemoryPaging.DecisionComparison(sort)));
 }
 
 public sealed class InMemoryActionStore : IActionStore
@@ -192,8 +214,15 @@ public sealed class InMemoryAuditLedger : IAuditLedger
     public ValueTask<KeysetPage<AuditRecord>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        AuditListFilter? filter = null,
+        ListSort<AuditSortColumn>? sort = null,
         CancellationToken cancellationToken = default) =>
-        ValueTask.FromResult(InMemoryPaging.Page(_records.ToArray(), beforeId, pageSize, r => r.Id));
+        ValueTask.FromResult(InMemoryPaging.Page(
+            InMemoryPaging.ApplyFilter(_records.ToArray(), filter),
+            beforeId,
+            pageSize,
+            r => r.Id,
+            InMemoryPaging.AuditComparison(sort)));
 
     public IReadOnlyList<AuditRecord> Snapshot() => _records.ToArray();
 }
@@ -215,6 +244,22 @@ public sealed class InMemoryCustomSignatureStore : ICustomSignatureStore
             .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
             .ThenBy(s => s.Id)
             .ToList());
+    }
+
+    public ValueTask<KeysetPage<CustomSignature>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        SignatureListFilter? filter = null,
+        ListSort<SignatureSortColumn>? sort = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureSeeded();
+        return ValueTask.FromResult(InMemoryPaging.Page(
+            CustomSignatureFilter.Apply(_signatures.Values.ToList(), filter?.Text),
+            beforeId,
+            pageSize,
+            s => s.Id,
+            InMemoryPaging.SignatureComparison(sort)));
     }
 
     public ValueTask<CustomSignature?> GetAsync(Guid id, CancellationToken cancellationToken = default)
@@ -670,19 +715,104 @@ public sealed class InMemoryAdminSessionStore : IAdminSessionStore
 
 internal static class InMemoryPaging
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        AllowOutOfOrderMetadataProperties = true,
+    };
+
+    public static IEnumerable<NormalizedEvent> ApplyFilter(
+        IEnumerable<NormalizedEvent> source,
+        EventListFilter? filter)
+    {
+        var text = ListFilterText.Normalize(filter?.Text);
+        if (text is null)
+        {
+            return source;
+        }
+
+        return source.Where(item =>
+            item.SourceId.Contains(text, StringComparison.OrdinalIgnoreCase)
+            || JsonSerializer.Serialize<EventPayload>(item.Payload, JsonOptions)
+                .Contains(text, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static IEnumerable<Incident> ApplyFilter(
+        IEnumerable<Incident> source,
+        IncidentListFilter? filter)
+    {
+        var query = source;
+        var text = ListFilterText.Normalize(filter?.Text);
+        if (text is not null)
+        {
+            query = query.Where(item => item.CorrelationKey.Contains(text, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (filter?.State is { } state && Enum.IsDefined(typeof(IncidentState), state))
+        {
+            query = query.Where(item => item.State == state);
+        }
+
+        return query;
+    }
+
+    public static IEnumerable<Decision> ApplyFilter(
+        IEnumerable<Decision> source,
+        DecisionListFilter? filter)
+    {
+        var query = source;
+        var text = ListFilterText.Normalize(filter?.Text);
+        if (text is not null)
+        {
+            query = query.Where(item => item.Rationale.Contains(text, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (filter?.Outcome is { } outcome && Enum.IsDefined(typeof(DecisionOutcome), outcome))
+        {
+            query = query.Where(item => item.Outcome == outcome);
+        }
+
+        return query;
+    }
+
+    public static IEnumerable<AuditRecord> ApplyFilter(
+        IEnumerable<AuditRecord> source,
+        AuditListFilter? filter)
+    {
+        var query = source;
+        var text = ListFilterText.Normalize(filter?.Text);
+        if (text is not null)
+        {
+            query = query.Where(item => item.Summary.Contains(text, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (filter?.Stage is { } stage && Enum.IsDefined(typeof(PipelineStage), stage))
+        {
+            query = query.Where(item => item.Stage == stage);
+        }
+
+        return query;
+    }
+
     public static KeysetPage<T> Page<T>(
         IEnumerable<T> source,
         Guid? beforeId,
         int pageSize,
-        Func<T, Guid> getId)
+        Func<T, Guid> getId,
+        Comparison<T>? comparison = null)
     {
         var safePageSize = Math.Clamp(pageSize, 1, 200);
-        var ordered = source
-            .OrderByDescending(getId)
-            .ToList();
+        var ordered = source.ToList();
+        ordered.Sort(comparison ?? CompareBy(getId, getId, SortDirection.Desc));
         var totalCount = ordered.Count;
+        var startIndex = 0;
+        if (beforeId is not null)
+        {
+            var cursorIndex = ordered.FindIndex(item => getId(item) == beforeId.Value);
+            startIndex = cursorIndex < 0 ? ordered.Count : cursorIndex + 1;
+        }
+
         var pagePlusOne = ordered
-            .Where(item => beforeId is null || getId(item).CompareTo(beforeId.Value) < 0)
+            .Skip(startIndex)
             .Take(safePageSize + 1)
             .ToList();
         var items = pagePlusOne.Take(safePageSize).ToList();
@@ -691,7 +821,114 @@ internal static class InMemoryPaging
             : (Guid?)null;
         var preceding = items.Count == 0
             ? 0
-            : ordered.LongCount(item => getId(item).CompareTo(getId(items[0])) > 0);
+            : ordered.FindIndex(item => getId(item) == getId(items[0]));
         return new KeysetPage<T>(items, nextCursor, totalCount, preceding);
     }
+
+    public static Comparison<NormalizedEvent>? EventComparison(ListSort<EventSortColumn>? sort)
+    {
+        if (sort is not { } active || !ValidDirection(active.Direction))
+        {
+            return null;
+        }
+
+        return active.Column switch
+        {
+            EventSortColumn.Occurred => CompareBy<NormalizedEvent, DateTimeOffset>(e => e.OccurredAt, e => e.Id, active.Direction),
+            EventSortColumn.Source => CompareBy<NormalizedEvent, string>(e => e.SourceId, e => e.Id, active.Direction, StringComparer.Ordinal),
+            _ => null,
+        };
+    }
+
+    public static Comparison<Incident>? IncidentComparison(ListSort<IncidentSortColumn>? sort)
+    {
+        if (sort is not { } active || !ValidDirection(active.Direction))
+        {
+            return null;
+        }
+
+        return active.Column switch
+        {
+            IncidentSortColumn.CorrelationKey => CompareBy<Incident, string>(i => i.CorrelationKey, i => i.Id, active.Direction, StringComparer.Ordinal),
+            IncidentSortColumn.Window => CompareBy<Incident, DateTimeOffset>(i => i.WindowStart, i => i.Id, active.Direction),
+            IncidentSortColumn.State => CompareBy<Incident, int>(i => (int)i.State, i => i.Id, active.Direction),
+            _ => null,
+        };
+    }
+
+    public static Comparison<Decision>? DecisionComparison(ListSort<DecisionSortColumn>? sort)
+    {
+        if (sort is not { } active || !ValidDirection(active.Direction))
+        {
+            return null;
+        }
+
+        return active.Column switch
+        {
+            DecisionSortColumn.Created => CompareBy<Decision, DateTimeOffset>(d => d.CreatedAt, d => d.Id, active.Direction),
+            DecisionSortColumn.Policy => CompareBy<Decision, string>(d => d.PolicyId, d => d.Id, active.Direction, StringComparer.Ordinal),
+            DecisionSortColumn.Outcome => CompareBy<Decision, int>(d => (int)d.Outcome, d => d.Id, active.Direction),
+            DecisionSortColumn.Classification => CompareBy<Decision, Guid>(d => d.ClassificationId, d => d.Id, active.Direction),
+            _ => null,
+        };
+    }
+
+    public static Comparison<AuditRecord>? AuditComparison(ListSort<AuditSortColumn>? sort)
+    {
+        if (sort is not { } active || !ValidDirection(active.Direction))
+        {
+            return null;
+        }
+
+        return active.Column switch
+        {
+            AuditSortColumn.Timestamp => CompareBy<AuditRecord, DateTimeOffset>(r => r.Timestamp, r => r.Id, active.Direction),
+            AuditSortColumn.Stage => CompareBy<AuditRecord, int>(r => (int)r.Stage, r => r.Id, active.Direction),
+            AuditSortColumn.Source => CompareBy<AuditRecord, string>(r => r.SourceId ?? string.Empty, r => r.Id, active.Direction, StringComparer.Ordinal),
+            _ => null,
+        };
+    }
+
+    public static Comparison<CustomSignature>? SignatureComparison(ListSort<SignatureSortColumn>? sort)
+    {
+        if (sort is not { } active || !ValidDirection(active.Direction))
+        {
+            return null;
+        }
+
+        return active.Column switch
+        {
+            SignatureSortColumn.Name => CompareBy<CustomSignature, string>(s => s.Name, s => s.Id, active.Direction, StringComparer.Ordinal),
+            SignatureSortColumn.Target => CompareBy<CustomSignature, int>(s => (int)s.Target, s => s.Id, active.Direction),
+            SignatureSortColumn.Match => CompareBy<CustomSignature, int>(s => (int)s.MatchType, s => s.Id, active.Direction),
+            SignatureSortColumn.Category => CompareBy<CustomSignature, string>(s => s.Category, s => s.Id, active.Direction, StringComparer.Ordinal),
+            SignatureSortColumn.Severity => CompareBy<CustomSignature, int>(s => s.Severity, s => s.Id, active.Direction),
+            SignatureSortColumn.Enabled => CompareBy<CustomSignature, bool>(s => s.Enabled, s => s.Id, active.Direction),
+            SignatureSortColumn.Updated => CompareBy<CustomSignature, DateTimeOffset>(s => s.UpdatedAt, s => s.Id, active.Direction),
+            SignatureSortColumn.Version => CompareBy<CustomSignature, int>(s => s.Version, s => s.Id, active.Direction),
+            _ => null,
+        };
+    }
+
+    private static Comparison<T> CompareBy<T, TKey>(
+        Func<T, TKey> getKey,
+        Func<T, Guid> getId,
+        SortDirection direction,
+        IComparer<TKey>? comparer = null)
+    {
+        var keyComparer = comparer ?? Comparer<TKey>.Default;
+        return (left, right) =>
+        {
+            var result = keyComparer.Compare(getKey(left), getKey(right));
+            if (result == 0)
+            {
+                result = getId(left).CompareTo(getId(right));
+            }
+
+            return direction == SortDirection.Asc ? result : -result;
+        };
+    }
+
+    private static bool ValidDirection(SortDirection direction) =>
+        Enum.IsDefined(typeof(SortDirection), direction);
 }

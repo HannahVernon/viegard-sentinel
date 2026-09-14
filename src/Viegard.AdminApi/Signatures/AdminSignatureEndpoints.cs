@@ -53,7 +53,7 @@ public static class AdminSignatureEndpoints
 
         if (!TryReadSignature(form, user.Username, out var signature, out var error))
         {
-            return Redirect("/signatures", error: error);
+            return Redirect("/signatures#add", error: error);
         }
 
         var before = await signatures.GetAsync(signature.Id, context.RequestAborted).ConfigureAwait(false);

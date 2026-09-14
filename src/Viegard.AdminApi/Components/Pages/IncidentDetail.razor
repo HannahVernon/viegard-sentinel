@@ -73,7 +73,7 @@
                 {
                     <article class="card">
                         <h3>@row.Classification.Category severity @row.Classification.Severity</h3>
-                        <p>Classifier @row.Classification.ClassifierId, confidence @row.Classification.Confidence, created @Display.Format(row.Classification.CreatedAt).</p>
+                        <p>Classifier @row.Classification.ClassifierId, confidence @row.Classification.Confidence.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture), created @Display.Format(row.Classification.CreatedAt).</p>
                         <ul>
                             @foreach (var reason in row.Classification.Reasons)
                             {

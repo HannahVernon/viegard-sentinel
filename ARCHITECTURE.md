@@ -90,7 +90,7 @@ Key invariants:
 Deployable | Container | Responsibility
 -----------|-----------|---------------
 `viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
-`viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), read access to incidents, classifications, decisions, audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no integration credentials.
+`viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), server-side filtered and sortable read access to incidents, classifications, decisions, and audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no integration credentials.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
 Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, feedback, telemetry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
 
@@ -121,7 +121,8 @@ src/
                                zero external dependencies
   Viegard.Application/         Ports (interfaces), deterministic classification,
                                pipeline orchestration, policy engine, prompt assembly,
-                               schema validation, guardrails, admin auth helpers
+                               schema validation, guardrails, admin auth helpers,
+                               and admin list filter helpers
   Viegard.Persistence/         Store implementations (in-memory/file first; DB when chosen)
   Viegard.Sources.Imap/        IMAP data source adapter (MailKit)
   Viegard.Sources.Syslog/      Syslog UDP source adapter; nginx/SWAG access logs normalize
@@ -139,13 +140,13 @@ src/
                                correlation, classification, and policy workers
   Viegard.AdminApi/            Admin API executable, auth endpoints, WebAuthn adapter,
                                static SSR pages, display preferences, keyset
-                               pagination UI, first-party WebAuthn JS bridge
+                               pagination, filter, and sort UI, first-party WebAuthn JS bridge
 tests/
   Viegard.AdminApi.Tests/      Admin API adapter, WebAuthn option, display, and
                                pagination tests
   Viegard.Domain.Tests/
   Viegard.Application.Tests/   Policy, guardrails, deterministic classification,
-                               schema validation, prompt injection
+                               schema validation, prompt injection, list filtering
   Viegard.Sources.Imap.Tests/
   Viegard.Sources.Syslog.Tests/       Syslog and nginx parser tests
   Viegard.Sources.MDaemonLogs.Tests/  Sanitized MDaemon parser fixtures

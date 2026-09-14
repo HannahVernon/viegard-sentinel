@@ -1,9 +1,11 @@
+using System.Runtime.CompilerServices;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Viegard.Application.Audit;
 using Viegard.Application.Stores;
-using Viegard.Domain.Admin;
 using Viegard.Application.Telemetry;
+using Viegard.Domain.Admin;
 using Viegard.Domain.Actions;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Classifications;
@@ -81,14 +83,14 @@ public sealed class PostgresEventStore(IDbContextFactory<ViegardDbContext> facto
     public async ValueTask<KeysetPage<NormalizedEvent>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        EventListFilter? filter = null,
+        ListSort<EventSortColumn>? sort = null,
         CancellationToken cancellationToken = default)
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var take = safePageSize + 1;
-        var rows = await (beforeId is null
-            ? db.Events.FromSqlInterpolated($"SELECT * FROM events ORDER BY id DESC LIMIT {take}")
-            : db.Events.FromSqlInterpolated($"SELECT * FROM events WHERE id < {beforeId.Value} ORDER BY id DESC LIMIT {take}"))
+        var rows = await db.Events.FromSqlInterpolated(BuildQuery(beforeId, seekAfterId: null, includeLimit: true))
             .AsNoTracking()
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -102,12 +104,87 @@ public sealed class PostgresEventStore(IDbContextFactory<ViegardDbContext> facto
         var nextCursor = rows.Count > safePageSize && domains.Count > 0 ? domains[^1].Id : (Guid?)null;
         // COUNT(*) is acceptable for these operator-only admin lists at the
         // expected scale, and keeps the page indicator honest.
-        var totalCount = await db.Events.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        var totalCount = await db.Events.FromSqlInterpolated(BuildQuery(seekBeforeId: null, seekAfterId: null, includeLimit: false))
+            .LongCountAsync(cancellationToken)
+            .ConfigureAwait(false);
         var preceding = domains.Count == 0
             ? 0
-            : await db.Events.LongCountAsync(e => e.Id.CompareTo(domains[0].Id) > 0, cancellationToken).ConfigureAwait(false);
+            : await db.Events.FromSqlInterpolated(BuildQuery(seekBeforeId: null, seekAfterId: domains[0].Id, includeLimit: false))
+                .LongCountAsync(cancellationToken)
+                .ConfigureAwait(false);
         return new KeysetPage<NormalizedEvent>(domains, nextCursor, totalCount, preceding);
+
+        FormattableString BuildQuery(Guid? seekBeforeId, Guid? seekAfterId, bool includeLimit)
+        {
+            var conditions = new List<string>();
+            var args = new List<object?>();
+            var hasSort = PostgresKeysetSorting.TryCreate(sort, EventSortDefinition, out var activeSort);
+            var pattern = PostgresPaging.LikePattern(filter?.Text);
+            if (pattern is not null)
+            {
+                var index = args.Count;
+                conditions.Add(
+                    $"(e.payload_json::text ILIKE {{{index}}} ESCAPE '\\' OR e.source_id IN (SELECT id FROM sources WHERE source_key ILIKE {{{index}}} ESCAPE '\\'))");
+                args.Add(pattern);
+            }
+
+            if (hasSort)
+            {
+                PostgresKeysetSorting.AddSeekCondition(conditions, args, activeSort, activeSort.PageComparator, seekBeforeId);
+                PostgresKeysetSorting.AddSeekCondition(conditions, args, activeSort, activeSort.PrecedingComparator, seekAfterId);
+            }
+            else
+            {
+                AddGuidCondition("e.id <", seekBeforeId);
+                AddGuidCondition("e.id >", seekAfterId);
+            }
+
+            var sql = hasSort ? activeSort.Definition.SelectSql : "SELECT e.* FROM events e";
+            if (conditions.Count > 0)
+            {
+                sql += $" WHERE {string.Join(" AND ", conditions)}";
+            }
+
+            if (includeLimit)
+            {
+                sql += hasSort ? PostgresKeysetSorting.OrderByClause(activeSort) : " ORDER BY e.id DESC";
+                sql += $" LIMIT {{{args.Count}}}";
+                args.Add(take);
+            }
+
+            return FormattableStringFactory.Create(sql, args.ToArray());
+
+            void AddGuidCondition(string expression, Guid? value)
+            {
+                if (value is null)
+                {
+                    return;
+                }
+
+                conditions.Add($"{expression} {{{args.Count}}}");
+                args.Add(value.Value);
+            }
+        }
     }
+
+    private static PostgresSortDefinition? EventSortDefinition(EventSortColumn column) => column switch
+    {
+        EventSortColumn.Occurred => new(
+            "SELECT e.* FROM events e",
+            "FROM events cursor_e",
+            "e.occurred_at",
+            "cursor_e.occurred_at",
+            "e.id",
+            "cursor_e.id"),
+        EventSortColumn.Source => new(
+            "SELECT e.* FROM events e JOIN sources s ON s.id = e.source_id",
+            "FROM events cursor_e JOIN sources cursor_s ON cursor_s.id = cursor_e.source_id",
+            "s.source_key",
+            "cursor_s.source_key",
+            "e.id",
+            "cursor_e.id"),
+        _ => null,
+    };
 }
 
 public sealed class PostgresIncidentStore(IDbContextFactory<ViegardDbContext> factory) : IIncidentStore
@@ -149,14 +226,14 @@ public sealed class PostgresIncidentStore(IDbContextFactory<ViegardDbContext> fa
     public async ValueTask<KeysetPage<Incident>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        IncidentListFilter? filter = null,
+        ListSort<IncidentSortColumn>? sort = null,
         CancellationToken cancellationToken = default)
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var take = safePageSize + 1;
-        var rows = await (beforeId is null
-            ? db.Incidents.FromSqlInterpolated($"SELECT * FROM incidents ORDER BY id DESC LIMIT {take}")
-            : db.Incidents.FromSqlInterpolated($"SELECT * FROM incidents WHERE id < {beforeId.Value} ORDER BY id DESC LIMIT {take}"))
+        var rows = await db.Incidents.FromSqlInterpolated(BuildQuery(beforeId, seekAfterId: null, includeLimit: true))
             .AsNoTracking()
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -164,12 +241,98 @@ public sealed class PostgresIncidentStore(IDbContextFactory<ViegardDbContext> fa
         var nextCursor = rows.Count > safePageSize && items.Count > 0 ? items[^1].Id : (Guid?)null;
         // COUNT(*) is acceptable for these operator-only admin lists at the
         // expected scale, and keeps the page indicator honest.
-        var totalCount = await db.Incidents.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        var totalCount = await db.Incidents.FromSqlInterpolated(BuildQuery(seekBeforeId: null, seekAfterId: null, includeLimit: false))
+            .LongCountAsync(cancellationToken)
+            .ConfigureAwait(false);
         var preceding = items.Count == 0
             ? 0
-            : await db.Incidents.LongCountAsync(i => i.Id.CompareTo(items[0].Id) > 0, cancellationToken).ConfigureAwait(false);
+            : await db.Incidents.FromSqlInterpolated(BuildQuery(seekBeforeId: null, seekAfterId: items[0].Id, includeLimit: false))
+                .LongCountAsync(cancellationToken)
+                .ConfigureAwait(false);
         return new KeysetPage<Incident>(items, nextCursor, totalCount, preceding);
+
+        FormattableString BuildQuery(Guid? seekBeforeId, Guid? seekAfterId, bool includeLimit)
+        {
+            var conditions = new List<string>();
+            var args = new List<object?>();
+            var hasSort = PostgresKeysetSorting.TryCreate(sort, IncidentSortDefinition, out var activeSort);
+            var pattern = PostgresPaging.LikePattern(filter?.Text);
+            if (pattern is not null)
+            {
+                conditions.Add($"i.correlation_key ILIKE {{{args.Count}}} ESCAPE '\\'");
+                args.Add(pattern);
+            }
+
+            if (filter?.State is { } state && Enum.IsDefined(typeof(IncidentState), state))
+            {
+                conditions.Add($"i.state = {{{args.Count}}}");
+                args.Add((int)state);
+            }
+
+            if (hasSort)
+            {
+                PostgresKeysetSorting.AddSeekCondition(conditions, args, activeSort, activeSort.PageComparator, seekBeforeId);
+                PostgresKeysetSorting.AddSeekCondition(conditions, args, activeSort, activeSort.PrecedingComparator, seekAfterId);
+            }
+            else
+            {
+                AddGuidCondition("i.id <", seekBeforeId);
+                AddGuidCondition("i.id >", seekAfterId);
+            }
+
+            var sql = hasSort ? activeSort.Definition.SelectSql : "SELECT i.* FROM incidents i";
+            if (conditions.Count > 0)
+            {
+                sql += $" WHERE {string.Join(" AND ", conditions)}";
+            }
+
+            if (includeLimit)
+            {
+                sql += hasSort ? PostgresKeysetSorting.OrderByClause(activeSort) : " ORDER BY i.id DESC";
+                sql += $" LIMIT {{{args.Count}}}";
+                args.Add(take);
+            }
+
+            return FormattableStringFactory.Create(sql, args.ToArray());
+
+            void AddGuidCondition(string expression, Guid? value)
+            {
+                if (value is null)
+                {
+                    return;
+                }
+
+                conditions.Add($"{expression} {{{args.Count}}}");
+                args.Add(value.Value);
+            }
+        }
     }
+
+    private static PostgresSortDefinition? IncidentSortDefinition(IncidentSortColumn column) => column switch
+    {
+        IncidentSortColumn.CorrelationKey => new(
+            "SELECT i.* FROM incidents i",
+            "FROM incidents cursor_i",
+            "i.correlation_key",
+            "cursor_i.correlation_key",
+            "i.id",
+            "cursor_i.id"),
+        IncidentSortColumn.Window => new(
+            "SELECT i.* FROM incidents i",
+            "FROM incidents cursor_i",
+            "i.window_start",
+            "cursor_i.window_start",
+            "i.id",
+            "cursor_i.id"),
+        IncidentSortColumn.State => new(
+            "SELECT i.* FROM incidents i",
+            "FROM incidents cursor_i",
+            "i.state",
+            "cursor_i.state",
+            "i.id",
+            "cursor_i.id"),
+        _ => null,
+    };
 }
 
 public sealed class PostgresClassificationStore(IDbContextFactory<ViegardDbContext> factory, ReferenceResolver resolver) : IClassificationStore
@@ -296,14 +459,14 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
     public async ValueTask<KeysetPage<Decision>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        DecisionListFilter? filter = null,
+        ListSort<DecisionSortColumn>? sort = null,
         CancellationToken cancellationToken = default)
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var take = safePageSize + 1;
-        var rows = await (beforeId is null
-            ? db.Decisions.FromSqlInterpolated($"SELECT * FROM decisions ORDER BY id DESC LIMIT {take}")
-            : db.Decisions.FromSqlInterpolated($"SELECT * FROM decisions WHERE id < {beforeId.Value} ORDER BY id DESC LIMIT {take}"))
+        var rows = await db.Decisions.FromSqlInterpolated(BuildQuery(beforeId, seekAfterId: null, includeLimit: true))
             .AsNoTracking()
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -317,12 +480,105 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
         var nextCursor = rows.Count > safePageSize && items.Count > 0 ? items[^1].Id : (Guid?)null;
         // COUNT(*) is acceptable for these operator-only admin lists at the
         // expected scale, and keeps the page indicator honest.
-        var totalCount = await db.Decisions.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        var totalCount = await db.Decisions.FromSqlInterpolated(BuildQuery(seekBeforeId: null, seekAfterId: null, includeLimit: false))
+            .LongCountAsync(cancellationToken)
+            .ConfigureAwait(false);
         var preceding = items.Count == 0
             ? 0
-            : await db.Decisions.LongCountAsync(d => d.Id.CompareTo(items[0].Id) > 0, cancellationToken).ConfigureAwait(false);
+            : await db.Decisions.FromSqlInterpolated(BuildQuery(seekBeforeId: null, seekAfterId: items[0].Id, includeLimit: false))
+                .LongCountAsync(cancellationToken)
+                .ConfigureAwait(false);
         return new KeysetPage<Decision>(items, nextCursor, totalCount, preceding);
+
+        FormattableString BuildQuery(Guid? seekBeforeId, Guid? seekAfterId, bool includeLimit)
+        {
+            var conditions = new List<string>();
+            var args = new List<object?>();
+            var hasSort = PostgresKeysetSorting.TryCreate(sort, DecisionSortDefinition, out var activeSort);
+            var pattern = PostgresPaging.LikePattern(filter?.Text);
+            if (pattern is not null)
+            {
+                conditions.Add($"d.rationale ILIKE {{{args.Count}}} ESCAPE '\\'");
+                args.Add(pattern);
+            }
+
+            if (filter?.Outcome is { } outcome && Enum.IsDefined(typeof(DecisionOutcome), outcome))
+            {
+                conditions.Add($"d.outcome = {{{args.Count}}}");
+                args.Add((int)outcome);
+            }
+
+            if (hasSort)
+            {
+                PostgresKeysetSorting.AddSeekCondition(conditions, args, activeSort, activeSort.PageComparator, seekBeforeId);
+                PostgresKeysetSorting.AddSeekCondition(conditions, args, activeSort, activeSort.PrecedingComparator, seekAfterId);
+            }
+            else
+            {
+                AddGuidCondition("d.id <", seekBeforeId);
+                AddGuidCondition("d.id >", seekAfterId);
+            }
+
+            var sql = hasSort ? activeSort.Definition.SelectSql : "SELECT d.* FROM decisions d";
+            if (conditions.Count > 0)
+            {
+                sql += $" WHERE {string.Join(" AND ", conditions)}";
+            }
+
+            if (includeLimit)
+            {
+                sql += hasSort ? PostgresKeysetSorting.OrderByClause(activeSort) : " ORDER BY d.id DESC";
+                sql += $" LIMIT {{{args.Count}}}";
+                args.Add(take);
+            }
+
+            return FormattableStringFactory.Create(sql, args.ToArray());
+
+            void AddGuidCondition(string expression, Guid? value)
+            {
+                if (value is null)
+                {
+                    return;
+                }
+
+                conditions.Add($"{expression} {{{args.Count}}}");
+                args.Add(value.Value);
+            }
+        }
     }
+
+    private static PostgresSortDefinition? DecisionSortDefinition(DecisionSortColumn column) => column switch
+    {
+        DecisionSortColumn.Created => new(
+            "SELECT d.* FROM decisions d",
+            "FROM decisions cursor_d",
+            "d.created_at",
+            "cursor_d.created_at",
+            "d.id",
+            "cursor_d.id"),
+        DecisionSortColumn.Policy => new(
+            "SELECT d.* FROM decisions d JOIN policies p ON p.id = d.policy_id",
+            "FROM decisions cursor_d JOIN policies cursor_p ON cursor_p.id = cursor_d.policy_id",
+            "p.policy_key",
+            "cursor_p.policy_key",
+            "d.id",
+            "cursor_d.id"),
+        DecisionSortColumn.Outcome => new(
+            "SELECT d.* FROM decisions d",
+            "FROM decisions cursor_d",
+            "d.outcome",
+            "cursor_d.outcome",
+            "d.id",
+            "cursor_d.id"),
+        DecisionSortColumn.Classification => new(
+            "SELECT d.* FROM decisions d LEFT JOIN classifications c ON c.id = d.classification_id",
+            "FROM decisions cursor_d LEFT JOIN classifications cursor_c ON cursor_c.id = cursor_d.classification_id",
+            "COALESCE(c.category, '')",
+            "COALESCE(cursor_c.category, '')",
+            "d.id",
+            "cursor_d.id"),
+        _ => null,
+    };
 }
 
 public sealed class PostgresActionStore(IDbContextFactory<ViegardDbContext> factory, ReferenceResolver resolver) : IActionStore
@@ -399,14 +655,14 @@ public sealed class PostgresAuditLedger(IDbContextFactory<ViegardDbContext> fact
     public async ValueTask<KeysetPage<AuditRecord>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        AuditListFilter? filter = null,
+        ListSort<AuditSortColumn>? sort = null,
         CancellationToken cancellationToken = default)
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var take = safePageSize + 1;
-        var rows = await (beforeId is null
-            ? db.AuditRecords.FromSqlInterpolated($"SELECT * FROM audit_records ORDER BY id DESC LIMIT {take}")
-            : db.AuditRecords.FromSqlInterpolated($"SELECT * FROM audit_records WHERE id < {beforeId.Value} ORDER BY id DESC LIMIT {take}"))
+        var rows = await db.AuditRecords.FromSqlInterpolated(BuildQuery(beforeId, seekAfterId: null, includeLimit: true))
             .AsNoTracking()
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -426,12 +682,98 @@ public sealed class PostgresAuditLedger(IDbContextFactory<ViegardDbContext> fact
         var nextCursor = rows.Count > safePageSize && items.Count > 0 ? items[^1].Id : (Guid?)null;
         // COUNT(*) is acceptable for these operator-only admin lists at the
         // expected scale, and keeps the page indicator honest.
-        var totalCount = await db.AuditRecords.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        var totalCount = await db.AuditRecords.FromSqlInterpolated(BuildQuery(seekBeforeId: null, seekAfterId: null, includeLimit: false))
+            .LongCountAsync(cancellationToken)
+            .ConfigureAwait(false);
         var preceding = items.Count == 0
             ? 0
-            : await db.AuditRecords.LongCountAsync(a => a.Id.CompareTo(items[0].Id) > 0, cancellationToken).ConfigureAwait(false);
+            : await db.AuditRecords.FromSqlInterpolated(BuildQuery(seekBeforeId: null, seekAfterId: items[0].Id, includeLimit: false))
+                .LongCountAsync(cancellationToken)
+                .ConfigureAwait(false);
         return new KeysetPage<AuditRecord>(items, nextCursor, totalCount, preceding);
+
+        FormattableString BuildQuery(Guid? seekBeforeId, Guid? seekAfterId, bool includeLimit)
+        {
+            var conditions = new List<string>();
+            var args = new List<object?>();
+            var hasSort = PostgresKeysetSorting.TryCreate(sort, AuditSortDefinition, out var activeSort);
+            var pattern = PostgresPaging.LikePattern(filter?.Text);
+            if (pattern is not null)
+            {
+                conditions.Add($"a.summary ILIKE {{{args.Count}}} ESCAPE '\\'");
+                args.Add(pattern);
+            }
+
+            if (filter?.Stage is { } stage && Enum.IsDefined(typeof(PipelineStage), stage))
+            {
+                conditions.Add($"a.stage = {{{args.Count}}}");
+                args.Add((int)stage);
+            }
+
+            if (hasSort)
+            {
+                PostgresKeysetSorting.AddSeekCondition(conditions, args, activeSort, activeSort.PageComparator, seekBeforeId);
+                PostgresKeysetSorting.AddSeekCondition(conditions, args, activeSort, activeSort.PrecedingComparator, seekAfterId);
+            }
+            else
+            {
+                AddGuidCondition("a.id <", seekBeforeId);
+                AddGuidCondition("a.id >", seekAfterId);
+            }
+
+            var sql = hasSort ? activeSort.Definition.SelectSql : "SELECT a.* FROM audit_records a";
+            if (conditions.Count > 0)
+            {
+                sql += $" WHERE {string.Join(" AND ", conditions)}";
+            }
+
+            if (includeLimit)
+            {
+                sql += hasSort ? PostgresKeysetSorting.OrderByClause(activeSort) : " ORDER BY a.id DESC";
+                sql += $" LIMIT {{{args.Count}}}";
+                args.Add(take);
+            }
+
+            return FormattableStringFactory.Create(sql, args.ToArray());
+
+            void AddGuidCondition(string expression, Guid? value)
+            {
+                if (value is null)
+                {
+                    return;
+                }
+
+                conditions.Add($"{expression} {{{args.Count}}}");
+                args.Add(value.Value);
+            }
+        }
     }
+
+    private static PostgresSortDefinition? AuditSortDefinition(AuditSortColumn column) => column switch
+    {
+        AuditSortColumn.Timestamp => new(
+            "SELECT a.* FROM audit_records a",
+            "FROM audit_records cursor_a",
+            "a.timestamp",
+            "cursor_a.timestamp",
+            "a.id",
+            "cursor_a.id"),
+        AuditSortColumn.Stage => new(
+            "SELECT a.* FROM audit_records a",
+            "FROM audit_records cursor_a",
+            "a.stage",
+            "cursor_a.stage",
+            "a.id",
+            "cursor_a.id"),
+        AuditSortColumn.Source => new(
+            "SELECT a.* FROM audit_records a LEFT JOIN sources s ON s.id = a.source_id",
+            "FROM audit_records cursor_a LEFT JOIN sources cursor_s ON cursor_s.id = cursor_a.source_id",
+            "COALESCE(s.source_key, '')",
+            "COALESCE(cursor_s.source_key, '')",
+            "a.id",
+            "cursor_a.id"),
+        _ => null,
+    };
 }
 
 public sealed class PostgresQueueTelemetryStore(IDbContextFactory<ViegardDbContext> factory) : IQueueTelemetryStore
@@ -516,6 +858,86 @@ public sealed class PostgresCustomSignatureStore(IDbContextFactory<ViegardDbCont
         return rows.Select(r => r.ToDomain()).ToList();
     }
 
+    public async ValueTask<KeysetPage<CustomSignature>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        SignatureListFilter? filter = null,
+        ListSort<SignatureSortColumn>? sort = null,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureSeededAsync(cancellationToken).ConfigureAwait(false);
+        var safePageSize = PostgresPaging.SafePageSize(pageSize);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var take = safePageSize + 1;
+        var rows = await db.CustomSignatures.FromSqlInterpolated(BuildQuery(beforeId, seekAfterId: null, includeLimit: true))
+            .AsNoTracking()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var items = rows.Take(safePageSize).Select(r => r.ToDomain()).ToList();
+        var nextCursor = rows.Count > safePageSize && items.Count > 0 ? items[^1].Id : (Guid?)null;
+        var totalCount = await db.CustomSignatures.FromSqlInterpolated(BuildQuery(seekBeforeId: null, seekAfterId: null, includeLimit: false))
+            .LongCountAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var preceding = items.Count == 0
+            ? 0
+            : await db.CustomSignatures.FromSqlInterpolated(BuildQuery(seekBeforeId: null, seekAfterId: items[0].Id, includeLimit: false))
+                .LongCountAsync(cancellationToken)
+                .ConfigureAwait(false);
+        return new KeysetPage<CustomSignature>(items, nextCursor, totalCount, preceding);
+
+        FormattableString BuildQuery(Guid? seekBeforeId, Guid? seekAfterId, bool includeLimit)
+        {
+            var conditions = new List<string>();
+            var args = new List<object?>();
+            var hasSort = PostgresKeysetSorting.TryCreate(sort, SignatureSortDefinition, out var activeSort);
+            var pattern = PostgresPaging.LikePattern(filter?.Text);
+            if (pattern is not null)
+            {
+                var index = args.Count;
+                conditions.Add(
+                    $"(s.name ILIKE {{{index}}} ESCAPE '\\' OR s.pattern ILIKE {{{index}}} ESCAPE '\\' OR s.category ILIKE {{{index}}} ESCAPE '\\')");
+                args.Add(pattern);
+            }
+
+            if (hasSort)
+            {
+                PostgresKeysetSorting.AddSeekCondition(conditions, args, activeSort, activeSort.PageComparator, seekBeforeId);
+                PostgresKeysetSorting.AddSeekCondition(conditions, args, activeSort, activeSort.PrecedingComparator, seekAfterId);
+            }
+            else
+            {
+                AddGuidCondition("s.id <", seekBeforeId);
+                AddGuidCondition("s.id >", seekAfterId);
+            }
+
+            var sql = hasSort ? activeSort.Definition.SelectSql : "SELECT s.* FROM custom_signatures s";
+            if (conditions.Count > 0)
+            {
+                sql += $" WHERE {string.Join(" AND ", conditions)}";
+            }
+
+            if (includeLimit)
+            {
+                sql += hasSort ? PostgresKeysetSorting.OrderByClause(activeSort) : " ORDER BY s.id DESC";
+                sql += $" LIMIT {{{args.Count}}}";
+                args.Add(take);
+            }
+
+            return FormattableStringFactory.Create(sql, args.ToArray());
+
+            void AddGuidCondition(string expression, Guid? value)
+            {
+                if (value is null)
+                {
+                    return;
+                }
+
+                conditions.Add($"{expression} {{{args.Count}}}");
+                args.Add(value.Value);
+            }
+        }
+    }
+
     public async ValueTask<CustomSignature?> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
         await EnsureSeededAsync(cancellationToken).ConfigureAwait(false);
@@ -525,6 +947,27 @@ public sealed class PostgresCustomSignatureStore(IDbContextFactory<ViegardDbCont
             .ConfigureAwait(false);
         return row?.ToDomain();
     }
+
+    private static PostgresSortDefinition? SignatureSortDefinition(SignatureSortColumn column) => column switch
+    {
+        SignatureSortColumn.Name => SignatureSort("s.name", "cursor_s.name"),
+        SignatureSortColumn.Target => SignatureSort("s.target", "cursor_s.target"),
+        SignatureSortColumn.Match => SignatureSort("s.match_type", "cursor_s.match_type"),
+        SignatureSortColumn.Category => SignatureSort("s.category", "cursor_s.category"),
+        SignatureSortColumn.Severity => SignatureSort("s.severity", "cursor_s.severity"),
+        SignatureSortColumn.Enabled => SignatureSort("s.enabled", "cursor_s.enabled"),
+        SignatureSortColumn.Updated => SignatureSort("s.updated_at", "cursor_s.updated_at"),
+        SignatureSortColumn.Version => SignatureSort("s.version", "cursor_s.version"),
+        _ => null,
+    };
+
+    private static PostgresSortDefinition SignatureSort(string orderExpression, string cursorOrderExpression) => new(
+        "SELECT s.* FROM custom_signatures s",
+        "FROM custom_signatures cursor_s",
+        orderExpression,
+        cursorOrderExpression,
+        "s.id",
+        "cursor_s.id");
 
     public async ValueTask<CustomSignature> UpsertAsync(
         CustomSignature signature,
@@ -996,4 +1439,27 @@ public sealed class PostgresAdminSessionStore(IDbContextFactory<ViegardDbContext
 internal static class PostgresPaging
 {
     public static int SafePageSize(int pageSize) => Math.Clamp(pageSize, 1, 200);
+
+    public static string EscapeLike(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        var escaped = new StringBuilder(value.Length);
+        foreach (var character in value)
+        {
+            if (character is '\\' or '%' or '_')
+            {
+                escaped.Append('\\');
+            }
+
+            escaped.Append(character);
+        }
+
+        return escaped.ToString();
+    }
+
+    public static string? LikePattern(string? value)
+    {
+        var normalized = ListFilterText.Normalize(value);
+        return normalized is null ? null : $"%{EscapeLike(normalized)}%";
+    }
 }

@@ -10,7 +10,12 @@
 
 <PageTitle>Viegard signatures</PageTitle>
 
-<main class="admin-panel wide">
+<main class="admin-panel wide page-layout">
+    <nav class="page-index" aria-label="Signature sections">
+        <a class="index-default-link" href="/signatures#list">Configured signatures</a>
+        <a href="/signatures#add">@(_editing is null ? "Add signature" : "Edit signature")</a>
+    </nav>
+    <div class="page-content">
     <h1>Detection signatures</h1>
 
     @if (!string.IsNullOrWhiteSpace(Error))
@@ -30,26 +35,41 @@
         </div>
     }
 
-    <section>
+    <section id="list" class="indexed index-default">
         <h2>Configured signatures</h2>
+        <form method="get" action="/signatures#list" class="filter-bar" aria-label="Signature filters">
+            <label for="signature-filter-q">
+                Search
+                <input id="signature-filter-q" name="q" maxlength="@ListFilterText.MaxLength" value="@(_filterText ?? string.Empty)" placeholder="Name, pattern, or category" />
+            </label>
+            @foreach (var parameter in ActiveFilterHiddenParams)
+            {
+                <input type="hidden" name="@parameter.Key" value="@parameter.Value" />
+            }
+            <button type="submit">Filter</button>
+            @if (HasFilters)
+            {
+                <a class="filter-clear" href="/signatures#list">Clear</a>
+            }
+        </form>
         @if (_signatures.Count == 0)
         {
-            <p>No signatures are configured.</p>
+            <p>@(HasFilters ? "No signatures match the current filters." : "No signatures are configured.")</p>
         }
         else
         {
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>Name</th>
-                        <th>Target</th>
-                        <th>Match</th>
+                        <SortHeader Title="Name" SortKey="@ListSortParser.ToQueryKey(SignatureSortColumn.Name)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/signatures#list" ExtraQueryParams="@_sortHeaderParams" />
+                        <SortHeader Title="Target" SortKey="@ListSortParser.ToQueryKey(SignatureSortColumn.Target)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/signatures#list" ExtraQueryParams="@_sortHeaderParams" />
+                        <SortHeader Title="Match" SortKey="@ListSortParser.ToQueryKey(SignatureSortColumn.Match)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/signatures#list" ExtraQueryParams="@_sortHeaderParams" />
                         <th>Pattern</th>
-                        <th>Category</th>
-                        <th>Severity</th>
-                        <th>Enabled</th>
-                        <th>Updated</th>
-                        <th>Version</th>
+                        <SortHeader Title="Category" SortKey="@ListSortParser.ToQueryKey(SignatureSortColumn.Category)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/signatures#list" ExtraQueryParams="@_sortHeaderParams" />
+                        <SortHeader Title="Severity" SortKey="@ListSortParser.ToQueryKey(SignatureSortColumn.Severity)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/signatures#list" ExtraQueryParams="@_sortHeaderParams" />
+                        <SortHeader Title="Enabled" SortKey="@ListSortParser.ToQueryKey(SignatureSortColumn.Enabled)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/signatures#list" ExtraQueryParams="@_sortHeaderParams" />
+                        <SortHeader Title="Updated" SortKey="@ListSortParser.ToQueryKey(SignatureSortColumn.Updated)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/signatures#list" ExtraQueryParams="@_sortHeaderParams" />
+                        <SortHeader Title="Version" SortKey="@ListSortParser.ToQueryKey(SignatureSortColumn.Version)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/signatures#list" ExtraQueryParams="@_sortHeaderParams" />
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -67,25 +87,32 @@
                             <td>@signature.UpdatedBy at @Display.Format(signature.UpdatedAt)</td>
                             <td>@signature.Version</td>
                             <td class="actions-cell">
-                                <a class="button-link" href="/signatures?editId=@signature.Id">Edit</a>
+                                <a class="icon-button" href="/signatures?editId=@(signature.Id)#add" data-tip="Edit" aria-label="Edit">
+                                    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.2 2.1l2.7 2.7L5.4 13.3l-3.3.6.6-3.3z"/><path d="M9.7 3.6l2.7 2.7"/></svg>
+                                </a>
                                 <form method="post" action="/signatures/toggle">
                                     <AntiforgeryToken />
                                     <input type="hidden" name="id" value="@signature.Id" />
-                                    <button type="submit">@(signature.Enabled ? "Disable" : "Enable")</button>
+                                    <button type="submit" class="icon-button" data-tip="@(signature.Enabled ? "Disable" : "Enable")" aria-label="@(signature.Enabled ? "Disable" : "Enable")">
+                                        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 1.8v6"/><path d="M4.3 4.2a5.2 5.2 0 1 0 7.4 0"/></svg>
+                                    </button>
                                 </form>
                                 <form method="post" action="/signatures/delete">
                                     <AntiforgeryToken />
                                     <input type="hidden" name="id" value="@signature.Id" />
-                                    <button type="submit">Delete</button>
+                                    <button type="submit" class="icon-button" data-tip="Delete" aria-label="Delete">
+                                        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.2h11"/><path d="M6 4.2V2.8h4v1.4"/><path d="M4 4.2l.7 9.2h6.6l.7-9.2"/><path d="M6.5 6.8v4.2M9.5 6.8v4.2"/></svg>
+                                    </button>
                                 </form>
                             </td>
                         </tr>
                     }
                 </tbody>
             </table>
+            <KeysetPagination BasePath="/signatures" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" Filters="_filters" />
         }
     </section>
-    <section>
+    <section id="add" class="indexed">
         <h2>@(_editing is null ? "Add signature" : "Edit signature")</h2>
         <form method="post" action="/signatures/save" class="edit-form">
             <AntiforgeryToken />
@@ -135,18 +162,31 @@
             <button type="submit">Save signature</button>
             @if (_editing is not null)
             {
-                <a class="button-link" href="/signatures">Cancel edit</a>
+                <a class="button-link" href="/signatures#list">Cancel edit</a>
             }
         </form>
     </section>
-
+    </div>
 </main>
 
 @code {
+    private KeysetPage<CustomSignature> _page = new([], null, 0, 0);
     private IReadOnlyList<CustomSignature> _signatures = [];
+    private IReadOnlyDictionary<string, string?> _filters = new Dictionary<string, string?>();
+    private IReadOnlyDictionary<string, string?> _sortHeaderParams = new Dictionary<string, string?>();
+    private IReadOnlyDictionary<string, string?> _filterHiddenParams = new Dictionary<string, string?>();
     private CustomSignature? _editing;
     private bool _stepUpFresh;
     private bool _hasSecurityKeys;
+    private string? _filterText;
+    private string? _sortKey;
+    private SortDirection? _sortDirection;
+
+    private int _take = KeysetPagination.DefaultPageSize;
+
+    private bool HasFilters => _filterText is not null;
+
+    private IEnumerable<KeyValuePair<string, string>> ActiveFilterHiddenParams => ActiveParameters(_filterHiddenParams);
 
     [SupplyParameterFromQuery(Name = "editId")]
     public Guid? EditId { get; set; }
@@ -157,14 +197,42 @@
     [SupplyParameterFromQuery(Name = "status")]
     public string? Status { get; set; }
 
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Q { get; set; }
+
+    [SupplyParameterFromQuery(Name = "take")]
+    public int? Take { get; set; }
+
+    [SupplyParameterFromQuery(Name = "cursor")]
+    public Guid? Cursor { get; set; }
+
+    [SupplyParameterFromQuery(Name = "prev")]
+    public Guid? Prev { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sort")]
+    public string? Sort { get; set; }
+
+    [SupplyParameterFromQuery(Name = "dir")]
+    public string? Dir { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         await Display.InitializeAsync().ConfigureAwait(false);
-        _signatures = await SignatureStore.ListAsync().ConfigureAwait(false);
+        _take = Take is null ? Display.DefaultPageSize : KeysetPagination.ClampPageSize(Take);
+        _filterText = ListFilterText.Normalize(Q);
+        var sort = ListSortParser.ParseSignature(Sort, Dir);
+        _sortKey = sort is { } activeSort ? ListSortParser.ToQueryKey(activeSort.Column) : null;
+        _sortDirection = sort?.Direction;
+        var direction = _sortDirection is null ? null : ListSortParser.ToQueryValue(_sortDirection.Value);
+        var take = _take.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _filters = new Dictionary<string, string?> { ["q"] = _filterText, ["sort"] = _sortKey, ["dir"] = direction };
+        _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["take"] = take };
+        _filterHiddenParams = new Dictionary<string, string?> { ["take"] = take, ["sort"] = _sortKey, ["dir"] = direction };
+        _page = await SignatureStore.ListPageAsync(Cursor, _take, new SignatureListFilter(_filterText), sort).ConfigureAwait(false);
+        _signatures = _page.Items;
         if (EditId is not null)
         {
-            _editing = _signatures.FirstOrDefault(s => s.Id == EditId.Value)
-                ?? await SignatureStore.GetAsync(EditId.Value).ConfigureAwait(false);
+            _editing = await SignatureStore.GetAsync(EditId.Value).ConfigureAwait(false);
         }
 
         var context = HttpContextAccessor.HttpContext;
@@ -185,4 +253,9 @@
             _hasSecurityKeys = credentials.Count > 0;
         }
     }
+
+    private static IEnumerable<KeyValuePair<string, string>> ActiveParameters(IReadOnlyDictionary<string, string?> parameters) =>
+        parameters
+            .Where(parameter => !string.IsNullOrWhiteSpace(parameter.Key) && !string.IsNullOrWhiteSpace(parameter.Value))
+            .Select(parameter => new KeyValuePair<string, string>(parameter.Key, parameter.Value!));
 }

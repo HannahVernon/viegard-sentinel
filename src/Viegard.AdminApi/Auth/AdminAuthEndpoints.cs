@@ -1117,14 +1117,24 @@ public static class AdminAuthEndpoints
     private static IResult Redirect(string path, string? status = null, string? error = null) =>
         Results.Redirect(BuildRedirectPath(path, status, error));
 
-    private static string BuildRedirectPath(string path, string? status = null, string? error = null)
+    public static string BuildRedirectPath(string path, string? status = null, string? error = null)
     {
         var query = status is not null
             ? $"status={Uri.EscapeDataString(status)}"
             : error is not null
                 ? $"error={Uri.EscapeDataString(error)}"
                 : string.Empty;
-        return string.IsNullOrEmpty(query) ? path : $"{path}?{query}";
+        if (string.IsNullOrEmpty(query))
+        {
+            return path;
+        }
+
+        // The query must precede any fragment or the browser treats it as
+        // part of the fragment (e.g. /account#totp -> /account?query#totp).
+        var hash = path.IndexOf('#', StringComparison.Ordinal);
+        return hash < 0
+            ? $"{path}?{query}"
+            : $"{path[..hash]}?{query}{path[hash..]}";
     }
 
     private sealed record WebAuthnRegistrationCompleteRequest(string? Name, JsonElement? Response);

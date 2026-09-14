@@ -106,6 +106,95 @@ a:hover {
     background: var(--bg-raised);
 }
 
+/* Sectioned pages: sticky index beside a content column.  Sections marked
+   .indexed show one at a time via the URL fragment (:target); the section
+   marked .index-default is visible when nothing is targeted.  Non-indexed
+   sections always render. */
+
+.page-layout {
+    display: grid;
+    grid-template-columns: 12rem minmax(0, 1fr);
+    gap: 2rem;
+}
+
+.page-index {
+    position: sticky;
+    top: 1.25rem;
+    align-self: start;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding-right: 1rem;
+    border-right: 1px solid var(--panel-border);
+    font-size: 0.92rem;
+}
+
+.page-index a {
+    color: var(--muted);
+    text-decoration: none;
+}
+
+.page-index a:hover {
+    color: var(--accent-strong);
+}
+
+.page-content section {
+    scroll-margin-top: 1rem;
+}
+
+.page-content h1 {
+    margin-top: 0;
+}
+
+.page-content > section.indexed {
+    display: none;
+}
+
+.page-content > section.indexed:target {
+    display: block;
+}
+
+.page-content > section.index-default {
+    display: block;
+}
+
+.page-content:has(> section.indexed:target) > section.index-default:not(:target) {
+    display: none;
+}
+
+/* Highlight the index entry for the visible section */
+
+.page-layout:not(:has(section.indexed:target)) .page-index a.index-default-link,
+.page-layout:has(#overview:target) .page-index a[href="/account#overview"],
+.page-layout:has(#password:target) .page-index a[href="/account#password"],
+.page-layout:has(#step-up:target) .page-index a[href="/account#step-up"],
+.page-layout:has(#totp:target) .page-index a[href="/account#totp"],
+.page-layout:has(#security-keys:target) .page-index a[href="/account#security-keys"],
+.page-layout:has(#recovery-codes:target) .page-index a[href="/account#recovery-codes"],
+.page-layout:has(#preferences:target) .page-index a[href="/account#preferences"],
+.page-layout:has(#sessions:target) .page-index a[href="/account#sessions"],
+.page-layout:has(#list:target) .page-index a[href="/signatures#list"],
+.page-layout:has(#add:target) .page-index a[href="/signatures#add"] {
+    color: var(--accent-strong);
+    font-weight: 700;
+}
+
+@media (max-width: 56rem) {
+    .page-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .page-index {
+        position: static;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        border-right: none;
+        border-bottom: 1px solid var(--panel-border);
+        padding: 0 0 0.75rem;
+    }
+}
+
 /* Right side of the header: live status dot and sign-out */
 
 .header-side {
@@ -233,7 +322,8 @@ label {
 }
 
 input,
-.edit-form select {
+.edit-form select,
+.filter-bar select {
     display: block;
     width: min(100%, 32rem);
     padding: 0.55rem 0.65rem;
@@ -247,6 +337,7 @@ input,
 
 input:focus,
 .edit-form select:focus,
+.filter-bar select:focus,
 .page-size select:focus,
 button:focus-visible,
 a:focus-visible {
@@ -259,6 +350,11 @@ button {
     padding: 0.5rem 1rem;
     background: var(--accent);
     color: var(--accent-ink);
+    /* Buttons do not inherit the page font by default; without this they
+       render in the browser UI font and look mismatched beside styled
+       anchors like .button-link. */
+    font-family: inherit;
+    font-size: 0.92rem;
     font-weight: 700;
     border: none;
     border-radius: 0.4rem;
@@ -270,6 +366,7 @@ button:hover {
 }
 
 .actions-cell button,
+.filter-bar button,
 .secondary-form button {
     background: var(--bg-raised);
     color: var(--ink);
@@ -278,10 +375,46 @@ button:hover {
 }
 
 .actions-cell button:hover,
+.filter-bar button:hover,
 .secondary-form button:hover {
     border-color: var(--accent);
     color: var(--accent-strong);
     background: var(--bg-raised);
+}
+
+.filter-bar {
+    display: flex;
+    gap: 0.6rem;
+    align-items: end;
+    flex-wrap: wrap;
+    margin-top: 0.75rem;
+}
+
+.filter-bar label {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.filter-bar input,
+.filter-bar select {
+    width: min(100%, 16rem);
+    margin-top: 0.25rem;
+}
+
+.filter-bar button {
+    margin-top: 0;
+}
+
+.filter-clear {
+    color: var(--muted);
+    font-size: 0.9rem;
+    text-decoration: none;
+    margin-bottom: 0.45rem;
+}
+
+.filter-clear:hover {
+    color: var(--accent-strong);
 }
 
 section {
@@ -413,6 +546,11 @@ section {
     color: var(--ink);
 }
 
+.step-up-fallback {
+    display: inline-block;
+    margin-left: 0.5rem;
+}
+
 .secondary-form {
     margin-top: 1.5rem;
 }
@@ -460,6 +598,21 @@ section {
     font-size: 0.82rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
+}
+
+.sort-header-link {
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.sort-header-link:hover {
+    color: var(--accent-strong);
+}
+
+.sort-indicator {
+    margin-left: 0.25rem;
+    font-size: 0.78em;
 }
 
 .data-table tbody tr:hover td {
@@ -590,13 +743,65 @@ section {
 }
 
 .actions-cell form {
-    display: inline-block;
-    margin-left: 0.4rem;
+    display: contents;
+}
+
+.actions-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
 }
 
 .actions-cell button,
 .button-link {
     margin-top: 0;
+}
+
+/* Compact square icon buttons; the SVG strokes follow currentColor */
+.icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 2.1rem;
+    height: 2.1rem;
+    padding: 0;
+    background: var(--bg-raised);
+    color: var(--muted);
+    border: 1px solid var(--panel-border);
+    border-radius: 0.4rem;
+    vertical-align: middle;
+}
+
+.icon-button:hover {
+    color: var(--accent-strong);
+    border-color: var(--accent);
+    background: var(--bg-raised);
+}
+
+.icon-button::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 0.4rem);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-raised);
+    color: var(--ink);
+    border: 1px solid var(--panel-border);
+    border-radius: 0.3rem;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease-in 0.15s;
+    z-index: 10;
+}
+
+.icon-button:hover::after,
+.icon-button:focus-visible::after {
+    opacity: 1;
 }
 
 /* Anchor styled to match the secondary buttons beside it */
@@ -608,7 +813,7 @@ section {
     border: 1px solid var(--panel-border);
     border-radius: 0.4rem;
     font-weight: 600;
-    font-size: 0.83em;
+    font-size: 0.92rem;
     text-decoration: none;
     box-sizing: border-box;
 }

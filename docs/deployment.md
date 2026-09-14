@@ -98,6 +98,10 @@ Sources ship disabled; enable them deliberately, one at a time.
 
 The admin interface uses local accounts, cookie authentication, server-side revocable sessions, mandatory TOTP, optional WebAuthn security keys, and recovery codes.  WebAuthn requires HTTPS in browsers except for localhost development.
 
+### Browser support
+
+The admin UI targets evergreen browsers: Chrome/Edge 114+, Firefox 125+, and Safari 17+ (all current since mid-2024).  The newest platform features it relies on are the HTML popover API (step-up overlay; older browsers fall back to a plain link to the account page's step-up section) and CSS `:has()` (account-page section switching; without it, sections remain visible together but stay fully functional).  Everything else is long-baseline HTML and CSS; the only client scripts are the first-party WebAuthn bridge and the 30-second status poll, both plain `fetch`.
+
 ### Bootstrap flow
 
 Create the bootstrap password secret before the first admin startup:

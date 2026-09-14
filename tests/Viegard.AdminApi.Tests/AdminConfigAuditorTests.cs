@@ -59,6 +59,8 @@ public sealed class AdminConfigAuditorTests
         public ValueTask<KeysetPage<AuditRecord>> ListPageAsync(
             Guid? beforeId,
             int pageSize,
+            AuditListFilter? filter = null,
+            ListSort<AuditSortColumn>? sort = null,
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(new KeysetPage<AuditRecord>(Records, null, Records.Count, 0));
     }

@@ -8,19 +8,45 @@
 <main class="admin-panel wide">
     <h1>Audit</h1>
 
+    <form method="get" action="/audit" class="filter-bar" aria-label="Audit filters">
+        <label for="audit-filter-q">
+            Search
+            <input id="audit-filter-q" name="q" maxlength="@ListFilterText.MaxLength" value="@(_filterText ?? string.Empty)" placeholder="Summary" />
+        </label>
+        <label for="audit-filter-stage">
+            Stage
+            <select id="audit-filter-stage" name="stage">
+                <option value="" selected="@(_stage is null)">All stages</option>
+                @foreach (var stage in Enum.GetValues<PipelineStage>())
+                {
+                    <option value="@stage" selected="@(_stage == stage)">@stage</option>
+                }
+            </select>
+        </label>
+        @foreach (var parameter in ActiveFilterHiddenParams)
+        {
+            <input type="hidden" name="@parameter.Key" value="@parameter.Value" />
+        }
+        <button type="submit">Filter</button>
+        @if (HasFilters)
+        {
+            <a class="filter-clear" href="/audit">Clear</a>
+        }
+    </form>
+
     @if (_page.Items.Count == 0)
     {
-        <p>No audit records are available.</p>
+        <p>@(HasFilters ? "No audit records match the current filters." : "No audit records are available.")</p>
     }
     else
     {
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Timestamp</th>
-                    <th>Stage</th>
+                    <SortHeader Title="Timestamp" SortKey="@ListSortParser.ToQueryKey(AuditSortColumn.Timestamp)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/audit" ExtraQueryParams="@_sortHeaderParams" />
+                    <SortHeader Title="Stage" SortKey="@ListSortParser.ToQueryKey(AuditSortColumn.Stage)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/audit" ExtraQueryParams="@_sortHeaderParams" />
                     <th>Summary</th>
-                    <th>Source</th>
+                    <SortHeader Title="Source" SortKey="@ListSortParser.ToQueryKey(AuditSortColumn.Source)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/audit" ExtraQueryParams="@_sortHeaderParams" />
                     <th>Links</th>
                 </tr>
             </thead>
@@ -69,14 +95,25 @@
                 }
             </tbody>
         </table>
-        <KeysetPagination BasePath="/audit" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" />
+        <KeysetPagination BasePath="/audit" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" Filters="_filters" />
     }
 </main>
 
 @code {
     private KeysetPage<AuditRecord> _page = new([], null, 0, 0);
+    private IReadOnlyDictionary<string, string?> _filters = new Dictionary<string, string?>();
+    private IReadOnlyDictionary<string, string?> _sortHeaderParams = new Dictionary<string, string?>();
+    private IReadOnlyDictionary<string, string?> _filterHiddenParams = new Dictionary<string, string?>();
+    private string? _filterText;
+    private PipelineStage? _stage;
+    private string? _sortKey;
+    private SortDirection? _sortDirection;
 
     private int _take = KeysetPagination.DefaultPageSize;
+
+    private bool HasFilters => _filterText is not null || _stage is not null;
+
+    private IEnumerable<KeyValuePair<string, string>> ActiveFilterHiddenParams => ActiveParameters(_filterHiddenParams);
 
     [SupplyParameterFromQuery(Name = "take")]
     public int? Take { get; set; }
@@ -87,10 +124,38 @@
     [SupplyParameterFromQuery(Name = "prev")]
     public Guid? Prev { get; set; }
 
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Q { get; set; }
+
+    [SupplyParameterFromQuery(Name = "stage")]
+    public string? StageRaw { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sort")]
+    public string? Sort { get; set; }
+
+    [SupplyParameterFromQuery(Name = "dir")]
+    public string? Dir { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         await Display.InitializeAsync().ConfigureAwait(false);
         _take = Take is null ? Display.DefaultPageSize : KeysetPagination.ClampPageSize(Take);
-        _page = await AuditLedger.ListPageAsync(Cursor, _take).ConfigureAwait(false);
+        _filterText = ListFilterText.Normalize(Q);
+        _stage = ListFilterParser.ParseEnum<PipelineStage>(StageRaw);
+        var sort = ListSortParser.ParseAudit(Sort, Dir);
+        _sortKey = sort is { } activeSort ? ListSortParser.ToQueryKey(activeSort.Column) : null;
+        _sortDirection = sort?.Direction;
+        var direction = _sortDirection is null ? null : ListSortParser.ToQueryValue(_sortDirection.Value);
+        var take = _take.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _filters = new Dictionary<string, string?> { ["q"] = _filterText, ["stage"] = _stage?.ToString(), ["sort"] = _sortKey, ["dir"] = direction };
+        _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["stage"] = _stage?.ToString(), ["take"] = take };
+        _filterHiddenParams = new Dictionary<string, string?> { ["take"] = take, ["sort"] = _sortKey, ["dir"] = direction };
+        _page = await AuditLedger.ListPageAsync(Cursor, _take, new AuditListFilter(_filterText, _stage), sort)
+            .ConfigureAwait(false);
     }
+
+    private static IEnumerable<KeyValuePair<string, string>> ActiveParameters(IReadOnlyDictionary<string, string?> parameters) =>
+        parameters
+            .Where(parameter => !string.IsNullOrWhiteSpace(parameter.Key) && !string.IsNullOrWhiteSpace(parameter.Value))
+            .Select(parameter => new KeyValuePair<string, string>(parameter.Key, parameter.Value!));
 }

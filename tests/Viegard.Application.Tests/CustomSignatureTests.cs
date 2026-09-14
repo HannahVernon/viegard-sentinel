@@ -229,6 +229,36 @@ public sealed class CustomSignatureTests
             return ValueTask.FromResult(Signatures);
         }
 
+        public ValueTask<KeysetPage<CustomSignature>> ListPageAsync(
+            Guid? beforeId,
+            int pageSize,
+            SignatureListFilter? filter = null,
+            ListSort<SignatureSortColumn>? sort = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnList)
+            {
+                throw new InvalidOperationException("configured failure");
+            }
+
+            var safePageSize = Math.Clamp(pageSize, 1, 200);
+            var ordered = CustomSignatureFilter.Apply(Signatures, filter?.Text).ToList();
+            ordered.Sort(SignatureComparison(sort) ?? CompareBy<CustomSignature, Guid>(s => s.Id, s => s.Id, SortDirection.Desc));
+            var totalCount = ordered.Count;
+            var startIndex = 0;
+            if (beforeId is not null)
+            {
+                var cursorIndex = ordered.FindIndex(s => s.Id == beforeId.Value);
+                startIndex = cursorIndex < 0 ? ordered.Count : cursorIndex + 1;
+            }
+
+            var pagePlusOne = ordered.Skip(startIndex).Take(safePageSize + 1).ToList();
+            var items = pagePlusOne.Take(safePageSize).ToList();
+            var nextCursor = pagePlusOne.Count > safePageSize && items.Count > 0 ? items[^1].Id : (Guid?)null;
+            var preceding = items.Count == 0 ? 0 : ordered.FindIndex(s => s.Id == items[0].Id);
+            return ValueTask.FromResult(new KeysetPage<CustomSignature>(items, nextCursor, totalCount, preceding));
+        }
+
         public ValueTask<CustomSignature?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(Signatures.FirstOrDefault(s => s.Id == id));
 
@@ -252,6 +282,46 @@ public sealed class CustomSignatureTests
             TimeSpan timeout,
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(CurrentChangeVersion);
+
+        private static Comparison<CustomSignature>? SignatureComparison(ListSort<SignatureSortColumn>? sort)
+        {
+            if (sort is not { } active || !Enum.IsDefined(typeof(SortDirection), active.Direction))
+            {
+                return null;
+            }
+
+            return active.Column switch
+            {
+                SignatureSortColumn.Name => CompareBy<CustomSignature, string>(s => s.Name, s => s.Id, active.Direction, StringComparer.Ordinal),
+                SignatureSortColumn.Target => CompareBy<CustomSignature, int>(s => (int)s.Target, s => s.Id, active.Direction),
+                SignatureSortColumn.Match => CompareBy<CustomSignature, int>(s => (int)s.MatchType, s => s.Id, active.Direction),
+                SignatureSortColumn.Category => CompareBy<CustomSignature, string>(s => s.Category, s => s.Id, active.Direction, StringComparer.Ordinal),
+                SignatureSortColumn.Severity => CompareBy<CustomSignature, int>(s => s.Severity, s => s.Id, active.Direction),
+                SignatureSortColumn.Enabled => CompareBy<CustomSignature, bool>(s => s.Enabled, s => s.Id, active.Direction),
+                SignatureSortColumn.Updated => CompareBy<CustomSignature, DateTimeOffset>(s => s.UpdatedAt, s => s.Id, active.Direction),
+                SignatureSortColumn.Version => CompareBy<CustomSignature, int>(s => s.Version, s => s.Id, active.Direction),
+                _ => null,
+            };
+        }
+
+        private static Comparison<T> CompareBy<T, TKey>(
+            Func<T, TKey> getKey,
+            Func<T, Guid> getId,
+            SortDirection direction,
+            IComparer<TKey>? comparer = null)
+        {
+            var keyComparer = comparer ?? Comparer<TKey>.Default;
+            return (left, right) =>
+            {
+                var result = keyComparer.Compare(getKey(left), getKey(right));
+                if (result == 0)
+                {
+                    result = getId(left).CompareTo(getId(right));
+                }
+
+                return direction == SortDirection.Asc ? result : -result;
+            };
+        }
     }
 
     private sealed class RecordingDiagnostics : ICustomSignatureRuleDiagnostics

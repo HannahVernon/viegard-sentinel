@@ -15,5 +15,7 @@ public interface IAuditLedger
     ValueTask<KeysetPage<AuditRecord>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        AuditListFilter? filter = null,
+        ListSort<AuditSortColumn>? sort = null,
         CancellationToken cancellationToken = default);
 }

@@ -29,6 +29,8 @@ public interface IEventStore
     ValueTask<KeysetPage<NormalizedEvent>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        EventListFilter? filter = null,
+        ListSort<EventSortColumn>? sort = null,
         CancellationToken cancellationToken = default);
 }
 
@@ -44,6 +46,8 @@ public interface IIncidentStore
     ValueTask<KeysetPage<Incident>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        IncidentListFilter? filter = null,
+        ListSort<IncidentSortColumn>? sort = null,
         CancellationToken cancellationToken = default);
 }
 
@@ -79,6 +83,8 @@ public interface IDecisionStore
     ValueTask<KeysetPage<Decision>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
+        DecisionListFilter? filter = null,
+        ListSort<DecisionSortColumn>? sort = null,
         CancellationToken cancellationToken = default);
 }
 

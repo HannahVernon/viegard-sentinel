@@ -9,19 +9,45 @@
 <main class="admin-panel wide">
     <h1>Decisions</h1>
 
+    <form method="get" action="/decisions" class="filter-bar" aria-label="Decision filters">
+        <label for="decision-filter-q">
+            Search
+            <input id="decision-filter-q" name="q" maxlength="@ListFilterText.MaxLength" value="@(_filterText ?? string.Empty)" placeholder="Rationale" />
+        </label>
+        <label for="decision-filter-outcome">
+            Outcome
+            <select id="decision-filter-outcome" name="outcome">
+                <option value="" selected="@(_outcome is null)">All outcomes</option>
+                @foreach (var outcome in Enum.GetValues<DecisionOutcome>())
+                {
+                    <option value="@outcome" selected="@(_outcome == outcome)">@outcome</option>
+                }
+            </select>
+        </label>
+        @foreach (var parameter in ActiveFilterHiddenParams)
+        {
+            <input type="hidden" name="@parameter.Key" value="@parameter.Value" />
+        }
+        <button type="submit">Filter</button>
+        @if (HasFilters)
+        {
+            <a class="filter-clear" href="/decisions">Clear</a>
+        }
+    </form>
+
     @if (_rows.Count == 0)
     {
-        <p>No decisions are available.</p>
+        <p>@(HasFilters ? "No decisions match the current filters." : "No decisions are available.")</p>
     }
     else
     {
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Created</th>
-                    <th>Policy</th>
-                    <th>Outcome</th>
-                    <th>Classification</th>
+                    <SortHeader Title="Created" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Created)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
+                    <SortHeader Title="Policy" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Policy)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
+                    <SortHeader Title="Outcome" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Outcome)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
+                    <SortHeader Title="Classification" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Classification)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
                     <th>Rationale</th>
                 </tr>
             </thead>
@@ -38,15 +64,26 @@
                 }
             </tbody>
         </table>
-        <KeysetPagination BasePath="/decisions" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" />
+        <KeysetPagination BasePath="/decisions" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" Filters="_filters" />
     }
 </main>
 
 @code {
     private KeysetPage<Decision> _page = new([], null, 0, 0);
     private IReadOnlyList<DecisionRow> _rows = [];
+    private IReadOnlyDictionary<string, string?> _filters = new Dictionary<string, string?>();
+    private IReadOnlyDictionary<string, string?> _sortHeaderParams = new Dictionary<string, string?>();
+    private IReadOnlyDictionary<string, string?> _filterHiddenParams = new Dictionary<string, string?>();
+    private string? _filterText;
+    private DecisionOutcome? _outcome;
+    private string? _sortKey;
+    private SortDirection? _sortDirection;
 
     private int _take = KeysetPagination.DefaultPageSize;
+
+    private bool HasFilters => _filterText is not null || _outcome is not null;
+
+    private IEnumerable<KeyValuePair<string, string>> ActiveFilterHiddenParams => ActiveParameters(_filterHiddenParams);
 
     [SupplyParameterFromQuery(Name = "take")]
     public int? Take { get; set; }
@@ -57,11 +94,34 @@
     [SupplyParameterFromQuery(Name = "prev")]
     public Guid? Prev { get; set; }
 
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Q { get; set; }
+
+    [SupplyParameterFromQuery(Name = "outcome")]
+    public string? OutcomeRaw { get; set; }
+
+    [SupplyParameterFromQuery(Name = "sort")]
+    public string? Sort { get; set; }
+
+    [SupplyParameterFromQuery(Name = "dir")]
+    public string? Dir { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         await Display.InitializeAsync().ConfigureAwait(false);
         _take = Take is null ? Display.DefaultPageSize : KeysetPagination.ClampPageSize(Take);
-        _page = await DecisionStore.ListPageAsync(Cursor, _take).ConfigureAwait(false);
+        _filterText = ListFilterText.Normalize(Q);
+        _outcome = ListFilterParser.ParseEnum<DecisionOutcome>(OutcomeRaw);
+        var sort = ListSortParser.ParseDecision(Sort, Dir);
+        _sortKey = sort is { } activeSort ? ListSortParser.ToQueryKey(activeSort.Column) : null;
+        _sortDirection = sort?.Direction;
+        var direction = _sortDirection is null ? null : ListSortParser.ToQueryValue(_sortDirection.Value);
+        var take = _take.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _filters = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["sort"] = _sortKey, ["dir"] = direction };
+        _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["take"] = take };
+        _filterHiddenParams = new Dictionary<string, string?> { ["take"] = take, ["sort"] = _sortKey, ["dir"] = direction };
+        _page = await DecisionStore.ListPageAsync(Cursor, _take, new DecisionListFilter(_filterText, _outcome), sort)
+            .ConfigureAwait(false);
         var rows = new List<DecisionRow>();
         foreach (var decision in _page.Items)
         {
@@ -74,6 +134,11 @@
     private static string ClassificationSummary(Classification? classification) => classification is null
         ? "not found"
         : $"{classification.Category} severity {classification.Severity}";
+
+    private static IEnumerable<KeyValuePair<string, string>> ActiveParameters(IReadOnlyDictionary<string, string?> parameters) =>
+        parameters
+            .Where(parameter => !string.IsNullOrWhiteSpace(parameter.Key) && !string.IsNullOrWhiteSpace(parameter.Value))
+            .Select(parameter => new KeyValuePair<string, string>(parameter.Key, parameter.Value!));
 
     private sealed record DecisionRow(Decision Decision, Classification? Classification);
 }

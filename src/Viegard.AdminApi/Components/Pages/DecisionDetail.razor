@@ -30,7 +30,7 @@
                 <dl class="detail-list">
                     <dt>Category</dt><dd>@_classification.Category</dd>
                     <dt>Severity</dt><dd>@_classification.Severity</dd>
-                    <dt>Confidence</dt><dd>@_classification.Confidence</dd>
+                    <dt>Confidence</dt><dd>@_classification.Confidence.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)</dd>
                     <dt>Subject</dt><dd>@_classification.SubjectKind <a href="/incidents/@_classification.SubjectId">@AdminText.ShortId(_classification.SubjectId)</a></dd>
                 </dl>
             </section>

@@ -202,6 +202,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
         builder.Services.AddSingleton<ISatelliteRoleStore, InMemorySatelliteRoleStore>();
+        builder.Services.AddSingleton<IHostUpgradeCommandStore, InMemoryHostUpgradeCommandStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");

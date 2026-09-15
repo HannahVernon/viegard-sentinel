@@ -83,6 +83,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRetentionStore, PostgresRetentionStore>();
         services.AddSingleton<IRetentionSettingsStore, PostgresRetentionSettingsStore>();
         services.AddSingleton<ISatelliteRoleStore, PostgresSatelliteRoleStore>();
+        services.AddSingleton<IHostUpgradeCommandStore, PostgresHostUpgradeCommandStore>();
 
         // Durable events queue and command queue (broker-semantics port).
         services.AddSingleton<IWorkQueue<Guid>>(sp =>

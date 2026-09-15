@@ -117,4 +117,32 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
             logger.LogError(ex, "Failed to append admin configuration audit record.");
         }
     }
+
+    public async ValueTask RecordHostUpgradeRequestedAsync(
+        string username,
+        string target,
+        Guid commandId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config write by {username}: HostUpgradeRequested for target '{target}'.",
+                SourceId = "admin:config",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Target = target,
+                    CommandId = commandId,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
 }

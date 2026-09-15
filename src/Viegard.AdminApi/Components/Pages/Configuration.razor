@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject IRetentionSettingsStore RetentionSettingsStore
 @inject ISatelliteRoleStore SatelliteRoles
+@inject IHostUpgradeCommandStore HostUpgrades
 @inject IAdminUserStore Users
 @inject IAdminSessionStore Sessions
 @inject IHttpContextAccessor HttpContextAccessor
@@ -15,6 +16,7 @@
     <nav class="page-index" aria-label="Configuration sections">
         <a class="index-default-link" href="/configuration#retention">Retention</a>
         <a href="/configuration#satellites">Satellites</a>
+        <a href="/configuration#upgrades">Upgrades</a>
     </nav>
     <div class="page-content">
     <h1>Service configuration</h1>
@@ -198,6 +200,80 @@
             </div>
         }
     </section>
+
+    <section id="upgrades" class="indexed">
+        <h2>Upgrades</h2>
+        <p class="small">Request an upgrade for the host-side Viegard deployment.  The request is executed by a privileged host-side agent outside the containers; the admin UI does not receive the Docker socket or host execution rights.</p>
+        <p class="small">The admin UI may briefly disconnect while its own container restarts.  If no host-side agent is installed for the target, the command remains Pending.</p>
+
+        <h3>Request upgrade</h3>
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/upgrades/request" class="secondary-form">
+                <AntiforgeryToken />
+                <input type="hidden" name="target" value="@HostUpgradeCommandPolicy.DefaultTarget" />
+                <button type="submit">Request upgrade</button>
+                <span class="small">Target: <code>@HostUpgradeCommandPolicy.DefaultTarget</code>.  Requests are single-flight per target and have a @HostUpgradeCommandPolicy.CooldownMinutes-minute cooldown after completion.</span>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Requesting a host upgrade requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#upgrades" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-upgrades" />
+            </div>
+        }
+
+        <h3>Recent upgrade commands</h3>
+        @if (_hostUpgradeCommands.Any(IsStalePending))
+        {
+            <p class="message error">A pending upgrade request is older than @HostUpgradeCommandPolicy.PendingStaleAfterMinutes minutes.  Confirm the host-side agent is installed and running for target <code>@HostUpgradeCommandPolicy.DefaultTarget</code>.</p>
+        }
+        @if (_hostUpgradeCommands.Count == 0)
+        {
+            <p>No host upgrade commands have been requested.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Requested</th>
+                        <th>Started</th>
+                        <th>Finished</th>
+                        <th>Detail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var command in _hostUpgradeCommands)
+                    {
+                        <tr>
+                            <td>
+                                <span class="@StatusCss(command.Status)">@command.Status</span>
+                                <span class="small">target <code>@command.Target</code></span>
+                            </td>
+                            <td>@command.RequestedBy at @Display.Format(command.RequestedAt)</td>
+                            <td>@FormatOptionalTimestamp(command.StartedAt)</td>
+                            <td>@FormatOptionalTimestamp(command.FinishedAt)</td>
+                            <td>@DetailSummary(command.Detail)</td>
+                        </tr>
+                        @if (HasLongDetail(command.Detail))
+                        {
+                            <tr class="details-row">
+                                <td colspan="5">
+                                    <details class="json-details">
+                                        <summary>Output detail</summary>
+                                        <pre class="json-block">@AdminText.Limit(command.Detail)</pre>
+                                    </details>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
     </div>
 </main>
 
@@ -205,9 +281,11 @@
     private RetentionSettings? _settings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
     private IReadOnlyList<SatelliteRoleInfo> _satelliteRoles = [];
+    private IReadOnlyList<HostUpgradeCommand> _hostUpgradeCommands = [];
     private SatelliteRoleSecret? _satelliteCredential;
     private bool _stepUpFresh;
     private bool _hasSecurityKeys;
+    private DateTimeOffset _now;
 
     [SupplyParameterFromQuery(Name = "error")]
     public string? Error { get; set; }
@@ -241,6 +319,8 @@
         _settings = await RetentionSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
         _satelliteRoles = await SatelliteRoles.ListAsync().ConfigureAwait(false);
+        _hostUpgradeCommands = await HostUpgrades.ListRecentAsync(HostUpgradeCommandPolicy.DefaultTarget).ConfigureAwait(false);
+        _now = DateTimeOffset.UtcNow;
 
         var context = HttpContextAccessor.HttpContext;
         if (context is null)
@@ -277,4 +357,26 @@
     private bool IsConfirmingRevoke(SatelliteRoleInfo role) =>
         SatelliteRoleName.TryNormalize(ConfirmRevoke, out var confirmed, out _)
         && string.Equals(confirmed.SatelliteName, role.SatelliteName, StringComparison.Ordinal);
+
+    private bool IsStalePending(HostUpgradeCommand command) =>
+        HostUpgradeCommandPolicy.IsPendingStale(command, _now);
+
+    private string FormatOptionalTimestamp(DateTimeOffset? value) =>
+        value is null ? "" : Display.Format(value.Value);
+
+    private static string DetailSummary(string? detail) =>
+        string.IsNullOrWhiteSpace(detail) ? "" : AdminText.OneLine(detail);
+
+    private static bool HasLongDetail(string? detail) =>
+        !string.IsNullOrWhiteSpace(detail) && detail.Length > 160;
+
+    private static string StatusCss(HostUpgradeCommandStatus status) => status switch
+    {
+        HostUpgradeCommandStatus.Pending => "badge badge-amber",
+        HostUpgradeCommandStatus.Running => "badge badge-blue",
+        HostUpgradeCommandStatus.Succeeded => "badge badge-green",
+        HostUpgradeCommandStatus.Failed => "badge badge-red",
+        HostUpgradeCommandStatus.Superseded => "badge",
+        _ => "badge",
+    };
 }

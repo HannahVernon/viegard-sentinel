@@ -43,6 +43,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<CustomSignatureRow> CustomSignatures => Set<CustomSignatureRow>();
 
+    public DbSet<HostUpgradeCommandRow> HostUpgradeCommands => Set<HostUpgradeCommandRow>();
+
     public DbSet<RetentionSettingsRow> RetentionSettings => Set<RetentionSettingsRow>();
 
     public DbSet<QueueMessageRow> QueueMessages => Set<QueueMessageRow>();
@@ -204,6 +206,19 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.AdditionalPatternsJson).HasColumnType("text");
             entity.Property(e => e.Category).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxCategoryLength);
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<HostUpgradeCommandRow>(entity =>
+        {
+            entity.ToTable("host_upgrade_commands");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.HasIndex(e => new { e.Target, e.Status, e.RequestedAt });
+            entity.HasIndex(e => new { e.Target, e.FinishedAt });
+            entity.HasIndex(e => e.Target)
+                .IsUnique()
+                .HasFilter("status IN (0, 1)");
+            entity.Property(e => e.RequestedBy).HasMaxLength(Viegard.Application.Configuration.HostUpgradeCommandPolicy.MaxRequestedByLength);
         });
 
         modelBuilder.Entity<RetentionSettingsRow>(entity =>

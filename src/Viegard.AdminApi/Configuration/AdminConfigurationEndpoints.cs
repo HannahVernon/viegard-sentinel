@@ -14,6 +14,7 @@ public static class AdminConfigurationEndpoints
 {
     private const string RetentionConfigurationPath = "/configuration#retention";
     private const string SatellitesConfigurationPath = "/configuration#satellites";
+    private const string UpgradesConfigurationPath = "/configuration#upgrades";
 
     public static void MapAdminConfigurationEndpoints(this WebApplication app)
     {
@@ -27,6 +28,9 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/satellites/revoke", RevokeSatelliteAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/upgrades/request", RequestHostUpgradeAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
     }
@@ -207,6 +211,58 @@ public static class AdminConfigurationEndpoints
         }
     }
 
+    internal static async Task<IResult> RequestHostUpgradeAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IHostUpgradeCommandStore hostUpgrades,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(UpgradesConfigurationPath, error: "Step-up verification is required before requesting a host upgrade.");
+        }
+
+        var target = form["target"].ToString();
+        if (!string.Equals(target, HostUpgradeCommandPolicy.DefaultTarget, StringComparison.Ordinal))
+        {
+            return Redirect(UpgradesConfigurationPath, error: "Only the vm upgrade target is available in this version.");
+        }
+
+        try
+        {
+            var command = await hostUpgrades.RequestAsync(
+                HostUpgradeCommandPolicy.DefaultTarget,
+                user.Username,
+                context.RequestAborted).ConfigureAwait(false);
+            await configAuditor.RecordHostUpgradeRequestedAsync(
+                user.Username,
+                command.Target,
+                command.Id,
+                context.RequestAborted).ConfigureAwait(false);
+            return Redirect(UpgradesConfigurationPath, status: $"Upgrade request {command.Id:N} was queued for {command.Target}.");
+        }
+        catch (HostUpgradeCommandRejectedException ex)
+        {
+            return Redirect(UpgradesConfigurationPath, error: HostUpgradeRejectionMessage(ex));
+        }
+    }
+
     private static bool TryReadSettings(
         IFormCollection form,
         RetentionSettings? current,
@@ -288,6 +344,16 @@ public static class AdminConfigurationEndpoints
 
     private static IResult Redirect(string path, string? status = null, string? error = null) =>
         Results.Redirect(AdminAuthEndpoints.BuildRedirectPath(path, status, error));
+
+    private static string HostUpgradeRejectionMessage(HostUpgradeCommandRejectedException exception) =>
+        exception.Reason switch
+        {
+            HostUpgradeCommandRejectionReason.SingleFlight =>
+                $"An upgrade for {exception.Target} is already pending or running.  Wait for it to finish before requesting another.",
+            HostUpgradeCommandRejectionReason.Cooldown =>
+                $"The latest upgrade for {exception.Target} finished less than {HostUpgradeCommandPolicy.CooldownMinutes.ToString(CultureInfo.InvariantCulture)} minutes ago.  Wait a few minutes before requesting another.",
+            _ => "The upgrade request could not be queued.",
+        };
 
     private sealed record SatelliteStepUpResult(Viegard.Domain.Admin.AdminUser? User, IResult? Failure);
 }

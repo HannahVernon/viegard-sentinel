@@ -277,6 +277,25 @@ public sealed class CustomSignatureRow
     public int Version { get; set; }
 }
 
+public sealed class HostUpgradeCommandRow
+{
+    public Guid Id { get; set; }
+
+    public string Target { get; set; } = string.Empty;
+
+    public int Status { get; set; }
+
+    public DateTimeOffset RequestedAt { get; set; }
+
+    public string RequestedBy { get; set; } = string.Empty;
+
+    public DateTimeOffset? StartedAt { get; set; }
+
+    public DateTimeOffset? FinishedAt { get; set; }
+
+    public string? Detail { get; set; }
+}
+
 public sealed class RetentionSettingsRow
 {
     public int Id { get; set; }

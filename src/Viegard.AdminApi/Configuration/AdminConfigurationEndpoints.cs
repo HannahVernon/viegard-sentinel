@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.RateLimiting;
 using Viegard.AdminApi.Auth;
+using Viegard.Application.Configuration;
 using Viegard.Application.Retention;
 using Viegard.Application.Stores;
 using Viegard.Domain.Events;
@@ -11,11 +12,21 @@ namespace Viegard.AdminApi.Configuration;
 
 public static class AdminConfigurationEndpoints
 {
-    private const string ConfigurationPath = "/configuration#retention";
+    private const string RetentionConfigurationPath = "/configuration#retention";
+    private const string SatellitesConfigurationPath = "/configuration#satellites";
 
     public static void MapAdminConfigurationEndpoints(this WebApplication app)
     {
         app.MapPost("/configuration/retention", SaveRetentionAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/satellites/create", CreateSatelliteAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/satellites/rotate", RotateSatellitePasswordAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/satellites/revoke", RevokeSatelliteAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
     }
@@ -44,19 +55,19 @@ public static class AdminConfigurationEndpoints
                 context,
                 enqueueForCorrelation: true,
                 cancellationToken: context.RequestAborted).ConfigureAwait(false);
-            return Redirect(error: "Step-up verification is required before editing retention settings.");
+            return Redirect(RetentionConfigurationPath, error: "Step-up verification is required before editing retention settings.");
         }
 
         if (!int.TryParse(form["version"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedVersion)
             || expectedVersion < 0)
         {
-            return Redirect(error: "Retention settings version was not valid.  Reload the page and try again.");
+            return Redirect(RetentionConfigurationPath, error: "Retention settings version was not valid.  Reload the page and try again.");
         }
 
         var before = await retentionSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
         if (!TryReadSettings(form, before, out var candidate, out var error))
         {
-            return Redirect(error: error);
+            return Redirect(RetentionConfigurationPath, error: error);
         }
 
         var result = await retentionSettings.UpsertAsync(
@@ -67,7 +78,7 @@ public static class AdminConfigurationEndpoints
             context.RequestAborted).ConfigureAwait(false);
         if (!result.Succeeded)
         {
-            return Redirect(error: "Retention settings were changed by another session.  Review the current values and save again.");
+            return Redirect(RetentionConfigurationPath, error: "Retention settings were changed by another session.  Review the current values and save again.");
         }
 
         await configAuditor.RecordRetentionSettingsWriteAsync(
@@ -75,7 +86,125 @@ public static class AdminConfigurationEndpoints
             before,
             result.Settings,
             context.RequestAborted).ConfigureAwait(false);
-        return Redirect(status: "Retention settings saved.");
+        return Redirect(RetentionConfigurationPath, status: "Retention settings saved.");
+    }
+
+    internal static async Task<IResult> CreateSatelliteAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ISatelliteRoleStore satelliteRoles,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor,
+        SatelliteRoleCredentialCookie credentialCookie)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var gate = await RequireSatelliteStepUpAsync(context, users, sessions, authAuditor).ConfigureAwait(false);
+        if (gate.Failure is not null)
+        {
+            return gate.Failure;
+        }
+
+        if (!SatelliteRoleName.TryNormalize(form["name"].ToString(), out var normalized, out var error))
+        {
+            return Redirect(SatellitesConfigurationPath, error: error);
+        }
+
+        try
+        {
+            var credential = await satelliteRoles.CreateAsync(normalized.SatelliteName, context.RequestAborted).ConfigureAwait(false);
+            credentialCookie.Write(context, credential);
+            await configAuditor.RecordSatelliteRoleWriteAsync(
+                "SatelliteRoleCreated",
+                gate.User!.Username,
+                credential.RoleName,
+                credential.GrantSummary,
+                context.RequestAborted).ConfigureAwait(false);
+            return Redirect(SatellitesConfigurationPath, status: $"Satellite role {credential.RoleName} created.  Copy the password now.");
+        }
+        catch (SatelliteRoleStoreException ex)
+        {
+            return Redirect(SatellitesConfigurationPath, error: ex.Message);
+        }
+    }
+
+    internal static async Task<IResult> RotateSatellitePasswordAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ISatelliteRoleStore satelliteRoles,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor,
+        SatelliteRoleCredentialCookie credentialCookie)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var gate = await RequireSatelliteStepUpAsync(context, users, sessions, authAuditor).ConfigureAwait(false);
+        if (gate.Failure is not null)
+        {
+            return gate.Failure;
+        }
+
+        if (!SatelliteRoleName.TryNormalize(form["name"].ToString(), out var normalized, out var error))
+        {
+            return Redirect(SatellitesConfigurationPath, error: error);
+        }
+
+        try
+        {
+            var credential = await satelliteRoles.RotatePasswordAsync(normalized.SatelliteName, context.RequestAborted).ConfigureAwait(false);
+            credentialCookie.Write(context, credential);
+            await configAuditor.RecordSatelliteRoleWriteAsync(
+                "SatelliteRolePasswordRotated",
+                gate.User!.Username,
+                credential.RoleName,
+                credential.GrantSummary,
+                context.RequestAborted).ConfigureAwait(false);
+            return Redirect(SatellitesConfigurationPath, status: $"Password rotated for {credential.RoleName}.  Copy the password now.");
+        }
+        catch (SatelliteRoleStoreException ex)
+        {
+            return Redirect(SatellitesConfigurationPath, error: ex.Message);
+        }
+    }
+
+    internal static async Task<IResult> RevokeSatelliteAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ISatelliteRoleStore satelliteRoles,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var gate = await RequireSatelliteStepUpAsync(context, users, sessions, authAuditor).ConfigureAwait(false);
+        if (gate.Failure is not null)
+        {
+            return gate.Failure;
+        }
+
+        if (!SatelliteRoleName.TryNormalize(form["name"].ToString(), out var normalized, out var error))
+        {
+            return Redirect(SatellitesConfigurationPath, error: error);
+        }
+
+        try
+        {
+            await satelliteRoles.RevokeAsync(normalized.SatelliteName, context.RequestAborted).ConfigureAwait(false);
+            await configAuditor.RecordSatelliteRoleWriteAsync(
+                "SatelliteRoleRevoked",
+                gate.User!.Username,
+                normalized.RoleName,
+                "DROP OWNED BY and DROP ROLE executed; grants revoked.",
+                context.RequestAborted).ConfigureAwait(false);
+            return Redirect(SatellitesConfigurationPath, status: $"Satellite role {normalized.RoleName} revoked.");
+        }
+        catch (SatelliteRoleStoreException ex)
+        {
+            return Redirect(SatellitesConfigurationPath, error: ex.Message);
+        }
     }
 
     private static bool TryReadSettings(
@@ -129,6 +258,36 @@ public static class AdminConfigurationEndpoints
             : null;
     }
 
-    private static IResult Redirect(string? status = null, string? error = null) =>
-        Results.Redirect(AdminAuthEndpoints.BuildRedirectPath(ConfigurationPath, status, error));
+    private static async ValueTask<SatelliteStepUpResult> RequireSatelliteStepUpAsync(
+        HttpContext context,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor)
+    {
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return new SatelliteStepUpResult(null, Results.Redirect("/login"));
+        }
+
+        if (await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            return new SatelliteStepUpResult(user, null);
+        }
+
+        await authAuditor.RecordAsync(
+            AdminAuthEventKind.StepUpFailed,
+            user.Username,
+            context,
+            enqueueForCorrelation: true,
+            cancellationToken: context.RequestAborted).ConfigureAwait(false);
+        return new SatelliteStepUpResult(
+            user,
+            Redirect(SatellitesConfigurationPath, error: "Step-up verification is required before managing satellite roles."));
+    }
+
+    private static IResult Redirect(string path, string? status = null, string? error = null) =>
+        Results.Redirect(AdminAuthEndpoints.BuildRedirectPath(path, status, error));
+
+    private sealed record SatelliteStepUpResult(Viegard.Domain.Admin.AdminUser? User, IResult? Failure);
 }

@@ -1,17 +1,20 @@
 @page "/configuration"
 @attribute [Authorize]
 @inject IRetentionSettingsStore RetentionSettingsStore
+@inject ISatelliteRoleStore SatelliteRoles
 @inject IAdminUserStore Users
 @inject IAdminSessionStore Sessions
 @inject IHttpContextAccessor HttpContextAccessor
 @inject IOptions<AdminAuthOptions> AuthOptions
 @inject UserDisplay Display
+@inject SatelliteRoleCredentialCookie SatelliteCredentialCookie
 
 <PageTitle>Viegard configuration</PageTitle>
 
 <main class="admin-panel wide page-layout">
     <nav class="page-index" aria-label="Configuration sections">
         <a class="index-default-link" href="/configuration#retention">Retention</a>
+        <a href="/configuration#satellites">Satellites</a>
     </nav>
     <div class="page-content">
     <h1>Service configuration</h1>
@@ -89,12 +92,120 @@
             </div>
         }
     </section>
+
+    <section id="satellites" class="indexed">
+        <h2>Satellites</h2>
+        <p class="small">Manage PostgreSQL roles for Windows satellite pipeline instances.  Use one role per satellite host.</p>
+
+        @if (_satelliteCredential is not null)
+        {
+            <div class="message">
+                <h3>Satellite credential shown once</h3>
+                <p>Store this password now.  It cannot be retrieved again; it can only be rotated.</p>
+                <dl class="detail-list">
+                    <dt>Host</dt><dd>@_satelliteCredential.ConnectionFacts.HostNote</dd>
+                    <dt>Port</dt><dd>@(_satelliteCredential.ConnectionFacts.Port.ToString(System.Globalization.CultureInfo.InvariantCulture))</dd>
+                    <dt>Database</dt><dd>@_satelliteCredential.ConnectionFacts.Database</dd>
+                    <dt>Username</dt><dd>@_satelliteCredential.ConnectionFacts.Username</dd>
+                    <dt>Schema</dt><dd>@_satelliteCredential.ConnectionFacts.Schema</dd>
+                </dl>
+                <p>Password:</p>
+                <pre class="secret-block">@_satelliteCredential.Password</pre>
+            </div>
+        }
+
+        <h3>Existing satellite roles</h3>
+        @if (_satelliteRoles.Count == 0)
+        {
+            <p>No satellite roles are configured.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Role name</th>
+                        <th>Login</th>
+                        <th>Connection info</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var role in _satelliteRoles)
+                    {
+                        <tr>
+                            <td><code>@role.RoleName</code></td>
+                            <td>@(role.CanLogin ? "Enabled" : "Disabled")</td>
+                            <td>@role.ConnectionFacts.Hint</td>
+                            <td class="actions-cell">
+                                @if (_stepUpFresh)
+                                {
+                                    <form method="post" action="/configuration/satellites/rotate">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="name" value="@role.SatelliteName" />
+                                        <button type="submit">Rotate password</button>
+                                    </form>
+                                    <form method="get" action="/configuration#satellites">
+                                        <input type="hidden" name="confirmRevoke" value="@role.SatelliteName" />
+                                        <button type="submit">Revoke</button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <span class="small">Step-up required</span>
+                                }
+                            </td>
+                        </tr>
+                        @if (_stepUpFresh && IsConfirmingRevoke(role))
+                        {
+                            <tr>
+                                <td colspan="4">
+                                    <div class="message error">
+                                        <p>Confirm revocation of <code>@role.RoleName</code>.  Stop the satellite service before revoking an active role.</p>
+                                        <form method="post" action="/configuration/satellites/revoke" class="secondary-form">
+                                            <AntiforgeryToken />
+                                            <input type="hidden" name="name" value="@role.SatelliteName" />
+                                            <button type="submit">Confirm revoke</button>
+                                            <a class="button-link" href="/configuration#satellites">Cancel</a>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        }
+
+        <h3>Add satellite</h3>
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/satellites/create" class="edit-form">
+                <AntiforgeryToken />
+                <label>
+                    Satellite name
+                    <input name="name" maxlength="@SatelliteRoleName.MaxNameLength" required placeholder="mdaemon01" />
+                    <span class="small">Lowercase letters, digits, and underscores only.  Viegard creates the PostgreSQL role <code>viegard_sat_&lt;name&gt;</code>.</span>
+                </label>
+                <button type="submit">Add satellite</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Managing satellite roles requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#satellites" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-satellites" />
+            </div>
+        }
+    </section>
     </div>
 </main>
 
 @code {
     private RetentionSettings? _settings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
+    private IReadOnlyList<SatelliteRoleInfo> _satelliteRoles = [];
+    private SatelliteRoleSecret? _satelliteCredential;
     private bool _stepUpFresh;
     private bool _hasSecurityKeys;
 
@@ -103,6 +214,9 @@
 
     [SupplyParameterFromQuery(Name = "status")]
     public string? Status { get; set; }
+
+    [SupplyParameterFromQuery(Name = "confirmRevoke")]
+    public string? ConfirmRevoke { get; set; }
 
     private string SettingsState => _settings switch
     {
@@ -126,12 +240,15 @@
         await Display.InitializeAsync().ConfigureAwait(false);
         _settings = await RetentionSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
+        _satelliteRoles = await SatelliteRoles.ListAsync().ConfigureAwait(false);
 
         var context = HttpContextAccessor.HttpContext;
         if (context is null)
         {
             return;
         }
+
+        _satelliteCredential = SatelliteCredentialCookie.ReadAndClear(context);
 
         if (Guid.TryParse(context.User.FindFirstValue(AdminCookieNames.SessionIdClaim), out var sessionId))
         {
@@ -156,4 +273,8 @@
 
     private string FormatLastCycleCount(RetentionTarget target) =>
         _lastCycleCounts.GetValueOrDefault(target).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private bool IsConfirmingRevoke(SatelliteRoleInfo role) =>
+        SatelliteRoleName.TryNormalize(ConfirmRevoke, out var confirmed, out _)
+        && string.Equals(confirmed.SatelliteName, role.SatelliteName, StringComparison.Ordinal);
 }

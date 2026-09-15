@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Viegard.Application.Audit;
+using Viegard.Application.Configuration;
 using Viegard.Application.Queues;
 using Viegard.Application.Retention;
 using Viegard.Application.Secrets;
@@ -81,6 +82,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ICustomSignatureStore, PostgresCustomSignatureStore>();
         services.AddSingleton<IRetentionStore, PostgresRetentionStore>();
         services.AddSingleton<IRetentionSettingsStore, PostgresRetentionSettingsStore>();
+        services.AddSingleton<ISatelliteRoleStore, PostgresSatelliteRoleStore>();
 
         // Durable events queue and command queue (broker-semantics port).
         services.AddSingleton<IWorkQueue<Guid>>(sp =>

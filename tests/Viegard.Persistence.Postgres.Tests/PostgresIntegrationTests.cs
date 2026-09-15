@@ -1,4 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Npgsql;
+using Viegard.Application.Configuration;
 using Viegard.Application.Stores;
 using Viegard.Domain;
 using Viegard.Domain.Admin;
@@ -62,6 +65,44 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
     private PostgresWorkQueue<Guid> CreateQueue(string name, int maxDeliveries = 5, TimeSpan? lease = null) =>
         new(_dataSource!, name, maxDeliveries, lease);
+
+    [PostgresFact]
+    public async Task Satellite_role_lifecycle_manages_role_password_and_grants()
+    {
+        var store = CreateSatelliteStore(_dataSource!);
+        var satelliteName = "it" + Guid.NewGuid().ToString("N")[..12];
+        var roleName = SatelliteRoleName.RolePrefix + satelliteName;
+        await CleanupSatelliteRoleAsync(roleName);
+
+        try
+        {
+            var created = await store.CreateAsync(satelliteName);
+            Assert.Equal(roleName, created.RoleName);
+            Assert.True(SatelliteRolePassword.UsesAlphabet(created.Password));
+
+            var listed = await store.ListAsync();
+            var role = Assert.Single(listed, candidate => candidate.RoleName == roleName);
+            Assert.True(role.CanLogin);
+
+            await AssertCanAuthenticateAsync(created);
+            await AssertSatelliteGrantsAsync(roleName);
+
+            var rotated = await store.RotatePasswordAsync(satelliteName);
+            Assert.Equal(roleName, rotated.RoleName);
+            Assert.NotEqual(created.Password, rotated.Password);
+            await AssertCanAuthenticateAsync(rotated);
+
+            await store.RevokeAsync(satelliteName);
+
+            var afterRevoke = await store.ListAsync();
+            Assert.DoesNotContain(afterRevoke, candidate => candidate.RoleName == roleName);
+            Assert.False(await RoleExistsAsync(roleName));
+        }
+        finally
+        {
+            await CleanupSatelliteRoleAsync(roleName);
+        }
+    }
 
     [PostgresFact]
     public async Task Enqueue_lease_complete_roundtrip()
@@ -1054,6 +1095,165 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         UserAgent = "retention-test",
         RevokedAt = revokedAt,
     };
+
+    private static PostgresSatelliteRoleStore CreateSatelliteStore(NpgsqlDataSource dataSource)
+    {
+        var builder = new NpgsqlConnectionStringBuilder(TestDatabase.ConnectionString!);
+        return new PostgresSatelliteRoleStore(
+            dataSource,
+            Options.Create(new DatabaseOptions
+            {
+                Host = builder.Host ?? "127.0.0.1",
+                Port = builder.Port,
+                Name = builder.Database ?? "viegard_test",
+                Username = builder.Username ?? "viegard_test",
+                Schema = TestDatabase.Schema,
+                PasswordSecretName = "viegard-db-password",
+            }));
+    }
+
+    private static async Task AssertCanAuthenticateAsync(SatelliteRoleSecret credential)
+    {
+        var builder = new NpgsqlConnectionStringBuilder(TestDatabase.ConnectionString!)
+        {
+            Username = credential.RoleName,
+            Password = credential.Password,
+            Pooling = false,
+            SearchPath = TestDatabase.Schema,
+        };
+
+        await using var connection = new NpgsqlConnection(builder.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("SELECT current_user", connection);
+        Assert.Equal(credential.RoleName, (string?)await command.ExecuteScalarAsync());
+    }
+
+    private async Task AssertSatelliteGrantsAsync(string roleName)
+    {
+        Assert.True(await ScalarBoolAsync(
+            "SELECT has_schema_privilege(@roleName, @schemaName, 'USAGE')",
+            ("roleName", roleName),
+            ("schemaName", TestDatabase.Schema)));
+
+        var tableCount = await ScalarLongAsync(
+            """
+            SELECT count(*)
+            FROM information_schema.tables
+            WHERE table_schema = @schemaName
+              AND table_type = 'BASE TABLE'
+            """,
+            ("schemaName", TestDatabase.Schema));
+        Assert.True(tableCount > 0);
+
+        var tableGrantCount = await ScalarLongAsync(
+            """
+            SELECT count(*)
+            FROM information_schema.tables AS tables
+            WHERE tables.table_schema = @schemaName
+              AND tables.table_type = 'BASE TABLE'
+              AND has_table_privilege(@roleName, format('%I.%I', tables.table_schema, tables.table_name), 'SELECT')
+              AND has_table_privilege(@roleName, format('%I.%I', tables.table_schema, tables.table_name), 'INSERT')
+              AND has_table_privilege(@roleName, format('%I.%I', tables.table_schema, tables.table_name), 'UPDATE')
+              AND has_table_privilege(@roleName, format('%I.%I', tables.table_schema, tables.table_name), 'DELETE')
+            """,
+            ("roleName", roleName),
+            ("schemaName", TestDatabase.Schema));
+        Assert.Equal(tableCount, tableGrantCount);
+
+        var sequenceCount = await ScalarLongAsync(
+            """
+            SELECT count(*)
+            FROM information_schema.sequences
+            WHERE sequence_schema = @schemaName
+            """,
+            ("schemaName", TestDatabase.Schema));
+        var sequenceGrantCount = await ScalarLongAsync(
+            """
+            SELECT count(*)
+            FROM information_schema.sequences AS sequences
+            WHERE sequences.sequence_schema = @schemaName
+              AND has_sequence_privilege(@roleName, format('%I.%I', sequences.sequence_schema, sequences.sequence_name), 'USAGE')
+              AND has_sequence_privilege(@roleName, format('%I.%I', sequences.sequence_schema, sequences.sequence_name), 'SELECT')
+            """,
+            ("roleName", roleName),
+            ("schemaName", TestDatabase.Schema));
+        Assert.Equal(sequenceCount, sequenceGrantCount);
+
+        Assert.Equal(4, await DefaultPrivilegeCountAsync(roleName, objectType: "r"));
+        Assert.Equal(2, await DefaultPrivilegeCountAsync(roleName, objectType: "S"));
+    }
+
+    private async Task<long> DefaultPrivilegeCountAsync(string roleName, string objectType) =>
+        await ScalarLongAsync(
+            """
+            SELECT count(DISTINCT exploded.privilege_type)
+            FROM pg_catalog.pg_default_acl AS acl
+            JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = acl.defaclnamespace
+            CROSS JOIN LATERAL aclexplode(acl.defaclacl) AS exploded
+            JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = exploded.grantee
+            WHERE namespace.nspname = @schemaName
+              AND grantee.rolname = @roleName
+              AND acl.defaclobjtype = @objectType
+            """,
+            ("roleName", roleName),
+            ("schemaName", TestDatabase.Schema),
+            ("objectType", objectType));
+
+    private async Task CleanupSatelliteRoleAsync(string roleName)
+    {
+        if (!await RoleExistsAsync(roleName))
+        {
+            return;
+        }
+
+        await using (var terminate = _dataSource!.CreateCommand(
+            """
+            SELECT pg_terminate_backend(pid)
+            FROM pg_catalog.pg_stat_activity
+            WHERE usename = @roleName
+              AND pid <> pg_backend_pid()
+            """))
+        {
+            terminate.Parameters.AddWithValue("roleName", roleName);
+            await terminate.ExecuteNonQueryAsync();
+        }
+
+        await using var drop = _dataSource!.CreateCommand($"""
+            DROP OWNED BY {QuoteIdentifier(roleName)};
+            DROP ROLE IF EXISTS {QuoteIdentifier(roleName)};
+            """);
+        await drop.ExecuteNonQueryAsync();
+    }
+
+    private async Task<bool> RoleExistsAsync(string roleName) =>
+        await ScalarBoolAsync(
+            "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = @roleName)",
+            ("roleName", roleName));
+
+    private async Task<bool> ScalarBoolAsync(string sql, params (string Name, object Value)[] parameters)
+    {
+        await using var command = _dataSource!.CreateCommand(sql);
+        AddParameters(command, parameters);
+        return (bool)(await command.ExecuteScalarAsync()
+            ?? throw new InvalidOperationException("PostgreSQL did not return a boolean result."));
+    }
+
+    private async Task<long> ScalarLongAsync(string sql, params (string Name, object Value)[] parameters)
+    {
+        await using var command = _dataSource!.CreateCommand(sql);
+        AddParameters(command, parameters);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static void AddParameters(NpgsqlCommand command, params (string Name, object Value)[] parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value);
+        }
+    }
+
+    private static string QuoteIdentifier(string identifier) => $"\"{identifier}\"";
 
     private sealed class TestDbContextFactory(Npgsql.NpgsqlDataSource dataSource) : IDbContextFactory<ViegardDbContext>
     {

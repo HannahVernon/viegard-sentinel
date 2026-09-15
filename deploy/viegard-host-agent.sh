@@ -110,6 +110,14 @@ psql_exec() {
         psql -U viegard -d viegard -v ON_ERROR_STOP=1 "$@"
 }
 
+# psql performs :'variable' interpolation only for SQL read from stdin or
+# -f, never for -c command strings, so SQL with variables must be piped.
+psql_exec_stdin() {
+    local sql="$1"
+    shift
+    printf '%s\n' "$sql" | psql_exec "$@" -Atf -
+}
+
 claim_next_pending() {
     local table sql
     table="$(commands_table)"
@@ -128,7 +136,7 @@ WHERE command.id = (
     FOR UPDATE SKIP LOCKED
 )
 RETURNING command.id;"
-    psql_exec -v "target_name=$TARGET_NAME" -Atc "$sql"
+    psql_exec_stdin "$sql" -v "target_name=$TARGET_NAME"
 }
 
 complete_command() {
@@ -141,11 +149,10 @@ SET status = :status_value::integer,
     detail = :'detail'
 WHERE id = :'command_id'::uuid
   AND status = 1;"
-    psql_exec \
+    psql_exec_stdin "$sql" \
         -v "command_id=$command_id" \
         -v "status_value=$status_value" \
-        -v "detail=$detail" \
-        -Atc "$sql" >/dev/null
+        -v "detail=$detail" >/dev/null
 }
 
 resolve_deploy_script() {

@@ -310,11 +310,17 @@ app.UseAntiforgery();
 
 app.MapGet("/healthz", () => Results.Ok(new { status = "healthy", service = "viegard-admin" }))
     .AllowAnonymous();
-app.MapGet("/status/queues", async (IQueueTelemetryStore telemetry, CancellationToken cancellationToken) =>
+app.MapGet("/status/queues", async (
+    IQueueTelemetryStore telemetry,
+    IRetentionSettingsStore retentionSettings,
+    UserDisplay display,
+    CancellationToken cancellationToken) =>
 {
+    await display.InitializeAsync().ConfigureAwait(false);
     var snapshots = await telemetry.GetLatestAsync(cancellationToken).ConfigureAwait(false);
-    var (css, label) = QueueStatusBadge.Summarize(snapshots, DateTimeOffset.UtcNow);
-    return Results.Json(new { css, label });
+    var settings = await retentionSettings.GetAsync(cancellationToken).ConfigureAwait(false);
+    var payload = QueueStatusPayload.Build(snapshots, DateTimeOffset.UtcNow, display.Format, settings);
+    return Results.Json(payload);
 }).RequireAuthorization();
 app.MapAdminAuthEndpoints();
 app.MapAdminSignatureEndpoints();

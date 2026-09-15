@@ -2,9 +2,12 @@
     "use strict";
 
     // Polls the authenticated queue-status endpoint and updates the header
-    // dot in place (D-0016 staleness auto-refresh).  Transient failures are
-    // ignored; the next tick tries again.  A 401 (session ended) stops the
-    // timer so an expired session does not poll forever.
+    // dot in place (D-0016 staleness auto-refresh).  On /queues it also
+    // updates the telemetry table and retention card values in place (all
+    // values arrive display-ready from the server; only textContent and
+    // known class names are swapped).  Transient failures are ignored; the
+    // next tick tries again.  A 401 (session ended) stops the timer so an
+    // expired session does not poll forever.
     const dot = document.querySelector("[data-status-dot]");
     const label = document.querySelector("[data-status-label]");
     if (!dot || !label) {
@@ -12,7 +15,67 @@
     }
 
     const knownClasses = ["status-dot-green", "status-dot-amber", "status-dot-red", "status-dot-muted"];
+    const knownLightClasses = ["badge", "badge badge-green", "badge badge-amber", "badge badge-red"];
+    const liveTable = document.querySelector("[data-live-queues]");
+    const retentionLastCycle = document.querySelector("[data-retention-last-cycle]");
+    const retentionTotal = document.querySelector("[data-retention-total]");
     let timer = null;
+
+    function updateQueueRows(rows) {
+        if (!liveTable || !Array.isArray(rows)) {
+            return;
+        }
+
+        const byKey = new Map();
+        liveTable.querySelectorAll("tr[data-q]").forEach(tr => byKey.set(tr.dataset.q, tr));
+        const reasonsByKey = new Map();
+        liveTable.querySelectorAll("tr[data-q-reasons]").forEach(tr => reasonsByKey.set(tr.dataset.qReasons, tr));
+
+        rows.forEach(row => {
+            if (!row || typeof row.key !== "string") {
+                return;
+            }
+
+            const tr = byKey.get(row.key);
+            if (tr) {
+                const light = tr.querySelector('[data-q-cell="light"]');
+                if (light && knownLightClasses.includes(row.lightCss)) {
+                    light.className = row.lightCss;
+                    light.textContent = row.light;
+                }
+
+                ["depth", "inFlight", "oldestAge", "deadLetters", "totals", "captured"].forEach(name => {
+                    const cell = tr.querySelector('[data-q-cell="' + name + '"]');
+                    if (cell && row[name] !== undefined && row[name] !== null) {
+                        cell.textContent = String(row[name]);
+                    }
+                });
+            }
+
+            const reasonsRow = reasonsByKey.get(row.key);
+            if (reasonsRow) {
+                reasonsRow.hidden = row.green === true || !row.reasons;
+                const cell = reasonsRow.querySelector("td");
+                if (cell) {
+                    cell.textContent = row.reasons || "";
+                }
+            }
+        });
+    }
+
+    function updateRetention(retention) {
+        if (!retention) {
+            return;
+        }
+
+        if (retentionLastCycle && typeof retention.lastCycle === "string") {
+            retentionLastCycle.textContent = retention.lastCycle;
+        }
+
+        if (retentionTotal && retention.lastRowsRemoved !== undefined && retention.lastRowsRemoved !== null) {
+            retentionTotal.textContent = String(retention.lastRowsRemoved);
+        }
+    }
 
     async function refresh() {
         try {
@@ -39,6 +102,8 @@
             knownClasses.forEach(name => dot.classList.remove(name));
             dot.classList.add(data.css);
             label.textContent = data.label || "";
+            updateQueueRows(data.rows);
+            updateRetention(data.retention);
         } catch {
             // Network hiccup; leave the last known state visible.
         }

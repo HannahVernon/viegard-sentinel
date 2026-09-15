@@ -611,6 +611,10 @@ public sealed class InMemoryAdminUserStore : IAdminUserStore
                 preferences.PageSize,
                 AdminUserPreferences.MinPageSize,
                 AdminUserPreferences.MaxPageSize),
+            StatusRefreshSeconds = Math.Clamp(
+                preferences.StatusRefreshSeconds,
+                AdminUserPreferences.MinStatusRefreshSeconds,
+                AdminUserPreferences.MaxStatusRefreshSeconds),
             UpdatedAt = preferences.UpdatedAt.ToUniversalTime(),
         };
         return ValueTask.CompletedTask;

@@ -154,6 +154,7 @@ public sealed class AdminAuthTests
             userId,
             "UTC",
             AdminUserPreferences.MaxPageSize + 1,
+            AdminUserPreferences.MaxStatusRefreshSeconds + 1,
             updatedAt,
             out var preferences,
             out var acceptedError);
@@ -162,11 +163,13 @@ public sealed class AdminAuthTests
         Assert.Equal(string.Empty, acceptedError);
         Assert.Equal("UTC", preferences.TimeZoneId);
         Assert.Equal(AdminUserPreferences.MaxPageSize, preferences.PageSize);
+        Assert.Equal(AdminUserPreferences.MaxStatusRefreshSeconds, preferences.StatusRefreshSeconds);
 
         var rejected = AdminUserPreferencesValidator.TryNormalize(
             userId,
             "not-a-real-time-zone",
             50,
+            AdminUserPreferences.DefaultStatusRefreshSeconds,
             updatedAt,
             out _,
             out var rejectedError);

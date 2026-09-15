@@ -248,6 +248,15 @@
                         }
                     </select>
                 </label>
+                <label>
+                    Status refresh interval
+                    <select name="statusRefreshSeconds">
+                        @foreach (var seconds in StatusRefreshOptions)
+                        {
+                            <option value="@seconds" selected="@(seconds == _preferences.StatusRefreshSeconds)">@seconds seconds</option>
+                        }
+                    </select>
+                </label>
                 <button type="submit">Save preferences</button>
             </form>
         </section>
@@ -305,6 +314,7 @@
     private string _otpUri = string.Empty;
     private bool _stepUpFresh;
     private static readonly int[] PageSizeOptions = [25, 50, 100, 200];
+    private static readonly int[] StatusRefreshOptions = [10, 15, 30, 60, 120, 300];
 
     [SupplyParameterFromQuery(Name = "error")]
     public string? Error { get; set; }

@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject IQueueTelemetryStore QueueTelemetry
+@inject UserDisplay Display
 
 <AuthorizeView>
     <Authorized>
@@ -16,8 +17,8 @@
                 <a href="/account">Account</a>
             </nav>
             <div class="header-side">
-                <a class="status-dot-link" href="/queues" title="Worst queue traffic light across all instances; refreshes every 30 seconds.">
-                    <span class="status-dot @_statusCss" data-status-dot></span><span data-status-label>@_statusLabel</span>
+                <a class="status-dot-link" href="/queues" title="Worst queue traffic light across all instances; refreshes every @_refreshSeconds seconds.">
+                    <span class="status-dot @_statusCss" data-status-dot data-refresh-ms="@(_refreshSeconds * 1000)"></span><span data-status-label>@_statusLabel</span>
                 </a>
                 <form method="post" action="/auth/logout" class="logout-form">
                     <AntiforgeryToken />
@@ -33,9 +34,12 @@
 @code {
     private string _statusCss = "status-dot-muted";
     private string _statusLabel = "No data";
+    private int _refreshSeconds = Viegard.Domain.Admin.AdminUserPreferences.DefaultStatusRefreshSeconds;
 
     protected override async Task OnInitializedAsync()
     {
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _refreshSeconds = Display.StatusRefreshSeconds;
         var snapshots = await QueueTelemetry.GetLatestAsync().ConfigureAwait(false);
         (_statusCss, _statusLabel) = QueueStatusBadge.Summarize(snapshots, DateTimeOffset.UtcNow);
     }

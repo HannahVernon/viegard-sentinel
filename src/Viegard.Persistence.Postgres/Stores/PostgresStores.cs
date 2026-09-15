@@ -1330,6 +1330,10 @@ public sealed class PostgresAdminUserStore(IDbContextFactory<ViegardDbContext> f
                 preferences.PageSize,
                 AdminUserPreferences.MinPageSize,
                 AdminUserPreferences.MaxPageSize),
+            StatusRefreshSeconds = Math.Clamp(
+                preferences.StatusRefreshSeconds,
+                AdminUserPreferences.MinStatusRefreshSeconds,
+                AdminUserPreferences.MaxStatusRefreshSeconds),
             UpdatedAt = preferences.UpdatedAt.ToUniversalTime(),
         };
 

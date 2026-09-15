@@ -382,10 +382,16 @@ public static class AdminAuthEndpoints
             return Redirect("/account", error: "Page size must be a number.");
         }
 
+        if (!int.TryParse(form["statusRefreshSeconds"].ToString(), out var statusRefreshSeconds))
+        {
+            return Redirect("/account", error: "Status refresh interval must be a number of seconds.");
+        }
+
         if (!AdminUserPreferencesValidator.TryNormalize(
             user.Id,
             form["timeZoneId"].ToString(),
             pageSize,
+            statusRefreshSeconds,
             DateTimeOffset.UtcNow,
             out var preferences,
             out var error))

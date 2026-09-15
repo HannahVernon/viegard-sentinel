@@ -22,6 +22,13 @@ public sealed class MDaemonSourceOptions
 
     /// <summary>When false, first sight of an existing file baselines to EOF.</summary>
     public bool IngestExistingOnFirstRun { get; set; }
+
+    /// <summary>
+    /// Upper bound on bytes read from one file in one scan.  Oversized
+    /// backlogs are consumed across successive scans instead of being
+    /// buffered whole (security-audit finding, 2026-08-25).
+    /// </summary>
+    public int MaxScanBytes { get; set; } = 8_388_608;
 }
 
 /// <summary>One MDaemon filename pattern and the log family it represents.</summary>
@@ -74,6 +81,11 @@ public sealed class MDaemonSourceOptionsValidator : IValidateOptions<MDaemonSour
         if (options.PollInterval <= TimeSpan.Zero)
         {
             failures.Add("MDaemon: PollInterval must be positive.");
+        }
+
+        if (options.MaxScanBytes < 4096)
+        {
+            failures.Add("MDaemon: MaxScanBytes must be at least 4096.");
         }
 
         return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;

@@ -10,6 +10,7 @@ public sealed class ImapEventNormalizerTests
     {
         Id = Guid.NewGuid(),
         SourceId = "imap:test-account",
+        SourceType = "imap",
         ObservedAt = DateTimeOffset.UtcNow,
         PayloadReference = "imap/test-account/INBOX/1/42",
         IngestOffset = "42",

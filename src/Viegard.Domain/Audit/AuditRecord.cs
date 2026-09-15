@@ -10,6 +10,7 @@ public enum PipelineStage
     Policy,
     Action,
     Command,
+    Admin,
     System,
 }
 

@@ -4,10 +4,24 @@ using Viegard.Persistence.Postgres.Model;
 
 namespace Viegard.Persistence.Postgres;
 
-/// <summary>EF Core context for Viegard's PostgreSQL persistence (D-0024).</summary>
+/// <summary>
+/// EF Core context for Viegard's PostgreSQL persistence (D-0024).  The model
+/// is deliberately schema-agnostic: all objects follow the connection's
+/// search path, so the schema is deployment configuration
+/// (Viegard:Database:Schema), not a compiled-in constant.
+/// </summary>
 public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> options) : DbContext(options)
 {
+
     public DbSet<RawObservationRow> RawObservations => Set<RawObservationRow>();
+
+    public DbSet<SourceRow> Sources => Set<SourceRow>();
+
+    public DbSet<ClassifierRow> Classifiers => Set<ClassifierRow>();
+
+    public DbSet<PolicyRow> Policies => Set<PolicyRow>();
+
+    public DbSet<ActionProviderRow> ActionProviders => Set<ActionProviderRow>();
 
     public DbSet<NormalizedEventRow> Events => Set<NormalizedEventRow>();
 
@@ -27,18 +41,71 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<SourceOffsetRow> SourceOffsets => Set<SourceOffsetRow>();
 
+    public DbSet<CustomSignatureRow> CustomSignatures => Set<CustomSignatureRow>();
+
+    public DbSet<RetentionSettingsRow> RetentionSettings => Set<RetentionSettingsRow>();
+
     public DbSet<QueueMessageRow> QueueMessages => Set<QueueMessageRow>();
 
     public DbSet<QueueCounterRow> QueueCounters => Set<QueueCounterRow>();
 
+    public DbSet<AdminUserRow> AdminUsers => Set<AdminUserRow>();
+
+    public DbSet<AdminTotpSecretRow> AdminTotpSecrets => Set<AdminTotpSecretRow>();
+
+    public DbSet<AdminRecoveryCodeRow> AdminRecoveryCodes => Set<AdminRecoveryCodeRow>();
+
+    public DbSet<AdminWebAuthnCredentialRow> AdminWebAuthnCredentials => Set<AdminWebAuthnCredentialRow>();
+
+    public DbSet<AdminUserPreferencesRow> AdminUserPreferences => Set<AdminUserPreferencesRow>();
+
+    public DbSet<AdminSessionRow> AdminSessions => Set<AdminSessionRow>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Insert-only reference tables (D-0031): rows are never deleted and
+        // natural keys never change; the only permitted mutation is filling
+        // a null sources.source_type once a typed writer first observes it.
+        modelBuilder.Entity<SourceRow>(entity =>
+        {
+            entity.ToTable("sources");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityAlwaysColumn();
+            entity.HasIndex(e => e.SourceKey).IsUnique();
+        });
+
+        modelBuilder.Entity<ClassifierRow>(entity =>
+        {
+            entity.ToTable("classifiers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityAlwaysColumn();
+            entity.HasIndex(e => e.ClassifierKey).IsUnique();
+        });
+
+        modelBuilder.Entity<PolicyRow>(entity =>
+        {
+            entity.ToTable("policies");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityAlwaysColumn();
+            entity.HasIndex(e => new { e.PolicyKey, e.PolicyVersion }).IsUnique();
+        });
+
+        modelBuilder.Entity<ActionProviderRow>(entity =>
+        {
+            entity.ToTable("action_providers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityAlwaysColumn();
+            entity.HasIndex(e => e.ProviderKey).IsUnique();
+        });
+
         modelBuilder.Entity<RawObservationRow>(entity =>
         {
             entity.ToTable("raw_observations");
             entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.ObservedAt);
             entity.HasIndex(e => e.PayloadReference).IsUnique();
             entity.HasIndex(e => e.SourceId);
+            entity.HasOne<SourceRow>().WithMany().HasForeignKey(e => e.SourceId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<NormalizedEventRow>(entity =>
@@ -47,6 +114,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.OccurredAt);
             entity.HasIndex(e => e.RawObservationId);
+            entity.HasIndex(e => e.SourceId);
+            entity.HasOne<SourceRow>().WithMany().HasForeignKey(e => e.SourceId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.EntitiesJson).HasColumnType("jsonb");
             entity.Property(e => e.PayloadJson).HasColumnType("jsonb");
         });
@@ -56,6 +125,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.ToTable("incidents");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.CorrelationKey, e.State });
+            entity.HasIndex(e => new { e.WindowStart, e.State });
             entity.Property(e => e.EventIdsJson).HasColumnType("jsonb");
             entity.Property(e => e.EvidenceJson).HasColumnType("jsonb");
         });
@@ -66,6 +136,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.SubjectId);
             entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.ClassifierId);
+            entity.HasOne<ClassifierRow>().WithMany().HasForeignKey(e => e.ClassifierId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.ModelJson).HasColumnType("jsonb");
             entity.Property(e => e.ReasonsJson).HasColumnType("jsonb");
         });
@@ -75,6 +147,9 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.ToTable("decisions");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.ClassificationId);
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.PolicyId);
+            entity.HasOne<PolicyRow>().WithMany().HasForeignKey(e => e.PolicyId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.GuardrailsJson).HasColumnType("jsonb");
         });
 
@@ -83,6 +158,9 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.ToTable("actions");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.DecisionId);
+            entity.HasIndex(e => e.ProviderId);
+            entity.HasIndex(e => e.RequestedAt);
+            entity.HasOne<ActionProviderRow>().WithMany().HasForeignKey(e => e.ProviderId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.ParametersJson).HasColumnType("jsonb");
             entity.Property(e => e.RollbackJson).HasColumnType("jsonb");
         });
@@ -92,6 +170,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.ToTable("audit_records");
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.Timestamp);
+            entity.HasIndex(e => e.SourceId);
+            entity.HasOne<SourceRow>().WithMany().HasForeignKey(e => e.SourceId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.DetailJson).HasColumnType("jsonb");
         });
 
@@ -114,12 +194,33 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => new { e.SourceId, e.Key });
         });
 
+        modelBuilder.Entity<CustomSignatureRow>(entity =>
+        {
+            entity.ToTable("custom_signatures");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Name).IsUnique();
+            entity.Property(e => e.Name).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxNameLength);
+            entity.Property(e => e.Pattern).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxPatternLength);
+            entity.Property(e => e.Category).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxCategoryLength);
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<RetentionSettingsRow>(entity =>
+        {
+            entity.ToTable("retention_settings", table =>
+                table.HasCheckConstraint("CK_retention_settings_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Retention.RetentionSettings.MaxUpdatedByLength);
+        });
+
         modelBuilder.Entity<QueueMessageRow>(entity =>
         {
             entity.ToTable("queue_messages");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).UseIdentityAlwaysColumn();
             entity.HasIndex(e => new { e.QueueName, e.DeadLettered, e.LeasedUntil, e.Id });
+            entity.HasIndex(e => new { e.DeadLettered, e.EnqueuedAt });
             entity.Property(e => e.PayloadJson).HasColumnType("jsonb");
         });
 
@@ -127,6 +228,57 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
         {
             entity.ToTable("queue_counters");
             entity.HasKey(e => e.QueueName);
+        });
+
+        modelBuilder.Entity<AdminUserRow>(entity =>
+        {
+            entity.ToTable("admin_users");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Username).IsUnique();
+        });
+
+        modelBuilder.Entity<AdminTotpSecretRow>(entity =>
+        {
+            entity.ToTable("admin_totp_secrets");
+            entity.HasKey(e => e.UserId);
+            entity.HasOne<AdminUserRow>().WithOne().HasForeignKey<AdminTotpSecretRow>(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AdminRecoveryCodeRow>(entity =>
+        {
+            entity.ToTable("admin_recovery_codes");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AdminWebAuthnCredentialRow>(entity =>
+        {
+            entity.ToTable("admin_webauthn_credentials");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.CredentialId).IsUnique();
+            entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+            entity.Property(e => e.CredentialId).HasColumnType("bytea");
+            entity.Property(e => e.PublicKey).HasColumnType("bytea");
+        });
+
+        modelBuilder.Entity<AdminUserPreferencesRow>(entity =>
+        {
+            entity.ToTable("admin_user_preferences");
+            entity.HasKey(e => e.UserId);
+            entity.HasOne<AdminUserRow>().WithOne().HasForeignKey<AdminUserPreferencesRow>(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AdminSessionRow>(entity =>
+        {
+            entity.ToTable("admin_sessions");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.AbsoluteExpiresAt);
+            entity.HasIndex(e => e.IdleExpiresAt);
+            entity.HasIndex(e => e.RevokedAt);
+            entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         // snake_case column names everywhere: PostgreSQL convention, and the

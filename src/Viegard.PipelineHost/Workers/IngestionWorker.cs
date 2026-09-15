@@ -2,6 +2,7 @@ using Viegard.Application.Audit;
 using Viegard.Application.Queues;
 using Viegard.Application.Sources;
 using Viegard.Application.Stores;
+using Viegard.Domain;
 using Viegard.Domain.Audit;
 
 namespace Viegard.PipelineHost.Workers;
@@ -55,12 +56,54 @@ public sealed class IngestionWorker(
         {
             await foreach (var item in source.ObserveAsync(cancellationToken).ConfigureAwait(false))
             {
-                await IngestAsync(source, normalizer, item, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await IngestAsync(source, normalizer, item, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // One failed item must never stop ingestion (or the
+                    // host): log, audit, and keep consuming the source.
+                    logger.LogError(
+                        ex,
+                        "Ingestion failed for observation {ObservationId} from {SourceId}; continuing.",
+                        item.Observation.Id, source.SourceId);
+                    await TryAuditIngestFailureAsync(source, item, ex, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException)
         {
             // Normal shutdown.
+        }
+    }
+
+    private async Task TryAuditIngestFailureAsync(
+        IDataSource source,
+        ObservedItem item,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Ingestion,
+                Summary = $"Ingestion failed: {exception.GetType().Name}: {exception.Message}",
+                SourceId = source.SourceId,
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception auditEx) when (auditEx is not OperationCanceledException)
+        {
+            // Auditing the failure failed too (e.g., database outage).  The
+            // original error is already logged; do not take down ingestion.
+            logger.LogError(auditEx, "Failed to audit an ingestion failure for {SourceId}.", source.SourceId);
         }
     }
 
@@ -73,7 +116,7 @@ public sealed class IngestionWorker(
         await rawObservationStore.AddAsync(item.Observation, item.RawPayload, cancellationToken).ConfigureAwait(false);
         await auditLedger.AppendAsync(new AuditRecord
         {
-            Id = Guid.NewGuid(),
+            Id = ViegardId.New(),
             Timestamp = DateTimeOffset.UtcNow,
             Stage = PipelineStage.Ingestion,
             Summary = $"Observation ingested from {source.SourceId}.",
@@ -88,7 +131,7 @@ public sealed class IngestionWorker(
                 item.Observation.Id, source.SourceId, result.FailureReason);
             await auditLedger.AppendAsync(new AuditRecord
             {
-                Id = Guid.NewGuid(),
+                Id = ViegardId.New(),
                 Timestamp = DateTimeOffset.UtcNow,
                 Stage = PipelineStage.Normalization,
                 Summary = $"Normalization failed: {result.FailureReason}",
@@ -104,7 +147,7 @@ public sealed class IngestionWorker(
             result.Event.Id, result.Event.Payload.GetType().Name, source.SourceId);
         await auditLedger.AppendAsync(new AuditRecord
         {
-            Id = Guid.NewGuid(),
+            Id = ViegardId.New(),
             Timestamp = DateTimeOffset.UtcNow,
             Stage = PipelineStage.Normalization,
             Summary = $"Event normalized ({result.Event.SourceType}) and queued for correlation.",

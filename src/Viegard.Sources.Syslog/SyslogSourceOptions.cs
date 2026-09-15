@@ -14,9 +14,11 @@ public sealed class SyslogSourceOptions
     public int Port { get; set; } = 5514;
 
     /// <summary>
-    /// Source-IP allowlist (D-0023 guardrail).  Fail-closed: when the
-    /// listener is enabled this list must be non-empty, and datagrams from
-    /// any other address are dropped and counted.
+    /// Source-IP allowlist (D-0023 guardrail).  Entries may be single
+    /// addresses or CIDR ranges (e.g., "192.0.2.10", "192.168.0.0/16").
+    /// Fail-closed: when the listener is enabled this list must be
+    /// non-empty, and datagrams from any other address are dropped and
+    /// counted.
     /// </summary>
     public IList<string> AllowedSources { get; } = [];
 

@@ -7,9 +7,11 @@ using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using MimeKit;
 using Viegard.Application.Health;
+using Viegard.Application.Logging;
 using Viegard.Application.Secrets;
 using Viegard.Application.Sources;
 using Viegard.Application.Stores;
+using Viegard.Domain;
 using Viegard.Domain.Events;
 using Viegard.Domain.Health;
 
@@ -29,6 +31,14 @@ public sealed class ImapMailSource(
     ILogger<ImapMailSource> logger) : IDataSource, IHealthContributor
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Largest body part (server-reported transfer octets) that will be
+    /// downloaded.  Generous headroom over the normalizer's 256 KiB
+    /// character truncation budget (base64 and multibyte overhead), while
+    /// bounding what a hostile oversized message can force into memory.
+    /// </summary>
+    public const uint MaxBodyFetchOctets = 1_048_576;
 
     private int _consecutiveIdleFailures;
     private string? _lastError;
@@ -146,8 +156,19 @@ public sealed class ImapMailSource(
             await folder.OpenAsync(FolderAccess.ReadOnly, cancellationToken).ConfigureAwait(false);
 
             var lastUid = await ResolveLastUidAsync(folder, cancellationToken).ConfigureAwait(false);
+            // uint.MaxValue + 1 would wrap to UID 0 and produce an invalid
+            // or overbroad search; fail closed (security-audit finding,
+            // 2026-08-25).
+            if (lastUid == uint.MaxValue)
+            {
+                logger.LogWarning(
+                    "IMAP account {AccountId}: stored UID offset for folder {Folder} is at uint.MaxValue; skipping sweep.",
+                    account.AccountId, LogSanitizer.Sanitize(folder.FullName));
+                continue;
+            }
+
             var newUids = await folder.SearchAsync(
-                SearchQuery.Uids(new UniqueIdRange(new UniqueId(lastUid + 1), UniqueId.MaxValue)),
+                MailKit.Search.SearchQuery.Uids(new UniqueIdRange(new UniqueId(lastUid + 1), UniqueId.MaxValue)),
                 cancellationToken).ConfigureAwait(false);
 
             foreach (var uid in newUids.Where(u => u.Id > lastUid).OrderBy(u => u.Id))
@@ -182,7 +203,7 @@ public sealed class ImapMailSource(
             {
                 logger.LogWarning(
                     "IMAP account {AccountId}: UIDVALIDITY changed for folder {Folder}; re-baselining.",
-                    account.AccountId, folder.FullName);
+                    account.AccountId, LogSanitizer.Sanitize(folder.FullName));
             }
 
             await offsetStore.SetAsync(SourceId, validityKey, currentValidity, cancellationToken).ConfigureAwait(false);
@@ -240,8 +261,9 @@ public sealed class ImapMailSource(
 
         var observation = new RawObservation
         {
-            Id = Guid.NewGuid(),
+            Id = ViegardId.New(),
             SourceId = SourceId,
+            SourceType = ImapEventNormalizer.ImapSourceType,
             ObservedAt = DateTimeOffset.UtcNow,
             PayloadReference = $"imap/{account.AccountId}/{folder.FullName}/{folder.UidValidity}/{uid.Id}",
             IngestOffset = uid.Id.ToString(),
@@ -263,6 +285,15 @@ public sealed class ImapMailSource(
         if (part is null)
         {
             return null;
+        }
+
+        // Cap enforced BEFORE download: a hostile oversized message must
+        // not force the full body into memory just to be truncated later
+        // by the normalizer (security-audit finding, 2026-08-25).  Octets
+        // is the server-reported transfer size of this part.
+        if (part.Octets > MaxBodyFetchOctets)
+        {
+            return $"[BODY NOT FETCHED BY VIEGARD: part size {part.Octets} octets exceeds the {MaxBodyFetchOctets}-octet fetch cap]";
         }
 
         // Folder is opened read-only, so retrieval can never set \Seen (D-0022).

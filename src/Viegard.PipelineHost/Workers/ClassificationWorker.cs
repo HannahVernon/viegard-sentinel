@@ -3,6 +3,7 @@ using Viegard.Application.Audit;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Queues;
 using Viegard.Application.Stores;
+using Viegard.Domain;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Classifications;
 using Viegard.Domain.Incidents;
@@ -74,7 +75,7 @@ public sealed class ClassificationWorker(
                     {
                         await auditLedger.AppendAsync(new AuditRecord
                         {
-                            Id = Guid.NewGuid(),
+                            Id = ViegardId.New(),
                             Timestamp = DateTimeOffset.UtcNow,
                             Stage = PipelineStage.Classification,
                             Summary = $"Classification failed for incident {incident.Id} with classifier {classifier.ClassifierId}.",
@@ -96,7 +97,7 @@ public sealed class ClassificationWorker(
                         .ConfigureAwait(false);
                     await auditLedger.AppendAsync(new AuditRecord
                     {
-                        Id = Guid.NewGuid(),
+                        Id = ViegardId.New(),
                         Timestamp = DateTimeOffset.UtcNow,
                         Stage = PipelineStage.Classification,
                         Summary = $"Classifier {classification.ClassifierId} produced {classification.Category} for incident {incident.Id}.",

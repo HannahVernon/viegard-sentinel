@@ -1,9 +1,10 @@
-using Microsoft.Extensions.Options;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Viegard.Application.Audit;
 using Viegard.Application.Policy;
 using Viegard.Application.Queues;
 using Viegard.Application.Stores;
+using Viegard.Domain;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Classifications;
 using Viegard.Domain.Incidents;
@@ -69,7 +70,7 @@ public sealed class PolicyWorker(
                 await MarkIncidentDecidedAsync(classification, stoppingToken).ConfigureAwait(false);
                 await auditLedger.AppendAsync(new AuditRecord
                 {
-                    Id = Guid.NewGuid(),
+                    Id = ViegardId.New(),
                     Timestamp = DateTimeOffset.UtcNow,
                     Stage = PipelineStage.Policy,
                     Summary = $"Policy produced {decision.Outcome} for classification {classification.Id}.",

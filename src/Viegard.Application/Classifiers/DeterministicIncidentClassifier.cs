@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Viegard.Application.Stores;
+using Viegard.Domain;
 using Viegard.Domain.Classifications;
 using Viegard.Domain.Incidents;
 
@@ -55,7 +56,7 @@ public sealed class DeterministicIncidentClassifier(
 
         var classification = new Classification
         {
-            Id = Guid.NewGuid(),
+            Id = ViegardId.New(),
             SubjectKind = ClassificationSubjectKind.Incident,
             SubjectId = incident.Id,
             ClassifierId = ClassifierId,

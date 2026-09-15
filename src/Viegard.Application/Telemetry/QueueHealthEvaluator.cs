@@ -48,6 +48,9 @@ public sealed record QueueHealthStatus
 /// </summary>
 public sealed class QueueHealthEvaluator(QueueHealthThresholds thresholds)
 {
+    public static string StaleTelemetryReason(TimeSpan telemetryAge) =>
+        $"Telemetry is stale ({telemetryAge:g} old): the publisher may be down.";
+
     public QueueHealthStatus Evaluate(QueueTelemetrySnapshot snapshot, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -63,7 +66,7 @@ public sealed class QueueHealthEvaluator(QueueHealthThresholds thresholds)
                 InstanceId = snapshot.InstanceId,
                 QueueName = snapshot.QueueName,
                 Light = TrafficLight.Red,
-                Reasons = [$"Telemetry is stale ({telemetryAge:g} old): the publisher may be down."],
+                Reasons = [StaleTelemetryReason(telemetryAge)],
             };
         }
 

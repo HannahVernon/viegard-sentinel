@@ -1,0 +1,198 @@
+<nav class="pagination" aria-label="Pagination">
+    <div class="pagination-pages">
+        @if (HasPrevious)
+        {
+            <a class="button-link" href="@BuildHref(BasePath, null, null, SafeTake, Filters)">First</a>
+        }
+        else
+        {
+            <span class="button-link disabled" aria-disabled="true">First</span>
+        }
+
+        @if (HasPrevious)
+        {
+            <a class="button-link" href="@BuildHref(BasePath, PreviousCursor, null, SafeTake, Filters)">Previous</a>
+        }
+        else
+        {
+            <span class="button-link disabled" aria-disabled="true">Previous</span>
+        }
+
+        <span class="page-indicator">Page @PageNumber of @TotalPages</span>
+
+        @if (NextCursor is not null)
+        {
+            <a class="button-link" href="@BuildHref(BasePath, NextCursor, CurrentCursor, SafeTake, Filters)">Next</a>
+        }
+        else
+        {
+            <span class="button-link disabled" aria-disabled="true">Next</span>
+        }
+
+        @if (HasLast)
+        {
+            <a class="button-link" href="@BuildPageHref(BasePath, TotalPages, SafeTake, Filters)">Last</a>
+        }
+        else
+        {
+            <span class="button-link disabled" aria-disabled="true">Last</span>
+        }
+    </div>
+
+    <form method="get" action="@BasePath" class="page-size">
+        @* Changing size restarts from the newest rows; cursor state from
+           another size would be misleading. *@
+        @foreach (var filter in ActiveFilters)
+        {
+            <input type="hidden" name="@filter.Key" value="@filter.Value" />
+        }
+        <label for="page-size-select">Page size</label>
+        <select id="page-size-select" name="take">
+            @foreach (var size in Sizes)
+            {
+                <option value="@size" selected="@(size == SafeTake)">@size</option>
+            }
+        </select>
+        <button type="submit" class="button-link">Apply</button>
+    </form>
+
+    <form method="get" action="@BasePath" class="page-jump">
+        @foreach (var filter in ActiveFilters)
+        {
+            <input type="hidden" name="@filter.Key" value="@filter.Value" />
+        }
+        <input type="hidden" name="take" value="@SafeTake" />
+        <label for="page-jump-input">Go to page</label>
+        <input id="page-jump-input" name="page" type="number" min="1" max="@TotalPages" value="@PageNumber" />
+        <button type="submit" class="button-link">Go</button>
+    </form>
+</nav>
+
+@code {
+    public const int DefaultPageSize = 50;
+    private static readonly int[] Sizes = [25, 50, 100, 200];
+
+    [Parameter]
+    public string BasePath { get; set; } = "/";
+
+    [Parameter]
+    public Guid? CurrentCursor { get; set; }
+
+    [Parameter]
+    public Guid? PreviousCursor { get; set; }
+
+    [Parameter]
+    public Guid? NextCursor { get; set; }
+
+    [Parameter]
+    public int Take { get; set; } = DefaultPageSize;
+
+    [Parameter]
+    public long TotalCount { get; set; }
+
+    [Parameter]
+    public long Preceding { get; set; }
+
+    [Parameter]
+    public IReadOnlyDictionary<string, string?>? Filters { get; set; }
+
+    private int SafeTake => ClampPageSize(Take);
+
+    private long PageNumber => PaginationMath.PageNumber(Preceding, SafeTake);
+
+    private long TotalPages => PaginationMath.TotalPages(TotalCount, SafeTake);
+
+    private bool HasPrevious => PageNumber > 1 && CurrentCursor is not null;
+
+    private bool HasLast => PageNumber < TotalPages;
+
+    private IReadOnlyList<KeyValuePair<string, string>> ActiveFilters => ActiveFilterParameters(Filters);
+
+    /// <summary>
+    /// Server-side clamp for the operator-supplied page size, so a crafted
+    /// take value can never request an unbounded page.
+    /// </summary>
+    public static int ClampPageSize(int? take) =>
+        take is null ? DefaultPageSize : Math.Clamp(take.Value, 10, 200);
+
+    public static IReadOnlyList<KeyValuePair<string, string>> ActiveFilterParameters(
+        IReadOnlyDictionary<string, string?>? filters) =>
+        filters is null
+            ? []
+            : filters
+                .Where(filter =>
+                    !string.IsNullOrWhiteSpace(filter.Key)
+                    && !string.IsNullOrWhiteSpace(filter.Value)
+                    && !IsReserved(filter.Key))
+                .Select(filter => new KeyValuePair<string, string>(filter.Key, filter.Value!))
+                .ToArray();
+
+    public static string BuildHref(
+        string basePath,
+        Guid? cursor,
+        Guid? previous,
+        int take,
+        IReadOnlyDictionary<string, string?>? filters)
+    {
+        var parts = new List<string>();
+        if (cursor is not null)
+        {
+            parts.Add($"cursor={Uri.EscapeDataString(cursor.Value.ToString())}");
+        }
+
+        if (previous is not null)
+        {
+            parts.Add($"prev={Uri.EscapeDataString(previous.Value.ToString())}");
+        }
+
+        parts.Add($"take={ClampPageSize(take)}");
+        foreach (var filter in ActiveFilterParameters(filters))
+        {
+            parts.Add($"{Uri.EscapeDataString(filter.Key)}={Uri.EscapeDataString(filter.Value)}");
+        }
+
+        return BuildQueryHref(basePath, parts);
+    }
+
+    public static string BuildPageHref(
+        string basePath,
+        long pageNumber,
+        int take,
+        IReadOnlyDictionary<string, string?>? filters)
+    {
+        var parts = new List<string> { $"take={ClampPageSize(take)}" };
+        foreach (var filter in ActiveFilterParameters(filters))
+        {
+            parts.Add($"{Uri.EscapeDataString(filter.Key)}={Uri.EscapeDataString(filter.Value)}");
+        }
+
+        parts.Add($"page={Math.Max(1, pageNumber)}");
+        return BuildQueryHref(basePath, parts);
+    }
+
+    private static string BuildQueryHref(string basePath, IReadOnlyCollection<string> parts)
+    {
+        var (path, fragment) = SplitFragment(string.IsNullOrWhiteSpace(basePath) ? "/" : basePath);
+        if (parts.Count == 0)
+        {
+            return $"{path}{fragment}";
+        }
+
+        var separator = path.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+        return $"{path}{separator}{string.Join("&", parts)}{fragment}";
+    }
+
+    private static bool IsReserved(string key) =>
+        string.Equals(key, "cursor", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "prev", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "page", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "take", StringComparison.OrdinalIgnoreCase);
+
+    private static (string Path, string Fragment) SplitFragment(string value)
+    {
+        var index = value.IndexOf('#', StringComparison.Ordinal);
+        return index < 0
+            ? (value, string.Empty)
+            : (value[..index], value[index..]);
+    }
+}

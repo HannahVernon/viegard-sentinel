@@ -5,17 +5,19 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    <link rel="icon" type="image/png" href="favicon.png" />
     <ResourcePreloader />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["Viegard.AdminApi.styles.css"]" />
-    <ImportMap />
     <HeadOutlet />
 </head>
 
 <body>
+    @* Every admin page is static SSR.  The only client script is the
+       first-party WebAuthn bridge, loaded as an external file for CSP. *@
     <Routes />
-    <ReconnectModal />
-    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="@Assets["js/webauthn.js"]" defer></script>
+    <script src="@Assets["js/status-refresh.js"]" defer></script>
 </body>
 
 </html>

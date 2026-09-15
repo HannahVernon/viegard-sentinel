@@ -1,0 +1,141 @@
+﻿@page "/queues"
+@attribute [Authorize]
+@inject IQueueTelemetryStore QueueTelemetry
+@inject IRetentionSettingsStore RetentionSettingsStore
+@inject UserDisplay Display
+
+<PageTitle>Viegard queues</PageTitle>
+
+<main class="admin-panel">
+    <h1>Dashboard/Queues</h1>
+
+    <section class="card">
+        <h2>Retention</h2>
+        <dl class="detail-list">
+            <dt>State</dt><dd>@RetentionState</dd>
+            <dt>Effective periods</dt><dd>@RetentionPeriodsSummary</dd>
+            <dt>Last cycle</dt><dd data-retention-last-cycle>@RetentionLastCycle</dd>
+            <dt>Last rows removed</dt><dd data-retention-total>@RetentionLastCycleTotal</dd>
+        </dl>
+        <p><a href="/configuration#retention">Edit retention configuration</a></p>
+    </section>
+
+    @if (_view.Queues.Count == 0)
+    {
+        <p>No queue telemetry has been published yet.</p>
+    }
+    else
+    {
+        <section class="card">
+            <h2>Queues</h2>
+            <table class="data-table" data-live-queues>
+                <caption>Queues are shared across all instances; values come from the freshest report.</caption>
+                <thead>
+                    <tr>
+                        <th>Queue</th>
+                        <th>Light</th>
+                        <th>Depth</th>
+                        <th>In-flight</th>
+                        <th>Oldest pending age</th>
+                        <th>Dead letters</th>
+                        <th>Totals</th>
+                        <th>Captured</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in _view.Queues)
+                    {
+                        var key = row.Snapshot.QueueName;
+                        <tr data-q="@key">
+                            <td>@row.Snapshot.QueueName</td>
+                            <td><span data-q-cell="light" class="@AdminText.LightCss(row.Status.Light)">@row.Status.Light</span></td>
+                            <td data-q-cell="depth">@row.Snapshot.Depth</td>
+                            <td data-q-cell="inFlight">@row.Snapshot.InFlight</td>
+                            <td data-q-cell="oldestAge">@OldestAge(row.Snapshot)</td>
+                            <td data-q-cell="deadLetters">@row.Snapshot.DeadLetterCount</td>
+                            <td data-q-cell="totals">@row.Snapshot.TotalEnqueued / @row.Snapshot.TotalCompleted / @row.Snapshot.TotalAbandoned</td>
+                            <td data-q-cell="captured">@CapturedBy(row.Snapshot)</td>
+                        </tr>
+                        <tr class="details-row" data-q-reasons="@key" hidden="@(row.Status.Light == TrafficLight.Green)">
+                            <td colspan="8">@string.Join(" ", row.Status.Reasons)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+
+        <section class="card">
+            <h2>Instances</h2>
+            <table class="data-table" data-live-instances>
+                <caption>Instances report telemetry every 10 seconds; a stale row means that instance may be down.</caption>
+                <thead>
+                    <tr>
+                        <th>Instance</th>
+                        <th>Queues reported</th>
+                        <th>Last captured</th>
+                        <th>Staleness light</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in _view.Instances)
+                    {
+                        <tr data-inst="@row.InstanceId">
+                            <td>@row.InstanceId</td>
+                            <td data-inst-cell="queuesReported">@row.QueuesReported</td>
+                            <td data-inst-cell="lastCaptured">@Display.Format(row.LastCapturedAt)</td>
+                            <td><span data-inst-cell="light" class="@AdminText.LightCss(row.Light)">@row.Light</span></td>
+                        </tr>
+                        <tr class="details-row" data-inst-reasons="@row.InstanceId" hidden="@row.Green">
+                            <td colspan="4">@string.Join(" ", row.Reasons)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    }
+</main>
+
+@code {
+    private QueueStatusView.SnapshotView _view = QueueStatusView.Empty;
+    private RetentionSettings? _retentionSettings;
+    private IReadOnlyDictionary<RetentionTarget, long> _retentionCounts = RetentionSettings.EmptyCounts();
+    private DateTimeOffset _now;
+
+    private string RetentionState => _retentionSettings is null
+        ? "Not seeded"
+        : "Configured";
+
+    private string RetentionPeriodsSummary => _retentionSettings is null
+        ? "No database-owned settings row exists yet."
+        : string.Join("; ", RetentionTargetMetadata.Descriptors.Select(descriptor =>
+            $"{descriptor.SettingName}: {FormatPeriod(descriptor.Target)}"));
+
+    private string RetentionLastCycle => _retentionSettings?.LastCycleAt is { } lastCycleAt
+        ? Display.Format(lastCycleAt)
+        : "Never";
+
+    private string RetentionLastCycleTotal =>
+        _retentionCounts.Values.Sum().ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _now = DateTimeOffset.UtcNow;
+        _retentionSettings = await RetentionSettingsStore.GetAsync().ConfigureAwait(false);
+        _retentionCounts = _retentionSettings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
+        var snapshots = await QueueTelemetry.GetLatestAsync().ConfigureAwait(false);
+        _view = QueueStatusView.Build(snapshots, _now);
+    }
+
+    private string OldestAge(QueueTelemetrySnapshot snapshot) => snapshot.OldestPendingEnqueuedAt is null
+        ? ""
+        : (_now - snapshot.OldestPendingEnqueuedAt.Value).ToString("g");
+
+    private string FormatPeriod(RetentionTarget target) =>
+        _retentionSettings?.GetDays(target) is { } days
+            ? $"{days.ToString(System.Globalization.CultureInfo.InvariantCulture)}d"
+            : "forever";
+
+    private string CapturedBy(QueueTelemetrySnapshot snapshot) =>
+        $"{Display.Format(snapshot.CapturedAt)} by {snapshot.InstanceId}";
+}

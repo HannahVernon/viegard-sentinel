@@ -18,6 +18,7 @@ public sealed class SyslogEventNormalizerTests
     {
         Id = Guid.NewGuid(),
         SourceId = "syslog:udp-5514",
+        SourceType = "syslog",
         ObservedAt = DateTimeOffset.UtcNow,
         PayloadReference = "syslog/192.0.2.10/1/1",
     };

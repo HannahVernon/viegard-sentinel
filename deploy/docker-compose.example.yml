@@ -5,7 +5,13 @@
 #
 # Secrets (D-0006): each secret is one file in ./secrets/ (never committed;
 # see .gitignore).  The directory is mounted read-only and the file name is
-# the secret name, e.g. ./secrets/yahoo-imap-password.
+# the secret name, e.g. ./secrets/yahoo-imap-password.  Admin bootstrap
+# uses ./secrets/viegard-admin-bootstrap-password for the first operator.
+#
+# IMPORTANT: the viegard-pipeline and viegard-admin containers run as the
+# non-root 'app' user (UID 1654) from the .NET base images, so each secret
+# file must be readable by that UID:
+#   chown 1654 secrets/<name> && chmod 400 secrets/<name>
 #
 # PostgreSQL (D-0024): dedicated container; data and nightly dumps live on
 # the VM disk under this directory, so both ride the weekly Hyper-V export.
@@ -45,6 +51,9 @@ services:
     entrypoint: [ "/bin/sh", "-c" ]
     command:
       - |
+        # Dumps contain full email bodies and security history: never
+        # world-readable (umask 077 -> mode 600 files).
+        umask 077
         export PGPASSWORD="$$(cat /run/viegard/secrets/viegard-db-password)"
         while true; do
           pg_dump -h viegard-db -U viegard -d viegard -F c \
@@ -68,21 +77,32 @@ services:
         condition: service_healthy
     environment:
       DOTNET_ENVIRONMENT: Production
+      # EF SQL command logging is noisy and could echo observed data; keep it quiet.
+      Logging__LogLevel__Microsoft.EntityFrameworkCore: Warning
       Viegard__Secrets__Provider: file
       Viegard__Secrets__Directory: /run/viegard/secrets
       # Roles this instance runs (D-0011); all roles by default.
       Viegard__Host__InstanceId: pipeline-1
       # Connection string components; the password is read via the secret
       # file viegard-db-password, never placed here.
+      Viegard__Persistence__Provider: postgres
       Viegard__Database__Host: viegard-db
       Viegard__Database__Name: viegard
       Viegard__Database__Username: viegard
+      # PostgreSQL schema that holds every Viegard object (created on
+      # startup if missing).  Lowercase letters, digits, and underscores
+      # only; must start with a letter.  Both services must agree.
+      Viegard__Database__Schema: viegard
+      # Syslog listener (D-0023): uncomment to enable.  The allowlist takes
+      # single addresses and/or CIDR ranges and is fail-closed.
+      # Viegard__Sources__Syslog__Enabled: "true"
+      # Viegard__Sources__Syslog__AllowedSources__0: "192.0.2.10"
+      # Viegard__Sources__Syslog__AllowedSources__1: "192.168.0.0/16"
     volumes:
       - ./secrets:/run/viegard/secrets:ro
-    # Syslog listener (D-0023): enable and allowlist explicitly, then map
-    # the UDP port, e.g.:
-    #   Viegard__Sources__Syslog__Enabled: "true"
-    #   Viegard__Sources__Syslog__AllowedSources__0: "192.0.2.10"
+    # When enabling the syslog listener, also publish the UDP port.  NOTE:
+    # ports: is a service-level key (sibling of environment:/volumes:),
+    # and remember the DOCKER-USER firewall rule (docs/deployment.md).
     # ports:
     #   - "5514:5514/udp"
 
@@ -97,14 +117,50 @@ services:
         condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      Logging__LogLevel__Microsoft.EntityFrameworkCore: Warning
       ASPNETCORE_URLS: http://+:8080
       Viegard__Secrets__Provider: file
       Viegard__Secrets__Directory: /run/viegard/secrets
+      Viegard__Persistence__Provider: postgres
       Viegard__Database__Host: viegard-db
       Viegard__Database__Name: viegard
       Viegard__Database__Username: viegard
+      Viegard__Database__Schema: viegard
+      # Admin authentication bootstrap.  On first startup with no users, the
+      # admin service reads this secret, creates the configured user, then
+      # forces password change and TOTP enrollment.
+      Viegard__Admin__Bootstrap__Username: admin
+      Viegard__Admin__Bootstrap__PasswordSecretName: viegard-admin-bootstrap-password
+      # Exposure modes:
+      #   loopback: default.  Do not publish this port beyond 127.0.0.1.
+      #   direct: Kestrel terminates HTTPS with mounted PEM files.
+      #   proxy: a TLS-terminating proxy is in front; configure trusted networks.
+      Viegard__Admin__Exposure: loopback
+      # Viegard__Admin__Tls__CertificatePath: /run/viegard/certs/admin.crt
+      # Viegard__Admin__Tls__KeyPath: /run/viegard/certs/admin.key
+      # Viegard__Admin__Tls__Port: "8443"
+      # Viegard__Admin__Proxy__TrustedNetworks__0: "192.0.2.0/24"
+      # AllowedSources is fail-closed.  Empty means loopback only.
+      #
+      # WARNING: setting 0.0.0.0/0 exposes the admin login to the internet.
+      # Prefer a self-hosted VPN such as WireGuard and allow only the VPN
+      # client subnet or dedicated management addresses.
+      # Viegard__Admin__AllowedSources__0: "192.0.2.0/24"
+      # Viegard__Admin__Auth__AbsoluteLifetime: "14.00:00:00"
+      # Viegard__Admin__Auth__IdleTimeout: "48:00:00"
+      # Viegard__Admin__Auth__IpBindingMode: strict
+      # Viegard__Admin__Auth__StepUpValidity: "00:05:00"
+      # WebAuthn security-key settings.  Required for direct/proxy exposure
+      # before enrolling keys; changing the RP ID invalidates enrolled keys.
+      # Viegard__Admin__WebAuthn__RelyingPartyId: viegard.example.com
+      # Viegard__Admin__WebAuthn__Origins__0: https://viegard.example.com
     volumes:
       - ./secrets:/run/viegard/secrets:ro
+      # Direct mode PEM certificate example:
+      # - ./certs:/run/viegard/certs:ro
+      # Persist Data Protection keys across container rebuilds (antiforgery
+      # and auth cookies).  Host dir: chown 1654, chmod 700.
+      - ./data/dataprotection-keys:/home/app/.aspnet/DataProtection-Keys
     ports:
       # Bind to localhost only; front with a reverse proxy + TLS for real use.
       - "127.0.0.1:8080:8080"

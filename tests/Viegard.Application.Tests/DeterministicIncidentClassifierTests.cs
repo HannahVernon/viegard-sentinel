@@ -224,6 +224,7 @@ public sealed class DeterministicIncidentClassifierTests
             Options.Create(options),
             new ProtectedAddressList(options.ProtectedCidrs),
             incidentStore,
+            eventStore,
             new InMemoryGuardrailStateStore());
         var classificationLease = await classificationQueue.LeaseAsync();
         var queuedClassification = await classificationStore.GetAsync(classificationLease.Message.ClassificationId);

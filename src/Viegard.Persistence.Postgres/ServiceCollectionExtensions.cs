@@ -4,7 +4,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Viegard.Application.Audit;
+using Viegard.Application.Configuration;
 using Viegard.Application.Queues;
+using Viegard.Application.Retention;
 using Viegard.Application.Secrets;
 using Viegard.Application.Stores;
 using Viegard.Application.Telemetry;
@@ -46,13 +48,24 @@ public static class ServiceCollectionExtensions
                 Database = options.Name,
                 Username = options.Username,
                 Password = password.Reveal(),
+                // All Viegard objects live in the configured schema; the
+                // model and raw SQL are schema-agnostic and follow the
+                // search path.
+                SearchPath = options.Schema,
             };
 
             return new NpgsqlDataSourceBuilder(builder.ConnectionString).Build();
         });
 
         services.AddDbContextFactory<ViegardDbContext>((sp, optionsBuilder) =>
-            optionsBuilder.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>()));
+            ViegardDbContextConfiguration.Configure(
+                optionsBuilder,
+                sp.GetRequiredService<NpgsqlDataSource>(),
+                sp.GetRequiredService<IOptions<DatabaseOptions>>().Value.Schema));
+
+        // Reference-table resolver (D-0031): process-lifetime caches over
+        // the insert-only sources/classifiers/policies/action_providers.
+        services.AddSingleton<ReferenceResolver>();
 
         services.AddSingleton<IRawObservationStore, PostgresRawObservationStore>();
         services.AddSingleton<IEventStore, PostgresEventStore>();
@@ -61,9 +74,15 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDecisionStore, PostgresDecisionStore>();
         services.AddSingleton<IActionStore, PostgresActionStore>();
         services.AddSingleton<ICorrectionStore, PostgresCorrectionStore>();
+        services.AddSingleton<IAdminUserStore, PostgresAdminUserStore>();
+        services.AddSingleton<IAdminSessionStore, PostgresAdminSessionStore>();
         services.AddSingleton<IAuditLedger, PostgresAuditLedger>();
         services.AddSingleton<IQueueTelemetryStore, PostgresQueueTelemetryStore>();
         services.AddSingleton<ISourceOffsetStore, PostgresSourceOffsetStore>();
+        services.AddSingleton<ICustomSignatureStore, PostgresCustomSignatureStore>();
+        services.AddSingleton<IRetentionStore, PostgresRetentionStore>();
+        services.AddSingleton<IRetentionSettingsStore, PostgresRetentionSettingsStore>();
+        services.AddSingleton<ISatelliteRoleStore, PostgresSatelliteRoleStore>();
 
         // Durable events queue and command queue (broker-semantics port).
         services.AddSingleton<IWorkQueue<Guid>>(sp =>
@@ -83,13 +102,29 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>Applies pending migrations when AutoMigrate is enabled.  Call once at host startup.</summary>
+    /// <summary>Creates the configured schema if needed and applies pending migrations when AutoMigrate is enabled.  Call once at host startup.</summary>
     public static async Task MigrateViegardDatabaseAsync(this IServiceProvider services, CancellationToken cancellationToken = default)
     {
         var options = services.GetRequiredService<IOptions<DatabaseOptions>>().Value;
         if (!options.AutoMigrate)
         {
             return;
+        }
+
+        // The schema name is validated at startup against ^[a-z][a-z0-9_]*$
+        // (DatabaseOptionsValidator); re-check here as defense in depth
+        // before it participates in DDL.
+        if (!DatabaseOptionsValidator.IsSafeSchemaName(options.Schema))
+        {
+            throw new InvalidOperationException($"Refusing to create schema from unsafe name '{options.Schema}'.");
+        }
+
+        var dataSource = services.GetRequiredService<NpgsqlDataSource>();
+        await using (var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false))
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"CREATE SCHEMA IF NOT EXISTS {options.Schema}";
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
         var factory = services.GetRequiredService<IDbContextFactory<ViegardDbContext>>();

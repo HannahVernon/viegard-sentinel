@@ -3,6 +3,12 @@
   <ItemGroup>
     <ProjectReference Include="..\Viegard.Application\Viegard.Application.csproj" />
     <ProjectReference Include="..\Viegard.Persistence\Viegard.Persistence.csproj" />
+    <ProjectReference Include="..\Viegard.Persistence.Postgres\Viegard.Persistence.Postgres.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Fido2" Version="4.0.1" />
+    <PackageReference Include="Fido2.Models" Version="4.0.1" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -12,5 +18,9 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <UserSecretsId>6b873927-6406-4221-b6d2-a32f97258b24</UserSecretsId>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Viegard.AdminApi.Tests" />
+  </ItemGroup>
 
 </Project>

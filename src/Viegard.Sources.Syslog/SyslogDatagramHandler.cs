@@ -2,7 +2,9 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Viegard.Application.Net;
 using Viegard.Application.Sources;
+using Viegard.Domain;
 using Viegard.Domain.Events;
 
 namespace Viegard.Sources.Syslog;
@@ -35,7 +37,7 @@ public sealed class SyslogDatagramHandler
 
     private readonly SyslogSourceOptions _options;
     private readonly TimeProvider _time;
-    private readonly HashSet<IPAddress> _allowed;
+    private readonly CidrSet _allowed;
     private readonly ConcurrentDictionary<IPAddress, TokenBucket> _buckets = new();
     private readonly string _sourceId;
 
@@ -51,7 +53,7 @@ public sealed class SyslogDatagramHandler
         _options = options;
         _sourceId = sourceId;
         _time = timeProvider ?? TimeProvider.System;
-        _allowed = options.AllowedSources.Select(IPAddress.Parse).ToHashSet();
+        _allowed = new CidrSet(options.AllowedSources);
     }
 
     public long DroppedNotAllowed => Interlocked.Read(ref _droppedNotAllowed);
@@ -102,8 +104,9 @@ public sealed class SyslogDatagramHandler
             {
                 Observation = new RawObservation
                 {
-                    Id = Guid.NewGuid(),
+                    Id = ViegardId.New(),
                     SourceId = _sourceId,
+                    SourceType = SyslogEventNormalizer.SyslogSourceType,
                     ObservedAt = now,
                     PayloadReference = $"syslog/{peer}/{now.UtcTicks}/{sequence}",
                 },

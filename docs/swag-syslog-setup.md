@@ -15,8 +15,10 @@ container deployment):
 environment:
   Viegard__Sources__Syslog__Enabled: "true"
   Viegard__Sources__Syslog__Port: "5514"
-  # Fail-closed allowlist: the SWAG host's address as seen by Viegard.
+  # Fail-closed allowlist: single addresses and/or CIDR ranges.
   Viegard__Sources__Syslog__AllowedSources__0: "192.0.2.10"
+  # e.g. also allow a whole LAN range:
+  # Viegard__Sources__Syslog__AllowedSources__1: "192.168.0.0/16"
 ports:
   - "5514:5514/udp"
 ```

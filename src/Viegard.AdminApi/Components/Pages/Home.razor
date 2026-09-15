@@ -1,7 +1,13 @@
 ﻿@page "/"
+@attribute [Authorize]
 
-<PageTitle>Home</PageTitle>
+<PageTitle>Viegard admin</PageTitle>
 
-<h1>Hello, world!</h1>
-
-Welcome to your new app.
+<main class="admin-panel">
+    <div class="brand-lockup">
+        <img src="img/raven.png" alt="Viegard raven mark" />
+        <h1>Viegard</h1>
+    </div>
+    <p class="tagline">The raven is watching.  Queue status, incidents, decisions, events, audit records, signatures, and account settings are available from the navigation links.</p>
+    <p class="tagline"><a href="/queues">Open the dashboard</a></p>
+</main>

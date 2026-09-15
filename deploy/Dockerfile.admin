@@ -8,6 +8,13 @@ RUN dotnet publish src/Viegard.AdminApi/Viegard.AdminApi.csproj \
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
+
+# Npgsql probes GSSAPI during connection negotiation; .NET images ship
+# without Kerberos libraries (documented .NET 8+ breaking change).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /app .
 
 # Run as the non-root user provided by the base image.

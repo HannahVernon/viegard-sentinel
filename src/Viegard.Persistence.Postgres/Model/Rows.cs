@@ -3,13 +3,63 @@ namespace Viegard.Persistence.Postgres.Model;
 /// <summary>
 /// EF Core row types.  These are persistence-shaped mirrors of the domain
 /// records (which stay immutable and EF-free); Mapping.cs converts between
-/// the two.  JSON columns are jsonb.
+/// the two.  JSON columns are jsonb.  Low-cardinality descriptors
+/// (source, classifier, policy, action provider) are normalized into
+/// insert-only reference tables (D-0031); fact rows carry int foreign keys
+/// and ReferenceResolver translates to and from the domain's strings.
 /// </summary>
+public sealed class SourceRow
+{
+    public int Id { get; set; }
+
+    /// <summary>Natural key: the configured data-source instance identifier.</summary>
+    public string SourceKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Kind of source ("imap", "syslog", "mdaemon").  Null only when the
+    /// key was first seen from a context that does not know the type
+    /// (audit); filled once, never rewritten.
+    /// </summary>
+    public string? SourceType { get; set; }
+
+    public DateTimeOffset FirstSeenAt { get; set; }
+}
+
+public sealed class ClassifierRow
+{
+    public int Id { get; set; }
+
+    public string ClassifierKey { get; set; } = string.Empty;
+
+    public DateTimeOffset FirstSeenAt { get; set; }
+}
+
+public sealed class PolicyRow
+{
+    public int Id { get; set; }
+
+    public string PolicyKey { get; set; } = string.Empty;
+
+    public string PolicyVersion { get; set; } = string.Empty;
+
+    public DateTimeOffset FirstSeenAt { get; set; }
+}
+
+public sealed class ActionProviderRow
+{
+    public int Id { get; set; }
+
+    public string ProviderKey { get; set; } = string.Empty;
+
+    public DateTimeOffset FirstSeenAt { get; set; }
+}
+
 public sealed class RawObservationRow
 {
     public Guid Id { get; set; }
 
-    public string SourceId { get; set; } = string.Empty;
+    /// <summary>Reference to sources.id.</summary>
+    public int SourceId { get; set; }
 
     public DateTimeOffset ObservedAt { get; set; }
 
@@ -24,9 +74,8 @@ public sealed class NormalizedEventRow
 {
     public Guid Id { get; set; }
 
-    public string SourceId { get; set; } = string.Empty;
-
-    public string SourceType { get; set; } = string.Empty;
+    /// <summary>Reference to sources.id; the source's type lives there too.</summary>
+    public int SourceId { get; set; }
 
     public DateTimeOffset OccurredAt { get; set; }
 
@@ -62,7 +111,8 @@ public sealed class ClassificationRow
 
     public Guid SubjectId { get; set; }
 
-    public string ClassifierId { get; set; } = string.Empty;
+    /// <summary>Reference to classifiers.id.</summary>
+    public int ClassifierId { get; set; }
 
     public string? ModelJson { get; set; }
 
@@ -87,9 +137,8 @@ public sealed class DecisionRow
 
     public Guid ClassificationId { get; set; }
 
-    public string PolicyId { get; set; } = string.Empty;
-
-    public string PolicyVersion { get; set; } = string.Empty;
+    /// <summary>Reference to policies.id; the policy version lives there too.</summary>
+    public int PolicyId { get; set; }
 
     public int Outcome { get; set; }
 
@@ -106,7 +155,8 @@ public sealed class ActionRecordRow
 
     public Guid DecisionId { get; set; }
 
-    public string ProviderId { get; set; } = string.Empty;
+    /// <summary>Reference to action_providers.id.</summary>
+    public int ProviderId { get; set; }
 
     public string OperationId { get; set; } = string.Empty;
 
@@ -133,7 +183,8 @@ public sealed class AuditRecordRow
 
     public string Summary { get; set; } = string.Empty;
 
-    public string? SourceId { get; set; }
+    /// <summary>Reference to sources.id, when the record relates to a source.</summary>
+    public int? SourceId { get; set; }
 
     public Guid? EventId { get; set; }
 
@@ -195,6 +246,70 @@ public sealed class SourceOffsetRow
     public string Value { get; set; } = string.Empty;
 }
 
+public sealed class CustomSignatureRow
+{
+    public Guid Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public bool Enabled { get; set; }
+
+    public int Target { get; set; }
+
+    public int MatchType { get; set; }
+
+    public string Pattern { get; set; } = string.Empty;
+
+    public string Category { get; set; } = string.Empty;
+
+    public int Severity { get; set; }
+
+    public double EvidenceWeight { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+
+    public int Version { get; set; }
+}
+
+public sealed class RetentionSettingsRow
+{
+    public int Id { get; set; }
+
+    public int? RawObservationsDays { get; set; }
+
+    public int? EventsDays { get; set; }
+
+    public int? IncidentsDays { get; set; }
+
+    public int? ClassificationsDays { get; set; }
+
+    public int? DecisionsDays { get; set; }
+
+    public int? ActionsDays { get; set; }
+
+    public int? AuditRecordsDays { get; set; }
+
+    public int? DeadLetteredQueueMessagesDays { get; set; }
+
+    public int? ExpiredAdminSessionsDays { get; set; }
+
+    public int Version { get; set; }
+
+    public DateTimeOffset? SeededAt { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+
+    public DateTimeOffset? LastCycleAt { get; set; }
+
+    public string? LastCycleCountsJson { get; set; }
+}
+
 public sealed class QueueMessageRow
 {
     public long Id { get; set; }
@@ -221,4 +336,110 @@ public sealed class QueueCounterRow
     public long Completed { get; set; }
 
     public long Abandoned { get; set; }
+}
+
+public sealed class AdminUserRow
+{
+    public Guid Id { get; set; }
+
+    public string Username { get; set; } = string.Empty;
+
+    public string PasswordHash { get; set; } = string.Empty;
+
+    public DateTimeOffset PasswordChangedAt { get; set; }
+
+    public int FailedLoginCount { get; set; }
+
+    public DateTimeOffset? LockedUntil { get; set; }
+
+    public bool MustChangePassword { get; set; }
+
+    public bool TotpEnrolled { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class AdminTotpSecretRow
+{
+    public Guid UserId { get; set; }
+
+    public string SecretBase32 { get; set; } = string.Empty;
+
+    public long? LastAcceptedStep { get; set; }
+
+    public DateTimeOffset EnrolledAt { get; set; }
+}
+
+public sealed class AdminRecoveryCodeRow
+{
+    public Guid Id { get; set; }
+
+    public Guid UserId { get; set; }
+
+    public string CodeHash { get; set; } = string.Empty;
+
+    public DateTimeOffset? UsedAt { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class AdminWebAuthnCredentialRow
+{
+    public Guid Id { get; set; }
+
+    public Guid UserId { get; set; }
+
+    public byte[] CredentialId { get; set; } = [];
+
+    public byte[] PublicKey { get; set; } = [];
+
+    public long SignCount { get; set; }
+
+    public Guid Aaguid { get; set; }
+
+    public string? Transports { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset? LastUsedAt { get; set; }
+}
+
+public sealed class AdminUserPreferencesRow
+{
+    public Guid UserId { get; set; }
+
+    public string TimeZoneId { get; set; } = "UTC";
+
+    public int PageSize { get; set; } = 50;
+
+    public int StatusRefreshSeconds { get; set; } = 30;
+
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public sealed class AdminSessionRow
+{
+    public Guid Id { get; set; }
+
+    public Guid UserId { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset LastSeenAt { get; set; }
+
+    public DateTimeOffset AbsoluteExpiresAt { get; set; }
+
+    public DateTimeOffset IdleExpiresAt { get; set; }
+
+    public string Ip { get; set; } = string.Empty;
+
+    public string IpBindingMode { get; set; } = string.Empty;
+
+    public string UserAgent { get; set; } = string.Empty;
+
+    public DateTimeOffset? RevokedAt { get; set; }
+
+    public DateTimeOffset? StepUpAt { get; set; }
 }

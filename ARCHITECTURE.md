@@ -1,17 +1,17 @@
 # Viegard Architecture
 
-> **Status: APPROVED by Hannah on 2026-08-18 (D-0017), including assumptions 1-5.**
+> **Status: APPROVED 2026-08-18 (D-0017), including assumptions 1-5.**
 > Approved decisions live in [DECISIONS.md](DECISIONS.md).  Open questions live in [TODO.md](TODO.md).
 
 Viegard is a modular, self-hosted autonomous monitoring and security platform with local AI inference.  This document proposes the component architecture, solution layout, core interfaces, data model, deployment topology, and security boundaries.
 
 ## Assumptions
 
-Assumptions made in this proposal that Hannah should confirm or correct:
+Assumptions made in this proposal, confirmed at approval (D-0017):
 
 1. **Two-container deployment is acceptable** on the Debian 13 Docker host (pipeline host + admin API host), plus a llama.cpp container/process and, later, a database.
 2. **The pipeline host exposes no inbound network listener** except a local health endpoint and, per D-0023, the guarded syslog UDP ingestion listener (source-IP allowlist, rate and size caps; splittable into a credential-free listener-only instance once cross-process queues exist).  The admin API is the only administrative HTTP surface.  Communication between the two services flows through shared persistence (reads) and a persisted command queue (writes), not a direct API on the pipeline host.
-3. **In-process queues (bounded channels) are sufficient** for v1 throughput (home-scale mail volume and nginx logs).  The queue port is designed with **broker semantics from day one**: explicit acknowledge/abandon, small versioned serializable messages that carry entity IDs rather than payload object graphs, idempotent consumers, and a poison-message policy.  The in-process Channel implementation is the degenerate case, so an external broker (SQL Server Service Broker, Kafka, or another; see TODO) can replace it later without a rewrite.
+3. **In-process queues (bounded channels) are sufficient** for v1 throughput (single-operator mail volume and nginx logs).  The queue port is designed with **broker semantics from day one**: explicit acknowledge/abandon, small versioned serializable messages that carry entity IDs rather than payload object graphs, idempotent consumers, and a poison-message policy.  The in-process Channel implementation is the degenerate case, so an external broker (SQL Server Service Broker, Kafka, or another; see TODO) can replace it later without a rewrite.
 4. **MailKit** is the intended IMAP library, subject to a supply-chain review before installation.
 5. Default v1 deployment runs all pipeline modules **in one process**, but process topology is **extensible per service**: the pipeline host is a role-configurable binary that can be deployed N times, each instance running a configured subset of modules (see "Host roles and process topology").  Data sources are also multi-instance by configuration (e.g., ten IMAP accounts across several mail hosts, each with its own worker, credential, offsets, and health).  Horizontal scaling of a *single* role beyond one process (other than sources) is out of scope for v1.
 
@@ -89,8 +89,8 @@ Key invariants:
 
 Deployable | Container | Responsibility
 -----------|-----------|---------------
-`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
-`viegard-admin` | ASP.NET Core (Blazor Web App: static SSR + Interactive Server islands, D-0016) | Mobile-compatible admin GUI + API: read access to incidents, classifications, decisions, audit; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no integration credentials.
+`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, maintenance retention, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
+`viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), server-side filtered and sortable read access to incidents, classifications, decisions, and audit; step-up-gated runtime configuration editors for custom signatures, retention periods, and satellite database roles with one-time password display; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no external integration credentials.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
 Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, feedback, telemetry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
 
@@ -99,17 +99,17 @@ Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, inc
 The pipeline host executable is **role-configurable**: its configuration declares which modules the instance runs.  This makes the number of processes extensible per service without code changes.  Examples:
 
 - v1 default: one instance running every module.
-- Later: one instance per mail provider (each holding only that provider's credentials), one instance for nginx ingestion, one core instance for correlation + policy + actions.
+- Later: one instance per mail provider (each holding only that provider's credentials), one instance for nginx ingestion, one core instance for correlation + policy + actions, and one maintenance instance for retention.
 
 Rules:
 
-- **Singleton roles.**  The correlator (single writer over incident state) and the policy/action engine (guardrail counters, action rate caps, circuit breaker state must be globally consistent) run in exactly one instance.  Configuration validation rejects topologies that violate this.
+- **Singleton roles.**  The correlator (single writer over incident state), policy/action engine (guardrail counters, action rate caps, circuit breaker state must be globally consistent), and maintenance retention worker run in exactly one instance.  Configuration validation rejects topologies that violate this.
 - **Multi-instance roles.**  Data-source and classification modules fan out freely.  Each configured data-source instance (e.g., each IMAP account) is an isolated worker with its own connection, credential, ingestion offsets, and health contributor, regardless of which process hosts it.
 - **Transport follows topology.**  Modules co-located in one process communicate over in-process bounded channels; modules split across processes use a durable queue implementation of the same `IWorkQueue` port (database-backed table queue first; an external broker can replace it later, see TODO).  Module code is identical in both topologies.
 
 ### Inter-service communication (proposal)
 
-The admin API never calls into the pipeline process.  It reads shared persistence directly and writes **commands** (e.g., `ApproveAction`, `UnblockIp`, `RetryClassification`) to a persisted command table/queue.  The pipeline host polls/subscribes, validates each command against policy, executes, and audits.  Benefits: the pipeline exposes no attack surface, commands are durable and auditable, and manual-approval mode falls out naturally.  Trade-off: command execution is asynchronous (typically sub-second at home scale).
+The admin API never calls into the pipeline process.  It reads shared persistence directly and writes **commands** (e.g., `ApproveAction`, `UnblockIp`, `RetryClassification`) to a persisted command table/queue.  The pipeline host polls/subscribes, validates each command against policy, executes, and audits.  Benefits: the pipeline exposes no attack surface, commands are durable and auditable, and manual-approval mode falls out naturally.  Trade-off: command execution is asynchronous (typically sub-second at single-operator scale).
 
 ## Solution layout (proposed)
 
@@ -117,10 +117,12 @@ The admin API never calls into the pipeline process.  It reads shared persistenc
 Viegard.slnx                   Solution (XML solution format; .NET 10 SDK default)
 Directory.Build.props          NuGetAudit, nullable, warnings-as-errors, LangVersion
 src/
-  Viegard.Domain/              Entities, value objects, enums; zero external dependencies
+  Viegard.Domain/              Entities, value objects, enums, admin preferences;
+                               zero external dependencies
   Viegard.Application/         Ports (interfaces), deterministic classification,
                                pipeline orchestration, policy engine, prompt assembly,
-                               schema validation, guardrails
+                               schema validation, guardrails, admin auth helpers,
+                               and admin list filter helpers
   Viegard.Persistence/         Store implementations (in-memory/file first; DB when chosen)
   Viegard.Sources.Imap/        IMAP data source adapter (MailKit)
   Viegard.Sources.Syslog/      Syslog UDP source adapter; nginx/SWAG access logs normalize
@@ -135,19 +137,25 @@ src/
   Viegard.Actions.Fail2Ban/    Fail2Ban integration (mode TBD)
   Viegard.Notifications.Email/ Operator status/alert emails via SMTP (MailKit)
   Viegard.PipelineHost/        Worker service executable, including ingestion,
-                               correlation, classification, and policy workers
-  Viegard.AdminApi/            Admin API executable
+                               correlation, classification, policy, and
+                               maintenance retention workers
+  Viegard.AdminApi/            Admin API executable, auth endpoints, WebAuthn adapter,
+                               static SSR pages, configuration editors, display preferences,
+                               keyset pagination, filter, and sort UI, first-party WebAuthn JS bridge
 tests/
+  Viegard.AdminApi.Tests/      Admin API adapter, WebAuthn option, display, and
+                               pagination tests
   Viegard.Domain.Tests/
   Viegard.Application.Tests/   Policy, guardrails, deterministic classification,
-                               schema validation, prompt injection
+                               schema validation, prompt injection, list filtering
   Viegard.Sources.Imap.Tests/
   Viegard.Sources.Syslog.Tests/       Syslog and nginx parser tests
   Viegard.Sources.MDaemonLogs.Tests/  Sanitized MDaemon parser fixtures
   Viegard.Integration.Tests/   Inference, ingestion, action providers (no real credentials)
   fixtures/                    nginx log corpora, representative emails, malformed AI output
 docs/
-deploy/                        Dockerfiles, sanitized compose examples
+deploy/                        Dockerfiles, sanitized compose examples, Linux deploy
+                               script, and Windows MDaemon satellite installer
 ```
 
 Adapters are separate projects so integrations stay optional, independently testable, and additive: new sources/actions never modify the core.  Project count is higher, but each project is small.
@@ -156,7 +164,7 @@ Implemented source integrations:
 
 - IMAP mail source, using per-account configuration and read-only folder access.
 - Syslog UDP source, with source allowlist, size cap, rate cap, RFC 3164/5424 parsing, and nginx access-log normalization.
-- MDaemon flat-file log source, intended for the Windows satellite pipeline instance on the MDaemon host.  It tails configured per-day log patterns, stores byte offsets per file, baselines existing files by default, skips session-log banners, drops Dynamic Screening noise by default, and normalizes SMTP/IMAP/POP, Screening, and Dynamic Screening lines into shared IP-correlatable events.
+- MDaemon flat-file log source, intended for the Windows satellite pipeline instance on the MDaemon host.  It tails configured per-day log patterns, stores byte offsets per file, baselines existing files by default, skips session-log banners, drops Dynamic Screening noise by default, and normalizes SMTP/IMAP/POP, Screening, and Dynamic Screening lines into shared IP-correlatable events.  The Windows satellite installer publishes the pipeline host as the client-specific `ViegardSatelliteMDaemon` service with only the `sources` role enabled.
 
 ## Core interfaces (ports; final shapes at implementation)
 
@@ -172,10 +180,14 @@ Interface | Metaphor | Contract summary
 `IActionProvider` | Talons | Executes a closed catalog of typed operations; validates inputs; returns `ActionResult` with rollback info
 `INotificationProvider` | Talons | Operator notification delivery; initial implementation: operator email (SMTP).  Mobile push mechanism deferred pending privacy review (D-0015); the port stays pluggable for it
 `IAuditLedger` | Ledger | Append-only audit records covering every stage
+`IRetentionStore` | Roost | Batched deletes for configured data-retention targets; unset periods keep rows forever
+`IRetentionSettingsStore` | Roost | Database-owned retention periods plus last-cycle status for admin editing and worker execution
+`ISatelliteRoleStore` | Roost | Lists, creates, rotates, and revokes per-satellite PostgreSQL roles behind the admin UI.  Role names use the enforced `viegard_sat_` prefix; generated passwords are shown once and are never audited.
 `ISecretProvider` | Roost | Named secret retrieval; file-mounted (prod) and user-secrets (dev) implementations
 `IHealthContributor` | - | Per-component health surfaced by both hosts
 `ICommandQueue` | - | Durable admin-to-pipeline commands
 `IWorkQueue` | Flight | Broker-semantics work queue port (ack/abandon, serializable messages, idempotent consumers); in-process bounded-channel implementation first
+`IWebAuthnService` | - | Library-free WebAuthn ceremony port.  Fido2/Fido2.Models types are isolated to `Viegard.AdminApi` as a D-0032 supply-chain mitigation
 
 ## Event and decision model (proposed)
 
@@ -190,7 +202,7 @@ Type | Key fields
 `Decision` | id, classification id, policy id + version, outcome, rationale, guardrail evaluations (protected lists, rate caps, circuit breaker, dry-run, approval mode)
 `ActionRecord` | id, decision id, provider, operation, parameters, result, error, rollback info, timestamps
 `AuditRecord` | Links the entire chain: event -> incident -> classification -> decision -> action; answers "why was this IP blocked?" / "why was this email moved?" without raw-log reconstruction
-`Correction` | Human feedback (AI said X, Hannah said Y), stored separately from the original classification
+`Correction` | Human feedback (AI said X, the operator said Y), stored separately from the original classification
 
 Typed payloads keep source-specific detail out of the shared envelope, so mail, nginx, Fail2Ban, MikroTik, and Windows events correlate without inventing incompatible representations.
 
@@ -202,7 +214,7 @@ Untrusted data | All observed content (bodies, subjects, URLs, User-Agents, file
 Inference | Prompt assembly separates SYSTEM / APPLICATION / UNTRUSTED-OBSERVED-DATA.  Model output is parsed against a strict schema; anything malformed, incomplete, oversized, or contradictory is discarded and recorded as an AI failure.  Local-only by default; no silent fallback to remote.
 Policy | The policy engine is the only path to actions.  Guardrails (protected addresses/networks/hosts, action rate caps, max ban duration, cooldowns, circuit breaker, emergency stop, dry-run, approval mode) are enforced here and cannot be bypassed by any classifier.
 Actions | Providers expose a closed catalog of typed operations (e.g., `AddAddressListEntry(ip, list, ttl)`), never command strings.  IP syntax, private/reserved ranges, and protected lists are validated at this layer too (defense in depth).  Destructive operations (mail delete, firewall change) ship disabled and require explicit configuration.
-Admin | Separate process; authn/authz model TBD (open question).  No integration credentials in this process.  Commands are durable, validated, and audited; the admin API cannot invoke actions directly.
+Admin | Separate process; local accounts with cookie authentication backed by server-side revocable sessions, mandatory TOTP, WebAuthn security keys, recovery codes, step-up verification, rate limiting, and fail-closed AllowedSources (D-0032/D-0033).  Satellite database role management is step-up-gated, audited without passwords, and displays generated passwords once via a short-lived protected cookie.  Commands are durable, validated, and audited; the admin API cannot invoke actions directly.
 Secrets | `ISecretProvider` only.  Never in source, config in git, logs, prompts, exceptions, telemetry, audit records, or docs.
 
 ## Failure handling
@@ -214,11 +226,11 @@ Secrets | `ISecretProvider` only.  Never in source, config in git, logs, prompts
 
 ## Observability
 
-Both hosts expose health endpoints (liveness + per-component readiness: IMAP connection, log ingestion, inference backend, queue depth, action providers).  Metrics (classification throughput, inference latency, action counts, failures, blocked-IP count, AI errors, policy decisions) via a mechanism to be chosen with Hannah if it materially affects deployment (open question).  Structured logging via `Microsoft.Extensions.Logging` abstractions; sink/format choices deferred.
+Both hosts expose health endpoints (liveness + per-component readiness: IMAP connection, log ingestion, inference backend, queue depth, action providers).  Metrics (classification throughput, inference latency, action counts, failures, blocked-IP count, AI errors, policy decisions) via a mechanism to be chosen when it materially affects deployment (open question).  Structured logging via `Microsoft.Extensions.Logging` abstractions; sink/format choices deferred.
 
 ### Queue health monitor (traffic-light)
 
-The admin API/GUI displays a per-queue traffic-light status so stalled or lagging queues are immediately visible.  Requirement from Hannah (D-0012).
+The admin API/GUI displays a `/queues` dashboard with shared Queues rows and per-instance heartbeat rows, so stalled or lagging global queues and stale reporters are immediately visible (D-0012).
 
 - **Signals per queue:** depth (absolute and vs. capacity), age of the oldest unacknowledged message (the primary timeliness signal), consumer heartbeat/liveness, throughput trend, recent poison-message count.
 - **Status derivation (thresholds configurable):** green = consumers alive and oldest-message age below the amber threshold; amber = lag or depth above threshold, or recent poison messages; red = no live consumer heartbeat, oldest-message age above the red threshold, or circuit breaker open.

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Options;
 using Viegard.Application.Policy;
 using Viegard.Domain.Classifications;
 using Viegard.Domain.Decisions;
+using Viegard.Domain.Events;
 using Viegard.Domain.Incidents;
 using Viegard.Persistence.InMemory;
 
@@ -177,10 +178,113 @@ public sealed class PolicyEngineTests
         Assert.Contains("7.00:00:00", decision.Rationale, StringComparison.Ordinal);
     }
 
-    private static async Task<PolicyFixture> CreateFixtureAsync(string ip = "198.51.100.10")
+    [Fact]
+    public async Task Allowlisted_structured_sender_denies_automated_action()
     {
         var options = new PolicyOptions();
+        options.AllowedSenders.Add("trusted@example.com");
+        var fixture = await CreateFixtureAsync(options: options);
+        var mailEventId = await AddMailEventAsync(fixture.EventStore, "trusted@example.com");
+
+        var decision = await fixture.Engine.EvaluateAsync(
+            MailClassification(mailEventId, confidence: 0.95, severity: 8),
+            ActiveContext);
+
+        Assert.Equal(DecisionOutcome.Deny, decision.Outcome);
+        var allowlist = Assert.Single(decision.Guardrails, g => g.GuardrailName == PolicyGuardrailNames.Allowlist);
+        Assert.False(allowlist.Passed);
+    }
+
+    [Fact]
+    public async Task Sender_markers_in_classification_text_cannot_trigger_the_allowlist()
+    {
+        // Regression for the 2026-08-25 security-audit finding: the sender
+        // must come from the structured mail event, never from free-form
+        // classification text that derives from attacker-controlled mail.
+        var options = new PolicyOptions();
+        options.AllowedSenders.Add("trusted@example.com");
+        var fixture = await CreateFixtureAsync(options: options);
+        var mailEventId = await AddMailEventAsync(fixture.EventStore, "attacker@evil.example");
+
+        var classification = MailClassification(mailEventId, confidence: 0.95, severity: 8) with
+        {
+            Reasons = ["message body contained sender=trusted@example.com from=trusted@example.com"],
+        };
+
+        var decision = await fixture.Engine.EvaluateAsync(classification, ActiveContext);
+
+        var allowlist = Assert.Single(decision.Guardrails, g => g.GuardrailName == PolicyGuardrailNames.Allowlist);
+        Assert.True(allowlist.Passed);
+        Assert.NotEqual(DecisionOutcome.Deny, decision.Outcome);
+    }
+
+    [Fact]
+    public async Task Missing_mail_event_means_allowlist_cannot_match()
+    {
+        var options = new PolicyOptions();
+        options.AllowedSenders.Add("trusted@example.com");
+        var fixture = await CreateFixtureAsync(options: options);
+
+        var decision = await fixture.Engine.EvaluateAsync(
+            MailClassification(Guid.NewGuid(), confidence: 0.95, severity: 8),
+            ActiveContext);
+
+        var allowlist = Assert.Single(decision.Guardrails, g => g.GuardrailName == PolicyGuardrailNames.Allowlist);
+        Assert.True(allowlist.Passed);
+        Assert.Contains("cannot be verified", allowlist.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Allowlisted_sender_domain_denies_automated_action()
+    {
+        var options = new PolicyOptions();
+        options.AllowedDomains.Add("example.com");
+        var fixture = await CreateFixtureAsync(options: options);
+        var mailEventId = await AddMailEventAsync(fixture.EventStore, "someone@mail.example.com");
+
+        var decision = await fixture.Engine.EvaluateAsync(
+            MailClassification(mailEventId, confidence: 0.95, severity: 8),
+            ActiveContext);
+
+        Assert.Equal(DecisionOutcome.Deny, decision.Outcome);
+    }
+
+    private static async Task<Guid> AddMailEventAsync(InMemoryEventStore eventStore, string fromAddress)
+    {
+        var mailEvent = new NormalizedEvent
+        {
+            Id = Guid.NewGuid(),
+            SourceId = "imap:test-account",
+            SourceType = "imap",
+            OccurredAt = DateTimeOffset.UtcNow,
+            Entities = [],
+            Payload = new MailMessageEvent
+            {
+                AccountId = "test-account",
+                Folder = "INBOX",
+                Uid = 1,
+                From = [new MailAddressInfo { Address = fromAddress }],
+                Subject = "test",
+            },
+            RawObservationId = Guid.NewGuid(),
+        };
+        await eventStore.AddAsync(mailEvent);
+        return mailEvent.Id;
+    }
+
+    private static Classification MailClassification(Guid subjectId, double confidence, int severity) =>
+        AiClassification(subjectId, confidence, severity) with
+        {
+            SubjectKind = ClassificationSubjectKind.MailMessage,
+            Category = "spam",
+            RecommendedAction = "move-to-spam",
+        };
+
+    private static async Task<PolicyFixture> CreateFixtureAsync(string ip = "198.51.100.10", PolicyOptions? options = null)
+    {
+        options ??= new PolicyOptions();
         var incidentStore = new InMemoryIncidentStore();
+        var eventStore = new InMemoryEventStore();
         var guardrailState = new InMemoryGuardrailStateStore();
         var incident = Incident(ip);
         await incidentStore.UpsertAsync(incident);
@@ -190,8 +294,10 @@ public sealed class PolicyEngineTests
                 Options.Create(options),
                 new ProtectedAddressList(options.ProtectedCidrs),
                 incidentStore,
+                eventStore,
                 guardrailState),
             guardrailState,
+            eventStore,
             incident.Id);
     }
 
@@ -242,5 +348,6 @@ public sealed class PolicyEngineTests
     private sealed record PolicyFixture(
         DefaultPolicyEngine Engine,
         InMemoryGuardrailStateStore GuardrailState,
+        InMemoryEventStore EventStore,
         Guid IncidentId);
 }

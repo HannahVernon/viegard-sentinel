@@ -1,0 +1,278 @@
+# Deploying Viegard
+
+This runbook covers deploying the Viegard stack with Docker Compose and verifying it, including the post-deployment backup restore drill.  It reflects a verified deployment (2026-08-25) on a Debian 13 Docker host.  All addresses and names below are placeholders; substitute your own.
+
+## Prerequisites
+
+- Docker Engine with the Compose plugin
+- A clone of this repository on the host
+
+## Scripted deployment
+
+`deploy/viegard-deploy.sh` automates this runbook end to end on a Debian host.  The manual sections below remain the reference for what the script does and for deployments that need to deviate.
+
+```bash
+# Fresh host, loopback-only admin (default):
+sudo ./viegard-deploy.sh install
+
+# Fresh host with direct TLS (issues the certificate via host certbot and
+# installs the D-0034 renewal hook):
+sudo ./viegard-deploy.sh install --domain admin.example.com --email you@example.com
+
+# Upgrade an existing deployment (pulls the tracked branch, rebuilds only
+# when new commits arrived, verifies liveness after):
+sudo ./viegard-deploy.sh upgrade
+
+# Track main instead of dev (main is the future release branch):
+sudo ./viegard-deploy.sh upgrade --branch main
+
+# Health, cert expiry, and latest-backup overview:
+./viegard-deploy.sh status
+
+# Write the automatable compose settings for you (direct TLS, admin
+# allowlist, retention with the reference periods, syslog listener):
+sudo ./viegard-deploy.sh configure --domain admin.example.com \
+    --allowed-sources 192.0.2.0/24 --enable-retention \
+    --enable-syslog --syslog-sources 192.0.2.10
+```
+
+The `configure` command writes `deploy/docker-compose.generated.yml` and points `COMPOSE_FILE` in `deploy/.env` at `docker-compose.generated.yml:docker-compose.yml`.  Compose applies the files left to right with later files winning per setting, so the generated file provides defaults and **your `docker-compose.yml` always has the final word**: re-declare any variable there to override the generated value.  Re-running `configure` regenerates the whole generated file from the options given, so pass the complete set you want each run.  Generated array entries (allowlists, the maintenance role) use high indices (`__9`, `__50`+) so they never collide with the `__0..N` entries your own file declares.  One caution: published port lists are appended across files, so if your `docker-compose.yml` already publishes an admin HTTPS port, keep TLS configuration there and do not pass `--domain` to `configure`.
+
+Safety properties: secrets are generated only when missing and never overwritten or printed; an existing `docker-compose.yml` is never touched; certificate issuance is skipped when the certificate already exists; re-running `install` is safe.  The script does not edit `docker-compose.yml` for you - after a fresh install it prints a checklist of the operator-specific settings (exposure mode, WebAuthn relying party, AllowedSources, retention periods, data sources).
+
+## 1. Prepare secrets and directories
+
+Each secret is one file in `deploy/secrets/`; the file name is the secret name (D-0006).  These directories are gitignored and must never be committed.
+
+```bash
+cd deploy
+mkdir -p secrets data/postgres backups/postgres data/dataprotection-keys
+chmod 700 backups/postgres      # dumps will contain full email bodies and security history
+chown 1654 data/dataprotection-keys && chmod 700 data/dataprotection-keys   # admin's ASP.NET Data Protection keys
+openssl rand -base64 24 | tr -d '\n' > secrets/viegard-db-password
+
+# The viegard-pipeline and viegard-admin containers run as the non-root
+# 'app' user (UID 1654) from the .NET base images.  Root-owned mode-600
+# files are unreadable to them; the directory also needs traversal.
+chown 1654 secrets/viegard-db-password
+chmod 400 secrets/viegard-db-password
+chmod 755 secrets
+```
+
+## 2. Configure and start
+
+```bash
+cp docker-compose.example.yml docker-compose.yml   # local copy stays out of git
+docker compose up -d --build
+```
+
+First start applies EF Core migrations automatically (`Viegard:Database:AutoMigrate`).
+
+### Database schema
+
+Every Viegard object lives in a dedicated PostgreSQL schema rather than `public`, controlled by `Viegard__Database__Schema` in the compose file (default `viegard`).  The pipeline creates the schema on startup if it is missing; both services must use the same value.  Names are validated fail-closed: lowercase letters, digits, and underscores only, starting with a letter, at most 63 characters.
+
+The schema is applied via the connection `search_path`, so the migrations and queue SQL are schema-agnostic.  Keeping application objects out of `public` means a `pg_dump --schema=viegard` captures exactly the application state, and other tooling added to the same database later cannot collide with Viegard tables.
+
+Satellite database roles created from the admin UI use the same configured schema.  Create or rotate those roles from `/configuration#satellites`; the generated password is displayed once and is not recoverable later.
+
+### Data retention
+
+Retention is fail-safe by default.  Deploying the retention worker deletes nothing until explicit per-table periods exist in the database-owned `retention_settings` row; any blank period means keep that table forever.  Corrections are not purgeable because training feedback is retained.
+
+Run retention from exactly one pipeline instance by adding the singleton `maintenance` host role.  On first maintenance startup only, the worker creates the `retention_settings` row from the configured `Viegard__Retention__*Days` values.  The deploy script's `configure --enable-retention` option writes those same seed values into the generated compose overlay.  After the row exists, the period values are owned by the admin UI at `/configuration#retention`; changing `Viegard__Retention__*Days` in the environment no longer changes effective retention.  `Viegard__Retention__BatchSize`, `StartupDelay`, and `CheckInterval` remain environment-tunable operational settings.
+
+The worker runs shortly after startup and then once per day.  It reads the database settings fresh at the start of every cycle, so UI changes apply at the next daily retention cycle.  A purge cycle that removes one or more rows writes an audit record with per-table counts and the configured periods; a no-op cycle writes no audit record.  Every cycle, including a no-op cycle, updates the settings row with the last cycle time and per-target row counts so the admin UI can show that retention ran and deleted nothing.
+
+Example policy values from D-0035:
+
+```bash
+Viegard__Host__Roles__4=maintenance
+Viegard__Retention__RawObservationsDays=30
+Viegard__Retention__EventsDays=90
+Viegard__Retention__IncidentsDays=180
+Viegard__Retention__ClassificationsDays=180
+Viegard__Retention__DecisionsDays=180
+Viegard__Retention__ActionsDays=180
+Viegard__Retention__AuditRecordsDays=365
+Viegard__Retention__DeadLetteredQueueMessagesDays=30
+Viegard__Retention__ExpiredAdminSessionsDays=30
+```
+
+**Upgrading an existing deployment** that already migrated into `public`: the simplest path while the data is still expendable is to reset.  If any rows are worth keeping (for example, captured bot-signature events), export them first:
+
+```bash
+# Optional: keep selected rows before the reset.
+docker compose exec viegard-db pg_dump -U viegard -d viegard \
+    --table=public.normalized_events --data-only > /root/keep-events.sql
+
+docker compose stop viegard-pipeline viegard-admin
+docker compose exec viegard-db psql -U viegard -d viegard \
+    -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+docker compose up -d          # migrations re-run into the configured schema
+```
+
+Rows exported this way can be replayed into the new schema with `psql` after editing the `SET search_path` / table references, or simply kept as an archive.
+
+## 3. Verify
+
+```bash
+docker compose ps                       # four services up; viegard-db healthy
+curl http://127.0.0.1:8080/healthz     # admin liveness
+docker compose logs -t --tail 30 viegard-pipeline
+```
+
+A clean pipeline boot logs: roles (`sources, correlation, classification, policy, actions`, plus `maintenance` when retention is enabled), `Ingestion worker: no data sources configured; idle` (sources ship disabled), correlation/classification/policy workers started, and the queue telemetry publisher.  The shipped posture is dry-run ON, all action providers OFF (D-0027): the stack can observe and decide, but cannot act.
+
+## 4. Prove the backup with a restore drill (do this first)
+
+The `viegard-db-backup` sidecar writes a custom-format `pg_dump` to `backups/postgres/` at every container start and then every 24 hours (14-day retention).  **A backup that has never been restored is a hope, not a backup**: the time to discover a broken dump, a bad format flag, or a permissions problem is now, with a throwaway database, not during an incident with your audit history on the line.  Run this drill immediately after first deployment, and again once real data has accumulated:
+
+```bash
+ls -lh backups/postgres/                # dump exists and is non-trivial in size
+
+docker compose exec viegard-db createdb -U viegard restore_drill
+docker compose exec viegard-db pg_restore -U viegard -d restore_drill \
+    /dev/stdin < backups/postgres/viegard-*.dump
+docker compose exec viegard-db psql -U viegard -d restore_drill -c '\dt'   # tables present
+docker compose exec viegard-db dropdb -U viegard restore_drill
+```
+
+If `pg_restore` completes and `\dt` lists the Viegard tables, the dump is provably restorable.  (With multiple dumps present, replace the glob with one specific file.)
+
+Disaster-recovery posture (D-0024): the dumps live on the VM disk, so they ride the host's regular VM-image backups; worst-case data loss is bounded by the daily dump cadence.
+
+**Backup file protection:** dumps carry everything the database holds, which once mail ingestion is live includes full message bodies and your security event history.  The sidecar writes them mode 600 (root-owned) via `umask 077`, and the directory should be `700` (step 1).  If you deployed before this hardening, tighten existing files: `chmod 700 backups/postgres && chmod 600 backups/postgres/*.dump`.
+
+## 5. Enable data sources
+
+Sources ship disabled; enable them deliberately, one at a time.
+
+- **SWAG/nginx syslog:** see [swag-syslog-setup.md](swag-syslog-setup.md).  Set `Viegard__Sources__Syslog__Enabled`, the fail-closed `AllowedSources` list, and publish `5514/udp` in your compose copy; firewall the port to the SWAG host.
+- **IMAP accounts:** add entries under `Viegard__Sources__Imap__Accounts__*` with a password secret file per account (`PasswordSecretName`).
+- **MDaemon logs:** runs as a satellite pipeline instance on the mail host (D-0025).  Create the per-host database role in **Configuration** -> **Satellites**, then paste the one-time password into the Windows installer; see [satellite-windows.md](satellite-windows.md).
+
+## Admin interface exposure and authentication
+
+The admin interface uses local accounts, cookie authentication, server-side revocable sessions, mandatory TOTP, optional WebAuthn security keys, and recovery codes.  WebAuthn requires HTTPS in browsers except for localhost development.
+
+### Browser support
+
+The admin UI targets evergreen browsers: Chrome/Edge 114+, Firefox 125+, and Safari 17+ (all current since mid-2024).  The newest platform features it relies on are the HTML popover API (step-up overlay; older browsers fall back to a plain link to the account page's step-up section) and CSS `:has()` (account-page section switching; without it, sections remain visible together but stay fully functional).  Everything else is long-baseline HTML and CSS; the only client scripts are the first-party WebAuthn bridge and the 30-second status poll, both plain `fetch`.
+
+### Bootstrap flow
+
+Create the bootstrap password secret before the first admin startup:
+
+```bash
+openssl rand -base64 32 | tr -d '\n' > secrets/viegard-admin-bootstrap-password
+chown 1654 secrets/viegard-admin-bootstrap-password
+chmod 400 secrets/viegard-admin-bootstrap-password
+```
+
+When no `admin_users` rows exist, the admin service creates `Viegard__Admin__Bootstrap__Username` (default `admin`) from that secret.  The first login forces a password change, then TOTP enrollment with a manual base32 secret and otpauth URI.  Recovery codes are shown once after enrollment or regeneration.  Store them outside Viegard.
+
+If the bootstrap secret is missing and no users exist, the host stays up but the UI remains locked.  Add the secret and restart the admin service.
+
+### WebAuthn security keys
+
+WebAuthn is configured under `Viegard__Admin__WebAuthn__*`.  In loopback development, Viegard defaults to relying party ID `localhost` and origin `http://localhost:8080`.  In `direct` or `proxy` exposure, set both values explicitly before enrolling keys:
+
+```yaml
+Viegard__Admin__WebAuthn__RelyingPartyId: viegard.example.com
+Viegard__Admin__WebAuthn__Origins__0: https://viegard.example.com
+```
+
+The relying party ID must be the public host name that browsers see, not a URL.  The origin must exactly match the browser origin, including scheme and non-default port if one is used.  Changing the relying party ID invalidates all enrolled keys because browsers scope credentials to that ID.
+
+Enrollment is available from **Account -> Security keys** after a fresh step-up verification.  Give the key an operator label, press **Enroll security key**, and follow the browser prompt.  Sign-in and step-up can then use **Use security key** when the account has at least one enrolled credential.
+
+Viegard requests WebAuthn attestation conveyance `none`.  In this self-hosted model, the operator enrolls their own keys, and collecting attestation metadata would add device-identifying data without changing the trust decision.
+
+Browsers require WebAuthn on a secure context.  Use HTTPS for real deployments, including VPN-only deployments; localhost is the only HTTP exception.
+
+### Exposure modes
+
+Mode | Configuration | Notes
+-----|---------------|------
+`loopback` | `Viegard__Admin__Exposure=loopback` | Default.  The operator must keep the published port bound to loopback only, for example `127.0.0.1:8080:8080`.
+`direct` | `Viegard__Admin__Exposure=direct` plus `Viegard__Admin__Tls__CertificatePath` and `KeyPath` | Kestrel loads mounted PEM files and exposes HTTPS directly.  A dedicated public IP with router dst-nat of 80/443 to the Viegard host is the reference topology.
+`proxy` | `Viegard__Admin__Exposure=proxy` plus `Viegard__Admin__Proxy__TrustedNetworks__*` | Use only with a trusted TLS-terminating proxy.  Trusted networks are fail-closed: an empty list is a startup error.
+
+For `direct` mode, mount the PEM pair readable by the container user: the certificate directory must be traversable (`chmod 755`) and the files owned by UID 1654 with mode 400.  A `umask 077` shell (recommended for the secrets steps) creates `700` directories, which make the files invisible to the container; the startup error "requires readable ... PEM files" is the symptom.  With Let's Encrypt via host certbot, a deploy hook keeps the copies fresh and restarts the admin container:
+
+```bash
+mkdir -p deploy/certs && chmod 755 deploy/certs
+cat > /etc/letsencrypt/renewal-hooks/deploy/viegard.sh <<'EOF'
+#!/bin/sh
+set -e
+D=/etc/letsencrypt/live/<your-admin-host>
+T=/opt/viegard-sentinel/deploy/certs
+cp -L "$D/fullchain.pem" "$T/admin.crt"
+cp -L "$D/privkey.pem"  "$T/admin.key"
+chown 1654:1654 "$T/admin.crt" "$T/admin.key"
+chmod 400 "$T/admin.crt" "$T/admin.key"
+cd /opt/viegard-sentinel/deploy && docker compose restart viegard-admin
+EOF
+chmod 755 /etc/letsencrypt/renewal-hooks/deploy/viegard.sh
+```
+
+If port 80 on the dedicated address is occupied or NAT-translated, certbot standalone accepts `--http-01-address <dedicated-ip> --http-01-port <port>`; the public side of the challenge is always port 80.  Remember that adding the certs volume to an existing deployment requires `docker compose up -d viegard-admin` (recreate), not `restart`.
+
+Verify the full renewal chain at any time with `certbot renew --dry-run --run-deploy-hooks` (staging validation plus real hook execution; the admin container restarts briefly).  Certificate renewal and rotation into the container is otherwise fully automated by the certbot systemd timer and the deploy hook (D-0034); no in-process ACME client is required.
+
+Prefer a self-hosted VPN such as WireGuard for routine access.  Opening `AllowedSources` to `0.0.0.0/0` exposes the admin login to the internet and should be a deliberate exception, not the default.
+
+### AllowedSources
+
+`Viegard__Admin__AllowedSources__*` accepts bare IP addresses or CIDR ranges and uses the same semantics as syslog CIDR matching.  Empty list means loopback only.  Requests outside loopback and the configured ranges receive HTTP 403 with no body details and a warning log entry with sanitized values.
+
+### Session and IP binding options
+
+Setting | Default | Meaning
+--------|---------|--------
+`Viegard__Admin__Auth__AbsoluteLifetime` | `14.00:00:00` | Maximum session age.  Validation rejects values above 30 days.
+`Viegard__Admin__Auth__IdleTimeout` | `48:00:00` | Session expires when not seen for this interval.
+`Viegard__Admin__Auth__IpBindingMode` | `strict` | `strict` requires exact IP match, `subnet` accepts `/24` IPv4 or `/64` IPv6 movement, and `log-only` records mismatches without rejecting.
+`Viegard__Admin__Auth__StepUpValidity` | `00:05:00` | How long a TOTP step-up remains valid for sensitive account actions.
+
+## Firewalling the syslog port
+
+**Docker bypasses the host firewall for published ports.**  Traffic to a published container port flows through Docker's NAT/forward chains, not the `INPUT` chain that tools like ufw manage: a `ufw deny 5514` is silently ineffective.  Docker's sanctioned filtering hook is the `DOCKER-USER` chain, which Docker creates and never flushes.
+
+Restrict UDP 5514 to a single sender:
+
+```bash
+sudo iptables -I DOCKER-USER -p udp --dport 5514 ! -s 192.0.2.10 -j DROP
+```
+
+Or to private ranges, if many LAN hosts will send syslog:
+
+```bash
+sudo iptables -I DOCKER-USER -p udp --dport 5514 -s 192.168.0.0/16 -j RETURN
+sudo iptables -I DOCKER-USER -p udp --dport 5514 -s 172.16.0.0/12 -j RETURN
+sudo iptables -I DOCKER-USER 3 -p udp --dport 5514 -j DROP
+```
+
+Persist across reboots:
+
+```bash
+sudo apt install iptables-persistent
+sudo netfilter-persistent save        # after any rule change
+```
+
+Notes:
+
+- This is defense-in-depth layer two.  Layer one is Viegard's own fail-closed source allowlist (`AllowedSources`), which drops and counts non-allowlisted datagrams before any parsing.  Skipping the firewall rule leaves integrity intact but exposes the socket to floods (kernel-buffer pressure can drop legitimate datagrams) and widens reachable surface.
+- Neither layer defeats on-LAN source spoofing; both trust the claimed source address.  Anti-spoofing belongs to the network layer (router/switch controls).
+- `172.16.0.0/12` includes Docker's own container networks; allowing it means containers on this host can send syslog too.  Decide deliberately.
+- The admin port needs no rule here: it binds to `127.0.0.1` on the host and is not reachable through the Docker forward path.
+- Host services that are not Docker-published (e.g., SSH) hit `INPUT` normally; ufw or plain nftables work fine for those.
+
+## Operational notes
+
+- `docker compose logs` keeps the container's full history; use `--since`/`-t` to separate fresh entries from old ones after a fix.
+- Keep `Logging__LogLevel__Microsoft.EntityFrameworkCore: Warning` (in the example) so SQL statement logging stays quiet; noisy always-on errors train operators to ignore logs.
+- Foreground `docker compose up` stops the stack on Ctrl-C; use `-d` for anything you want to survive the terminal.
+- Benign startup warnings: `Overriding HTTP_PORTS ... Binding to values defined by URLS` (explicit `ASPNETCORE_URLS` supersedes the image default) and Postgres listening on IPv6 inside the compose network (nothing is published beyond admin's localhost 8080).
+- The admin container's `No XML encryptor configured` warning is expected for now: keys persist to a permission-protected volume; encrypting them at rest is deliberately deferred to the admin-authentication work (TODO.md).

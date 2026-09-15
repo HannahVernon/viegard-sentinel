@@ -1,9 +1,46 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
+@inject IQueueTelemetryStore QueueTelemetry
+@inject UserDisplay Display
+
+<AuthorizeView>
+    <Authorized>
+        <header class="admin-header">
+            <a class="brand" href="/"><img class="brand-mark" src="img/raven.png" alt="" />Viegard</a>
+            <nav class="admin-nav" aria-label="Admin navigation">
+                <a href="/queues">Dashboard/Queues</a>
+                <a href="/events">Events</a>
+                <a href="/incidents">Incidents</a>
+                <a href="/decisions">Decisions</a>
+                <a href="/audit">Audit</a>
+                <a href="/signatures">Signatures</a>
+                <a href="/configuration">Configuration</a>
+                <a href="/account">Account</a>
+            </nav>
+            <div class="header-side">
+                <a class="status-dot-link" href="/queues" title="Worst queue or instance telemetry light; refreshes every @_refreshSeconds seconds.">
+                    <span class="status-dot @_statusCss" data-status-dot data-refresh-ms="@(_refreshSeconds * 1000)"></span><span data-status-label>@_statusLabel</span>
+                </a>
+                <form method="post" action="/auth/logout" class="logout-form">
+                    <AntiforgeryToken />
+                    <button type="submit" class="button-quiet">Sign out</button>
+                </form>
+            </div>
+        </header>
+    </Authorized>
+</AuthorizeView>
 
 @Body
 
-<div id="blazor-error-ui" data-nosnippet>
-    An unhandled error has occurred.
-    <a href="." class="reload">Reload</a>
-    <span class="dismiss">🗙</span>
-</div>
+@code {
+    private string _statusCss = "status-dot-muted";
+    private string _statusLabel = "No data";
+    private int _refreshSeconds = Viegard.Domain.Admin.AdminUserPreferences.DefaultStatusRefreshSeconds;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _refreshSeconds = Display.StatusRefreshSeconds;
+        var snapshots = await QueueTelemetry.GetLatestAsync().ConfigureAwait(false);
+        (_statusCss, _statusLabel) = QueueStatusBadge.Summarize(snapshots, DateTimeOffset.UtcNow);
+    }
+}

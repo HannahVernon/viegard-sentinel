@@ -11,6 +11,7 @@
     <Project Path="src/Viegard.Sources.Syslog/Viegard.Sources.Syslog.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Viegard.AdminApi.Tests/Viegard.AdminApi.Tests.csproj" />
     <Project Path="tests/Viegard.Application.Tests/Viegard.Application.Tests.csproj" />
     <Project Path="tests/Viegard.Domain.Tests/Viegard.Domain.Tests.csproj" />
     <Project Path="tests/Viegard.Persistence.Postgres.Tests/Viegard.Persistence.Postgres.Tests.csproj" />

@@ -1,7 +1,10 @@
 using System.Text.Json;
+using Viegard.Application.Retention;
+using Viegard.Domain.Admin;
 using Viegard.Domain.Actions;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Classifications;
+using Viegard.Domain.Configuration;
 using Viegard.Domain.Decisions;
 using Viegard.Domain.Events;
 using Viegard.Domain.Feedback;
@@ -29,41 +32,50 @@ internal static class Mapping
     private static T FromJson<T>(string json) => JsonSerializer.Deserialize<T>(json, Json)
         ?? throw new InvalidOperationException($"Persisted JSON deserialized to null for {typeof(T).Name}.");
 
-    public static RawObservationRow ToRow(this RawObservation observation, string rawPayload) => new()
+    /// <summary>
+    /// Npgsql only accepts offset-zero DateTimeOffset values for
+    /// timestamptz; observed timestamps (e.g., nginx "-0500") arrive with
+    /// local offsets.  Normalizing preserves the instant exactly.
+    /// </summary>
+    private static DateTimeOffset Utc(DateTimeOffset value) => value.ToUniversalTime();
+
+    private static DateTimeOffset? Utc(DateTimeOffset? value) => value?.ToUniversalTime();
+
+    public static RawObservationRow ToRow(this RawObservation observation, string rawPayload, int sourceRefId) => new()
     {
         Id = observation.Id,
-        SourceId = observation.SourceId,
-        ObservedAt = observation.ObservedAt,
+        SourceId = sourceRefId,
+        ObservedAt = Utc(observation.ObservedAt),
         PayloadReference = observation.PayloadReference,
         IngestOffset = observation.IngestOffset,
         RawPayload = rawPayload,
     };
 
-    public static RawObservation ToDomain(this RawObservationRow row) => new()
+    public static RawObservation ToDomain(this RawObservationRow row, string sourceKey, string sourceType) => new()
     {
         Id = row.Id,
-        SourceId = row.SourceId,
+        SourceId = sourceKey,
+        SourceType = sourceType,
         ObservedAt = row.ObservedAt,
         PayloadReference = row.PayloadReference,
         IngestOffset = row.IngestOffset,
     };
 
-    public static NormalizedEventRow ToRow(this NormalizedEvent normalizedEvent) => new()
+    public static NormalizedEventRow ToRow(this NormalizedEvent normalizedEvent, int sourceRefId) => new()
     {
         Id = normalizedEvent.Id,
-        SourceId = normalizedEvent.SourceId,
-        SourceType = normalizedEvent.SourceType,
-        OccurredAt = normalizedEvent.OccurredAt,
+        SourceId = sourceRefId,
+        OccurredAt = Utc(normalizedEvent.OccurredAt),
         EntitiesJson = ToJson(normalizedEvent.Entities),
         PayloadJson = ToJson(normalizedEvent.Payload),
         RawObservationId = normalizedEvent.RawObservationId,
     };
 
-    public static NormalizedEvent ToDomain(this NormalizedEventRow row) => new()
+    public static NormalizedEvent ToDomain(this NormalizedEventRow row, string sourceKey, string sourceType) => new()
     {
         Id = row.Id,
-        SourceId = row.SourceId,
-        SourceType = row.SourceType,
+        SourceId = sourceKey,
+        SourceType = sourceType,
         OccurredAt = row.OccurredAt,
         Entities = FromJson<List<EntityRef>>(row.EntitiesJson),
         Payload = FromJson<EventPayload>(row.PayloadJson),
@@ -74,8 +86,8 @@ internal static class Mapping
     {
         Id = incident.Id,
         CorrelationKey = incident.CorrelationKey,
-        WindowStart = incident.WindowStart,
-        WindowEnd = incident.WindowEnd,
+        WindowStart = Utc(incident.WindowStart),
+        WindowEnd = Utc(incident.WindowEnd),
         EventIdsJson = ToJson(incident.EventIds),
         EvidenceJson = ToJson(incident.Evidence),
         State = (int)incident.State,
@@ -92,12 +104,12 @@ internal static class Mapping
         State = (IncidentState)row.State,
     };
 
-    public static ClassificationRow ToRow(this Classification classification) => new()
+    public static ClassificationRow ToRow(this Classification classification, int classifierRefId) => new()
     {
         Id = classification.Id,
         SubjectKind = (int)classification.SubjectKind,
         SubjectId = classification.SubjectId,
-        ClassifierId = classification.ClassifierId,
+        ClassifierId = classifierRefId,
         ModelJson = classification.Model is null ? null : ToJson(classification.Model),
         Category = classification.Category,
         Confidence = classification.Confidence,
@@ -105,15 +117,15 @@ internal static class Mapping
         ReasonsJson = ToJson(classification.Reasons),
         RecommendedAction = classification.RecommendedAction,
         Uncertainty = classification.Uncertainty,
-        CreatedAt = classification.CreatedAt,
+        CreatedAt = Utc(classification.CreatedAt),
     };
 
-    public static Classification ToDomain(this ClassificationRow row) => new()
+    public static Classification ToDomain(this ClassificationRow row, string classifierKey) => new()
     {
         Id = row.Id,
         SubjectKind = (ClassificationSubjectKind)row.SubjectKind,
         SubjectId = row.SubjectId,
-        ClassifierId = row.ClassifierId,
+        ClassifierId = classifierKey,
         Model = row.ModelJson is null ? null : FromJson<ModelInfo>(row.ModelJson),
         Category = row.Category,
         Confidence = row.Confidence,
@@ -124,49 +136,48 @@ internal static class Mapping
         CreatedAt = row.CreatedAt,
     };
 
-    public static DecisionRow ToRow(this Decision decision) => new()
+    public static DecisionRow ToRow(this Decision decision, int policyRefId) => new()
     {
         Id = decision.Id,
         ClassificationId = decision.ClassificationId,
-        PolicyId = decision.PolicyId,
-        PolicyVersion = decision.PolicyVersion,
+        PolicyId = policyRefId,
         Outcome = (int)decision.Outcome,
         Rationale = decision.Rationale,
         GuardrailsJson = ToJson(decision.Guardrails),
-        CreatedAt = decision.CreatedAt,
+        CreatedAt = Utc(decision.CreatedAt),
     };
 
-    public static Decision ToDomain(this DecisionRow row) => new()
+    public static Decision ToDomain(this DecisionRow row, string policyKey, string policyVersion) => new()
     {
         Id = row.Id,
         ClassificationId = row.ClassificationId,
-        PolicyId = row.PolicyId,
-        PolicyVersion = row.PolicyVersion,
+        PolicyId = policyKey,
+        PolicyVersion = policyVersion,
         Outcome = (DecisionOutcome)row.Outcome,
         Rationale = row.Rationale,
         Guardrails = FromJson<List<GuardrailEvaluation>>(row.GuardrailsJson),
         CreatedAt = row.CreatedAt,
     };
 
-    public static ActionRecordRow ToRow(this ActionRecord action) => new()
+    public static ActionRecordRow ToRow(this ActionRecord action, int providerRefId) => new()
     {
         Id = action.Id,
         DecisionId = action.DecisionId,
-        ProviderId = action.ProviderId,
+        ProviderId = providerRefId,
         OperationId = action.OperationId,
         ParametersJson = action.ParametersJson,
         Status = (int)action.Status,
         Error = action.Error,
         RollbackJson = action.RollbackJson,
-        RequestedAt = action.RequestedAt,
-        CompletedAt = action.CompletedAt,
+        RequestedAt = Utc(action.RequestedAt),
+        CompletedAt = Utc(action.CompletedAt),
     };
 
-    public static ActionRecord ToDomain(this ActionRecordRow row) => new()
+    public static ActionRecord ToDomain(this ActionRecordRow row, string providerKey) => new()
     {
         Id = row.Id,
         DecisionId = row.DecisionId,
-        ProviderId = row.ProviderId,
+        ProviderId = providerKey,
         OperationId = row.OperationId,
         ParametersJson = row.ParametersJson,
         Status = (ActionStatus)row.Status,
@@ -176,13 +187,13 @@ internal static class Mapping
         CompletedAt = row.CompletedAt,
     };
 
-    public static AuditRecordRow ToRow(this AuditRecord record) => new()
+    public static AuditRecordRow ToRow(this AuditRecord record, int? sourceRefId) => new()
     {
         Id = record.Id,
-        Timestamp = record.Timestamp,
+        Timestamp = Utc(record.Timestamp),
         Stage = (int)record.Stage,
         Summary = record.Summary,
-        SourceId = record.SourceId,
+        SourceId = sourceRefId,
         EventId = record.EventId,
         IncidentId = record.IncidentId,
         ClassificationId = record.ClassificationId,
@@ -198,7 +209,7 @@ internal static class Mapping
         CorrectedCategory = correction.CorrectedCategory,
         CorrectedBy = correction.CorrectedBy,
         Note = correction.Note,
-        CreatedAt = correction.CreatedAt,
+        CreatedAt = Utc(correction.CreatedAt),
     };
 
     public static Correction ToDomain(this CorrectionRow row) => new()
@@ -217,12 +228,12 @@ internal static class Mapping
         QueueName = snapshot.QueueName,
         Depth = snapshot.Depth,
         InFlight = snapshot.InFlight,
-        OldestPendingEnqueuedAt = snapshot.OldestPendingEnqueuedAt,
+        OldestPendingEnqueuedAt = Utc(snapshot.OldestPendingEnqueuedAt),
         TotalEnqueued = snapshot.TotalEnqueued,
         TotalCompleted = snapshot.TotalCompleted,
         TotalAbandoned = snapshot.TotalAbandoned,
         DeadLetterCount = snapshot.DeadLetterCount,
-        CapturedAt = snapshot.CapturedAt,
+        CapturedAt = Utc(snapshot.CapturedAt),
     };
 
     public static QueueTelemetrySnapshot ToDomain(this QueueTelemetryRow row) => new()
@@ -237,5 +248,230 @@ internal static class Mapping
         TotalAbandoned = row.TotalAbandoned,
         DeadLetterCount = row.DeadLetterCount,
         CapturedAt = row.CapturedAt,
+    };
+
+    public static AdminUserRow ToRow(this AdminUser user) => new()
+    {
+        Id = user.Id,
+        Username = user.Username,
+        PasswordHash = user.PasswordHash,
+        PasswordChangedAt = Utc(user.PasswordChangedAt),
+        FailedLoginCount = user.FailedLoginCount,
+        LockedUntil = Utc(user.LockedUntil),
+        MustChangePassword = user.MustChangePassword,
+        TotpEnrolled = user.TotpEnrolled,
+        CreatedAt = Utc(user.CreatedAt),
+    };
+
+    public static AdminUser ToDomain(this AdminUserRow row) => new()
+    {
+        Id = row.Id,
+        Username = row.Username,
+        PasswordHash = row.PasswordHash,
+        PasswordChangedAt = row.PasswordChangedAt,
+        FailedLoginCount = row.FailedLoginCount,
+        LockedUntil = row.LockedUntil,
+        MustChangePassword = row.MustChangePassword,
+        TotpEnrolled = row.TotpEnrolled,
+        CreatedAt = row.CreatedAt,
+    };
+
+    public static AdminTotpSecretRow ToRow(this AdminTotpSecret secret) => new()
+    {
+        UserId = secret.UserId,
+        SecretBase32 = secret.SecretBase32,
+        LastAcceptedStep = secret.LastAcceptedStep,
+        EnrolledAt = Utc(secret.EnrolledAt),
+    };
+
+    public static AdminTotpSecret ToDomain(this AdminTotpSecretRow row) => new()
+    {
+        UserId = row.UserId,
+        SecretBase32 = row.SecretBase32,
+        LastAcceptedStep = row.LastAcceptedStep,
+        EnrolledAt = row.EnrolledAt,
+    };
+
+    public static AdminRecoveryCodeRow ToRow(this AdminRecoveryCode code) => new()
+    {
+        Id = code.Id,
+        UserId = code.UserId,
+        CodeHash = code.CodeHash,
+        UsedAt = Utc(code.UsedAt),
+        CreatedAt = Utc(code.CreatedAt),
+    };
+
+    public static AdminRecoveryCode ToDomain(this AdminRecoveryCodeRow row) => new()
+    {
+        Id = row.Id,
+        UserId = row.UserId,
+        CodeHash = row.CodeHash,
+        UsedAt = row.UsedAt,
+        CreatedAt = row.CreatedAt,
+    };
+
+    public static AdminUserPreferencesRow ToRow(this AdminUserPreferences preferences) => new()
+    {
+        UserId = preferences.UserId,
+        TimeZoneId = preferences.TimeZoneId,
+        PageSize = preferences.PageSize,
+        StatusRefreshSeconds = preferences.StatusRefreshSeconds,
+        UpdatedAt = Utc(preferences.UpdatedAt),
+    };
+
+    public static AdminUserPreferences ToDomain(this AdminUserPreferencesRow row) => new()
+    {
+        UserId = row.UserId,
+        TimeZoneId = row.TimeZoneId,
+        PageSize = row.PageSize,
+        StatusRefreshSeconds = row.StatusRefreshSeconds,
+        UpdatedAt = row.UpdatedAt,
+    };
+
+    public static AdminWebAuthnCredentialRow ToRow(this AdminWebAuthnCredential credential) => new()
+    {
+        Id = credential.Id,
+        UserId = credential.UserId,
+        CredentialId = credential.CredentialId.ToArray(),
+        PublicKey = credential.PublicKey.ToArray(),
+        SignCount = credential.SignCount,
+        Aaguid = credential.Aaguid,
+        Transports = credential.Transports,
+        Name = credential.Name,
+        CreatedAt = Utc(credential.CreatedAt),
+        LastUsedAt = Utc(credential.LastUsedAt),
+    };
+
+    public static AdminWebAuthnCredential ToDomain(this AdminWebAuthnCredentialRow row) => new()
+    {
+        Id = row.Id,
+        UserId = row.UserId,
+        CredentialId = row.CredentialId.ToArray(),
+        PublicKey = row.PublicKey.ToArray(),
+        SignCount = row.SignCount,
+        Aaguid = row.Aaguid,
+        Transports = row.Transports,
+        Name = row.Name,
+        CreatedAt = row.CreatedAt,
+        LastUsedAt = row.LastUsedAt,
+    };
+
+    public static AdminSessionRow ToRow(this AdminSession session) => new()
+    {
+        Id = session.Id,
+        UserId = session.UserId,
+        CreatedAt = Utc(session.CreatedAt),
+        LastSeenAt = Utc(session.LastSeenAt),
+        AbsoluteExpiresAt = Utc(session.AbsoluteExpiresAt),
+        IdleExpiresAt = Utc(session.IdleExpiresAt),
+        Ip = session.Ip,
+        IpBindingMode = session.IpBindingMode,
+        UserAgent = session.UserAgent,
+        RevokedAt = Utc(session.RevokedAt),
+        StepUpAt = Utc(session.StepUpAt),
+    };
+
+    public static AdminSession ToDomain(this AdminSessionRow row) => new()
+    {
+        Id = row.Id,
+        UserId = row.UserId,
+        CreatedAt = row.CreatedAt,
+        LastSeenAt = row.LastSeenAt,
+        AbsoluteExpiresAt = row.AbsoluteExpiresAt,
+        IdleExpiresAt = row.IdleExpiresAt,
+        Ip = row.Ip,
+        IpBindingMode = row.IpBindingMode,
+        UserAgent = row.UserAgent,
+        RevokedAt = row.RevokedAt,
+        StepUpAt = row.StepUpAt,
+    };
+
+    public static CustomSignatureRow ToRow(this CustomSignature signature) => new()
+    {
+        Id = signature.Id,
+        Name = signature.Name,
+        Enabled = signature.Enabled,
+        Target = (int)signature.Target,
+        MatchType = (int)signature.MatchType,
+        Pattern = signature.Pattern,
+        Category = signature.Category,
+        Severity = signature.Severity,
+        EvidenceWeight = signature.EvidenceWeight,
+        CreatedAt = Utc(signature.CreatedAt),
+        UpdatedAt = Utc(signature.UpdatedAt),
+        UpdatedBy = signature.UpdatedBy,
+        Version = signature.Version,
+    };
+
+    public static CustomSignature ToDomain(this CustomSignatureRow row) => new()
+    {
+        Id = row.Id,
+        Name = row.Name,
+        Enabled = row.Enabled,
+        Target = (CustomSignatureTarget)row.Target,
+        MatchType = (CustomSignatureMatchType)row.MatchType,
+        Pattern = row.Pattern,
+        Category = row.Category,
+        Severity = row.Severity,
+        EvidenceWeight = row.EvidenceWeight,
+        CreatedAt = row.CreatedAt,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+        Version = row.Version,
+    };
+
+    public static RetentionSettingsRow ToRow(this RetentionSettings settings) => new()
+    {
+        Id = settings.Id,
+        RawObservationsDays = settings.RawObservationsDays,
+        EventsDays = settings.EventsDays,
+        IncidentsDays = settings.IncidentsDays,
+        ClassificationsDays = settings.ClassificationsDays,
+        DecisionsDays = settings.DecisionsDays,
+        ActionsDays = settings.ActionsDays,
+        AuditRecordsDays = settings.AuditRecordsDays,
+        DeadLetteredQueueMessagesDays = settings.DeadLetteredQueueMessagesDays,
+        ExpiredAdminSessionsDays = settings.ExpiredAdminSessionsDays,
+        Version = settings.Version,
+        SeededAt = Utc(settings.SeededAt),
+        UpdatedAt = Utc(settings.UpdatedAt),
+        UpdatedBy = settings.UpdatedBy,
+        LastCycleAt = Utc(settings.LastCycleAt),
+        LastCycleCountsJson = settings.LastCycleCountsJson,
+    };
+
+    public static RetentionSettings ToDomain(this RetentionSettingsRow row) => new()
+    {
+        Id = row.Id,
+        RawObservationsDays = row.RawObservationsDays,
+        EventsDays = row.EventsDays,
+        IncidentsDays = row.IncidentsDays,
+        ClassificationsDays = row.ClassificationsDays,
+        DecisionsDays = row.DecisionsDays,
+        ActionsDays = row.ActionsDays,
+        AuditRecordsDays = row.AuditRecordsDays,
+        DeadLetteredQueueMessagesDays = row.DeadLetteredQueueMessagesDays,
+        ExpiredAdminSessionsDays = row.ExpiredAdminSessionsDays,
+        Version = row.Version,
+        SeededAt = row.SeededAt,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+        LastCycleAt = row.LastCycleAt,
+        LastCycleCountsJson = row.LastCycleCountsJson,
+    };
+
+    public static AuditRecord ToDomain(this AuditRecordRow row, string? sourceKey) => new()
+    {
+        Id = row.Id,
+        Timestamp = row.Timestamp,
+        Stage = (PipelineStage)row.Stage,
+        Summary = row.Summary,
+        SourceId = sourceKey,
+        EventId = row.EventId,
+        IncidentId = row.IncidentId,
+        ClassificationId = row.ClassificationId,
+        DecisionId = row.DecisionId,
+        ActionId = row.ActionId,
+        DetailJson = row.DetailJson,
     };
 }

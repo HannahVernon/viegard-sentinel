@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Viegard.Application.Sources;
+using Viegard.Domain;
 using Viegard.Domain.Events;
 
 namespace Viegard.Sources.Imap;
@@ -91,7 +92,7 @@ public sealed class ImapEventNormalizer : IEventNormalizer
 
         return NormalizationResult.Success(new NormalizedEvent
         {
-            Id = Guid.NewGuid(),
+            Id = ViegardId.New(),
             SourceId = observation.SourceId,
             SourceType = ImapSourceType,
             OccurredAt = dto.SentAt ?? observation.ObservedAt,

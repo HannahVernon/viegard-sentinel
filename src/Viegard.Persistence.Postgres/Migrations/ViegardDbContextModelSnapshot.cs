@@ -22,6 +22,32 @@ namespace Viegard.Persistence.Postgres.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.ActionProviderRow", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_seen_at");
+
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("provider_key");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProviderKey")
+                        .IsUnique();
+
+                    b.ToTable("action_providers", (string)null);
+                });
+
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.ActionRecordRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -50,9 +76,8 @@ namespace Viegard.Persistence.Postgres.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("parameters_json");
 
-                    b.Property<string>("ProviderId")
-                        .IsRequired()
-                        .HasColumnType("text")
+                    b.Property<int>("ProviderId")
+                        .HasColumnType("integer")
                         .HasColumnName("provider_id");
 
                     b.Property<DateTimeOffset>("RequestedAt")
@@ -71,7 +96,262 @@ namespace Viegard.Persistence.Postgres.Migrations
 
                     b.HasIndex("DecisionId");
 
+                    b.HasIndex("ProviderId");
+
+                    b.HasIndex("RequestedAt");
+
                     b.ToTable("actions", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminRecoveryCodeRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("code_hash");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("UsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("used_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("admin_recovery_codes", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminSessionRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("AbsoluteExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("absolute_expires_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset>("IdleExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("idle_expires_at");
+
+                    b.Property<string>("Ip")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("ip");
+
+                    b.Property<string>("IpBindingMode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("ip_binding_mode");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_seen_at");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<DateTimeOffset?>("StepUpAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("step_up_at");
+
+                    b.Property<string>("UserAgent")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("user_agent");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AbsoluteExpiresAt");
+
+                    b.HasIndex("IdleExpiresAt");
+
+                    b.HasIndex("RevokedAt");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("admin_sessions", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminTotpSecretRow", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<DateTimeOffset>("EnrolledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("enrolled_at");
+
+                    b.Property<long?>("LastAcceptedStep")
+                        .HasColumnType("bigint")
+                        .HasColumnName("last_accepted_step");
+
+                    b.Property<string>("SecretBase32")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("secret_base32");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("admin_totp_secrets", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminUserPreferencesRow", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("PageSize")
+                        .HasColumnType("integer")
+                        .HasColumnName("page_size");
+
+                    b.Property<int>("StatusRefreshSeconds")
+                        .HasColumnType("integer")
+                        .HasColumnName("status_refresh_seconds");
+
+                    b.Property<string>("TimeZoneId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("time_zone_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("admin_user_preferences", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminUserRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("FailedLoginCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("failed_login_count");
+
+                    b.Property<DateTimeOffset?>("LockedUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("locked_until");
+
+                    b.Property<bool>("MustChangePassword")
+                        .HasColumnType("boolean")
+                        .HasColumnName("must_change_password");
+
+                    b.Property<DateTimeOffset>("PasswordChangedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("password_changed_at");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("password_hash");
+
+                    b.Property<bool>("TotpEnrolled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("totp_enrolled");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("username");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username")
+                        .IsUnique();
+
+                    b.ToTable("admin_users", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminWebAuthnCredentialRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("Aaguid")
+                        .HasColumnType("uuid")
+                        .HasColumnName("aaguid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<byte[]>("CredentialId")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("credential_id");
+
+                    b.Property<DateTimeOffset?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_used_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.Property<byte[]>("PublicKey")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("public_key");
+
+                    b.Property<long>("SignCount")
+                        .HasColumnType("bigint")
+                        .HasColumnName("sign_count");
+
+                    b.Property<string>("Transports")
+                        .HasColumnType("text")
+                        .HasColumnName("transports");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CredentialId")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("admin_webauthn_credentials", (string)null);
                 });
 
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AuditRecordRow", b =>
@@ -105,8 +385,8 @@ namespace Viegard.Persistence.Postgres.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("incident_id");
 
-                    b.Property<string>("SourceId")
-                        .HasColumnType("text")
+                    b.Property<int?>("SourceId")
+                        .HasColumnType("integer")
                         .HasColumnName("source_id");
 
                     b.Property<int>("Stage")
@@ -123,6 +403,8 @@ namespace Viegard.Persistence.Postgres.Migrations
                         .HasColumnName("timestamp");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("SourceId");
 
                     b.HasIndex("Timestamp");
 
@@ -141,9 +423,8 @@ namespace Viegard.Persistence.Postgres.Migrations
                         .HasColumnType("text")
                         .HasColumnName("category");
 
-                    b.Property<string>("ClassifierId")
-                        .IsRequired()
-                        .HasColumnType("text")
+                    b.Property<int>("ClassifierId")
+                        .HasColumnType("integer")
                         .HasColumnName("classifier_id");
 
                     b.Property<double>("Confidence")
@@ -185,11 +466,39 @@ namespace Viegard.Persistence.Postgres.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ClassifierId");
+
                     b.HasIndex("CreatedAt");
 
                     b.HasIndex("SubjectId");
 
                     b.ToTable("classifications", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.ClassifierRow", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ClassifierKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("classifier_key");
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_seen_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClassifierKey")
+                        .IsUnique();
+
+                    b.ToTable("classifiers", (string)null);
                 });
 
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.CorrectionRow", b =>
@@ -228,6 +537,77 @@ namespace Viegard.Persistence.Postgres.Migrations
                     b.ToTable("corrections", (string)null);
                 });
 
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.CustomSignatureRow", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("category");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enabled");
+
+                    b.Property<double>("EvidenceWeight")
+                        .HasColumnType("double precision")
+                        .HasColumnName("evidence_weight");
+
+                    b.Property<int>("MatchType")
+                        .HasColumnType("integer")
+                        .HasColumnName("match_type");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Pattern")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("pattern");
+
+                    b.Property<int>("Severity")
+                        .HasColumnType("integer")
+                        .HasColumnName("severity");
+
+                    b.Property<int>("Target")
+                        .HasColumnType("integer")
+                        .HasColumnName("target");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("updated_by");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("custom_signatures", (string)null);
+                });
+
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.DecisionRow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -252,15 +632,9 @@ namespace Viegard.Persistence.Postgres.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("outcome");
 
-                    b.Property<string>("PolicyId")
-                        .IsRequired()
-                        .HasColumnType("text")
+                    b.Property<int>("PolicyId")
+                        .HasColumnType("integer")
                         .HasColumnName("policy_id");
-
-                    b.Property<string>("PolicyVersion")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("policy_version");
 
                     b.Property<string>("Rationale")
                         .IsRequired()
@@ -270,6 +644,10 @@ namespace Viegard.Persistence.Postgres.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ClassificationId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("PolicyId");
 
                     b.ToTable("decisions", (string)null);
                 });
@@ -312,6 +690,8 @@ namespace Viegard.Persistence.Postgres.Migrations
 
                     b.HasIndex("CorrelationKey", "State");
 
+                    b.HasIndex("WindowStart", "State");
+
                     b.ToTable("incidents", (string)null);
                 });
 
@@ -340,15 +720,9 @@ namespace Viegard.Persistence.Postgres.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("raw_observation_id");
 
-                    b.Property<string>("SourceId")
-                        .IsRequired()
-                        .HasColumnType("text")
+                    b.Property<int>("SourceId")
+                        .HasColumnType("integer")
                         .HasColumnName("source_id");
-
-                    b.Property<string>("SourceType")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("source_type");
 
                     b.HasKey("Id");
 
@@ -356,7 +730,40 @@ namespace Viegard.Persistence.Postgres.Migrations
 
                     b.HasIndex("RawObservationId");
 
+                    b.HasIndex("SourceId");
+
                     b.ToTable("events", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.PolicyRow", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_seen_at");
+
+                    b.Property<string>("PolicyKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("policy_key");
+
+                    b.Property<string>("PolicyVersion")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("policy_version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PolicyKey", "PolicyVersion")
+                        .IsUnique();
+
+                    b.ToTable("policies", (string)null);
                 });
 
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.QueueCounterRow", b =>
@@ -418,6 +825,8 @@ namespace Viegard.Persistence.Postgres.Migrations
                         .HasColumnName("queue_name");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("DeadLettered", "EnqueuedAt");
 
                     b.HasIndex("QueueName", "DeadLettered", "LeasedUntil", "Id");
 
@@ -496,12 +905,13 @@ namespace Viegard.Persistence.Postgres.Migrations
                         .HasColumnType("text")
                         .HasColumnName("raw_payload");
 
-                    b.Property<string>("SourceId")
-                        .IsRequired()
-                        .HasColumnType("text")
+                    b.Property<int>("SourceId")
+                        .HasColumnType("integer")
                         .HasColumnName("source_id");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ObservedAt");
 
                     b.HasIndex("PayloadReference")
                         .IsUnique();
@@ -509,6 +919,82 @@ namespace Viegard.Persistence.Postgres.Migrations
                     b.HasIndex("SourceId");
 
                     b.ToTable("raw_observations", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.RetentionSettingsRow", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    b.Property<int?>("ActionsDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("actions_days");
+
+                    b.Property<int?>("AuditRecordsDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("audit_records_days");
+
+                    b.Property<int?>("ClassificationsDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("classifications_days");
+
+                    b.Property<int?>("DeadLetteredQueueMessagesDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("dead_lettered_queue_messages_days");
+
+                    b.Property<int?>("DecisionsDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("decisions_days");
+
+                    b.Property<int?>("EventsDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("events_days");
+
+                    b.Property<int?>("ExpiredAdminSessionsDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("expired_admin_sessions_days");
+
+                    b.Property<int?>("IncidentsDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("incidents_days");
+
+                    b.Property<DateTimeOffset?>("LastCycleAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_cycle_at");
+
+                    b.Property<string>("LastCycleCountsJson")
+                        .HasColumnType("text")
+                        .HasColumnName("last_cycle_counts_json");
+
+                    b.Property<int?>("RawObservationsDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("raw_observations_days");
+
+                    b.Property<DateTimeOffset?>("SeededAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("seeded_at");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("updated_by");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("retention_settings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_retention_settings_fixed_id", "id = 1");
+                        });
                 });
 
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.SourceOffsetRow", b =>
@@ -529,6 +1015,134 @@ namespace Viegard.Persistence.Postgres.Migrations
                     b.HasKey("SourceId", "Key");
 
                     b.ToTable("source_offsets", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.SourceRow", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_seen_at");
+
+                    b.Property<string>("SourceKey")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("source_key");
+
+                    b.Property<string>("SourceType")
+                        .HasColumnType("text")
+                        .HasColumnName("source_type");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceKey")
+                        .IsUnique();
+
+                    b.ToTable("sources", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.ActionRecordRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.ActionProviderRow", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminRecoveryCodeRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.AdminUserRow", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminSessionRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.AdminUserRow", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminTotpSecretRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.AdminUserRow", null)
+                        .WithOne()
+                        .HasForeignKey("Viegard.Persistence.Postgres.Model.AdminTotpSecretRow", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminUserPreferencesRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.AdminUserRow", null)
+                        .WithOne()
+                        .HasForeignKey("Viegard.Persistence.Postgres.Model.AdminUserPreferencesRow", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AdminWebAuthnCredentialRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.AdminUserRow", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.AuditRecordRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.SourceRow", null)
+                        .WithMany()
+                        .HasForeignKey("SourceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.ClassificationRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.ClassifierRow", null)
+                        .WithMany()
+                        .HasForeignKey("ClassifierId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.DecisionRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.PolicyRow", null)
+                        .WithMany()
+                        .HasForeignKey("PolicyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.NormalizedEventRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.SourceRow", null)
+                        .WithMany()
+                        .HasForeignKey("SourceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.RawObservationRow", b =>
+                {
+                    b.HasOne("Viegard.Persistence.Postgres.Model.SourceRow", null)
+                        .WithMany()
+                        .HasForeignKey("SourceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

@@ -8,13 +8,14 @@ public static class RoleNames
     public const string Classification = "classification";
     public const string Policy = "policy";
     public const string Actions = "actions";
+    public const string Maintenance = "maintenance";
 }
 
 /// <summary>
 /// Host-instance configuration: which pipeline roles this process runs
-/// (D-0011).  The correlator and policy/action engine are singleton roles;
-/// deploying them in more than one instance is a configuration error that
-/// must be caught by deployment validation.
+/// (D-0011).  The correlator, policy/action engine, and maintenance worker
+/// are singleton roles; deploying them in more than one instance is a
+/// configuration error that must be caught by deployment validation.
 /// </summary>
 public sealed class ViegardHostOptions
 {
@@ -27,6 +28,7 @@ public sealed class ViegardHostOptions
         RoleNames.Classification,
         RoleNames.Policy,
         RoleNames.Actions,
+        RoleNames.Maintenance,
     };
 
     /// <summary>Identifier for this host instance; defaults to the machine name when empty.</summary>

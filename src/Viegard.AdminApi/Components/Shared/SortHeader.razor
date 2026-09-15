@@ -1,0 +1,94 @@
+<th>
+    <a class="sort-header-link" href="@Href">
+        @Title
+        @if (IsActive)
+        {
+            <span class="sort-indicator" aria-hidden="true">@Indicator</span>
+        }
+    </a>
+</th>
+
+@code {
+    [Parameter]
+    public string Title { get; set; } = string.Empty;
+
+    [Parameter]
+    public string SortKey { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? CurrentSortKey { get; set; }
+
+    [Parameter]
+    public SortDirection? CurrentDirection { get; set; }
+
+    [Parameter]
+    public SortDirection DefaultDirection { get; set; } = SortDirection.Asc;
+
+    [Parameter]
+    public string BasePath { get; set; } = "/";
+
+    [Parameter]
+    public IReadOnlyDictionary<string, string?>? ExtraQueryParams { get; set; }
+
+    private bool IsActive =>
+        CurrentDirection is not null
+        && string.Equals(SortKey, CurrentSortKey, StringComparison.OrdinalIgnoreCase);
+
+    private string Indicator => CurrentDirection == SortDirection.Asc ? "▲" : "▼";
+
+    private string Href => BuildHref(BasePath, SortKey, CurrentSortKey, CurrentDirection, DefaultDirection, ExtraQueryParams);
+
+    public static string BuildHref(
+        string basePath,
+        string sortKey,
+        string? currentSortKey,
+        SortDirection? currentDirection,
+        SortDirection defaultDirection,
+        IReadOnlyDictionary<string, string?>? extraQueryParams)
+    {
+        var isActive = currentDirection is not null
+            && string.Equals(sortKey, currentSortKey, StringComparison.OrdinalIgnoreCase);
+        var nextDirection = isActive ? Toggle(currentDirection.GetValueOrDefault()) : defaultDirection;
+        var (path, fragment) = SplitFragment(string.IsNullOrWhiteSpace(basePath) ? "/" : basePath);
+        var parts = new List<string>();
+
+        if (extraQueryParams is not null)
+        {
+            foreach (var parameter in extraQueryParams)
+            {
+                if (string.IsNullOrWhiteSpace(parameter.Key)
+                    || string.IsNullOrWhiteSpace(parameter.Value)
+                    || IsReserved(parameter.Key))
+                {
+                    continue;
+                }
+
+                parts.Add($"{Uri.EscapeDataString(parameter.Key)}={Uri.EscapeDataString(parameter.Value!)}");
+            }
+        }
+
+        parts.Add($"sort={Uri.EscapeDataString(sortKey)}");
+        parts.Add($"dir={ListSortParser.ToQueryValue(nextDirection)}");
+
+        var separator = path.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+        return $"{path}{separator}{string.Join("&", parts)}{fragment}";
+    }
+
+    private static SortDirection Toggle(SortDirection direction) =>
+        direction == SortDirection.Asc ? SortDirection.Desc : SortDirection.Asc;
+
+    private static bool IsReserved(string key) =>
+        string.Equals(key, "cursor", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "prev", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "page", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "sort", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "dir", StringComparison.OrdinalIgnoreCase);
+
+    private static (string Path, string Fragment) SplitFragment(string value)
+    {
+        var index = value.IndexOf('#', StringComparison.Ordinal);
+        return index < 0
+            ? (value, string.Empty)
+            : (value[..index], value[index..]);
+    }
+}

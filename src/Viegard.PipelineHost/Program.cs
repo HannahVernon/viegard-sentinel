@@ -1,10 +1,13 @@
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Options;
 using Viegard.Application.Audit;
 using Viegard.Application.Classifiers;
+using Viegard.Application.Configuration;
 using Viegard.Application.Correlation;
 using Viegard.Application.Detection;
 using Viegard.Application.Policy;
 using Viegard.Application.Queues;
+using Viegard.Application.Retention;
 using Viegard.Application.Secrets;
 using Viegard.Application.Sources;
 using Viegard.Application.Stores;
@@ -18,6 +21,12 @@ using Viegard.Sources.MDaemonLogs;
 using Viegard.Sources.Syslog;
 
 var builder = Host.CreateApplicationBuilder(args);
+var windowsServiceName = builder.Configuration["Viegard:WindowsService:ServiceName"] ?? "ViegardSatellite";
+builder.Services.AddWindowsService(options =>
+{
+    options.ServiceName = windowsServiceName;
+});
+builder.Services.AddSingleton(TimeProvider.System);
 
 // Host topology (roles this instance runs; D-0011).  Invalid topology fails startup.
 builder.Services
@@ -25,6 +34,12 @@ builder.Services
     .Bind(builder.Configuration.GetSection(ViegardHostOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<ViegardHostOptions>, ViegardHostOptionsValidator>();
+
+builder.Services
+    .AddOptions<RetentionOptions>()
+    .Bind(builder.Configuration.GetSection(RetentionOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<RetentionOptions>, RetentionOptionsValidator>();
 
 builder.Services
     .AddOptions<DetectionOptions>()
@@ -93,9 +108,14 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IDecisionStore, InMemoryDecisionStore>();
         builder.Services.AddSingleton<IActionStore, InMemoryActionStore>();
         builder.Services.AddSingleton<ICorrectionStore, InMemoryCorrectionStore>();
+        builder.Services.AddSingleton<IAdminUserStore, InMemoryAdminUserStore>();
+        builder.Services.AddSingleton<IAdminSessionStore, InMemoryAdminSessionStore>();
         builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
+        builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
+        builder.Services.AddSingleton<IRetentionStore, InMemoryRetentionStore>();
+        builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");
@@ -195,6 +215,14 @@ if (configuredRoles.Contains(RoleNames.Sources, StringComparer.OrdinalIgnoreCase
 // The correlation worker runs only in the singleton correlation role (D-0011).
 if (configuredRoles.Contains(RoleNames.Correlation, StringComparer.OrdinalIgnoreCase))
 {
+    builder.Services.AddSingleton<ICustomSignatureRuleDiagnostics, LoggingCustomSignatureRuleDiagnostics>();
+    builder.Services.AddSingleton(sp =>
+        new CustomSignatureRuleSource(
+            sp.GetRequiredService<ICustomSignatureStore>(),
+            sp.GetRequiredService<IOptions<DetectionOptions>>().Value,
+            sp.GetRequiredService<ICustomSignatureRuleDiagnostics>()));
+    builder.Services.AddSingleton<IDetectionRule>(sp => sp.GetRequiredService<CustomSignatureRuleSource>());
+    builder.Services.AddHostedService<CustomSignatureRefreshWorker>();
     builder.Services.AddSingleton<IDetectionRule>(sp =>
         new SensitivePathHttpDetectionRule(sp.GetRequiredService<IOptions<DetectionOptions>>().Value));
     builder.Services.AddSingleton<IDetectionRule>(sp =>
@@ -242,6 +270,8 @@ if (configuredRoles.Contains(RoleNames.Policy, StringComparer.OrdinalIgnoreCase)
     builder.Services.AddSingleton<IPolicyEngine, DefaultPolicyEngine>();
     builder.Services.AddHostedService<PolicyWorker>();
 }
+
+builder.Services.AddMaintenanceWorkers(configuredRoles);
 
 var host = builder.Build();
 

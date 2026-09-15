@@ -12,7 +12,7 @@ using Viegard.Persistence.Postgres;
 namespace Viegard.Persistence.Postgres.Migrations
 {
     [DbContext(typeof(ViegardDbContext))]
-    [Migration("20260820191804_InitialSchema")]
+    [Migration("20260825224059_InitialSchema")]
     partial class InitialSchema
     {
         /// <inheritdoc />

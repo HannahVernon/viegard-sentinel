@@ -269,13 +269,18 @@ app.Use(async (context, next) =>
 {
     var path = context.Request.Path;
     var authenticated = context.User.Identity?.IsAuthenticated == true;
-    if (!authenticated && !IsAnonymousAllowedPath(path))
+    // Endpoint metadata is the source of truth for anonymous access: it
+    // covers MapStaticAssets (whose asset URLs are fingerprinted in
+    // Production, e.g. /app.<hash>.css) and [AllowAnonymous] components.
+    // The path list remains for defense in depth on well-known routes.
+    if (!authenticated && !IsAnonymousAllowedPath(path) && !EndpointAllowsAnonymous(context))
     {
         await context.ChallengeAsync(CookieAuthenticationDefaults.AuthenticationScheme).ConfigureAwait(false);
         return;
     }
 
     if (authenticated
+        && !EndpointAllowsAnonymous(context)
         && !path.StartsWithSegments("/account")
         && !path.StartsWithSegments("/auth")
         && !path.StartsWithSegments("/login")
@@ -323,6 +328,9 @@ static string GetClientPartitionKey(HttpContext context) =>
     context.Connection.RemoteIpAddress is { } remote
         ? Viegard.Application.Auth.AdminIpBinding.Normalize(remote).ToString()
         : "unknown";
+
+static bool EndpointAllowsAnonymous(HttpContext context) =>
+    context.GetEndpoint()?.Metadata.GetMetadata<Microsoft.AspNetCore.Authorization.IAllowAnonymous>() is not null;
 
 static bool IsAnonymousAllowedPath(PathString path) =>
     path.StartsWithSegments("/login")

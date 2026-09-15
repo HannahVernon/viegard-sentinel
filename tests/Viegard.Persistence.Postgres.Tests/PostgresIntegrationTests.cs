@@ -243,6 +243,9 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(eventC.Id, Assert.Single(eventPage2.Items).Id);
         Assert.Equal(3, eventPage1.TotalCount);
         Assert.Equal(2, eventPage2.Preceding);
+        var eventJumpCursor = await eventStore.GetPageCursorAsync(2, 2, eventFilter, eventSort);
+        var eventJumpPage = await eventStore.ListPageAsync(eventJumpCursor, pageSize: 2, filter: eventFilter, sort: eventSort);
+        Assert.Equal(eventPage2.Items.Select(e => e.Id), eventJumpPage.Items.Select(e => e.Id));
 
         var incidentStore = new PostgresIncidentStore(factory);
         var incidentB = Incident($"{prefix}-incident-b", now.AddMinutes(2));
@@ -261,6 +264,10 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(incidentC.Id, Assert.Single(incidentPage2.Items).Id);
         Assert.Equal(3, incidentPage1.TotalCount);
         Assert.Equal(2, incidentPage2.Preceding);
+        Assert.Null(await incidentStore.GetPageCursorAsync(0, 2, incidentFilter, incidentSort));
+        var incidentJumpCursor = await incidentStore.GetPageCursorAsync(2, 2, incidentFilter, incidentSort);
+        var incidentJumpPage = await incidentStore.ListPageAsync(incidentJumpCursor, pageSize: 2, filter: incidentFilter, sort: incidentSort);
+        Assert.Equal(incidentPage2.Items.Select(i => i.Id), incidentJumpPage.Items.Select(i => i.Id));
 
         var classificationStore = new PostgresClassificationStore(factory, resolver);
         var decisionStore = new PostgresDecisionStore(factory, resolver);
@@ -295,6 +302,9 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(decisionC.Id, Assert.Single(decisionPage2.Items).Id);
         Assert.Equal(3, decisionPage1.TotalCount);
         Assert.Equal(2, decisionPage2.Preceding);
+        var decisionJumpCursor = await decisionStore.GetPageCursorAsync(2, 2, decisionFilter, classificationSort);
+        var decisionJumpPage = await decisionStore.ListPageAsync(decisionJumpCursor, pageSize: 2, filter: decisionFilter, sort: classificationSort);
+        Assert.Equal(decisionPage2.Items.Select(d => d.Id), decisionJumpPage.Items.Select(d => d.Id));
 
         var auditLedger = new PostgresAuditLedger(factory, resolver);
         var auditNone = AuditRecord($"{prefix} audit none", null, now.AddMinutes(1));
@@ -313,6 +323,9 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(auditB.Id, Assert.Single(auditPage2.Items).Id);
         Assert.Equal(3, auditPage1.TotalCount);
         Assert.Equal(2, auditPage2.Preceding);
+        var auditJumpCursor = await auditLedger.GetPageCursorAsync(2, 2, auditFilter, auditSort);
+        var auditJumpPage = await auditLedger.ListPageAsync(auditJumpCursor, pageSize: 2, filter: auditFilter, sort: auditSort);
+        Assert.Equal(auditPage2.Items.Select(a => a.Id), auditJumpPage.Items.Select(a => a.Id));
 
         var signatureStore = new PostgresCustomSignatureStore(factory, _dataSource!);
         var signatureB = CustomSignature($"{prefix}-signature-b");
@@ -331,6 +344,117 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(signatureC.Id, Assert.Single(signaturePage2.Items).Id);
         Assert.Equal(3, signaturePage1.TotalCount);
         Assert.Equal(2, signaturePage2.Preceding);
+        var signatureJumpCursor = await signatureStore.GetPageCursorAsync(2, 2, signatureFilter, signatureSort);
+        var signatureJumpPage = await signatureStore.ListPageAsync(signatureJumpCursor, pageSize: 2, filter: signatureFilter, sort: signatureSort);
+        Assert.Equal(signaturePage2.Items.Select(s => s.Id), signatureJumpPage.Items.Select(s => s.Id));
+        var signatureClampedCursor = await signatureStore.GetPageCursorAsync(99, 2, signatureFilter, signatureSort);
+        var signatureClampedPage = await signatureStore.ListPageAsync(signatureClampedCursor, pageSize: 2, filter: signatureFilter, sort: signatureSort);
+        Assert.Equal(signaturePage2.Items.Select(s => s.Id), signatureClampedPage.Items.Select(s => s.Id));
+    }
+
+    [PostgresFact]
+    public async Task Admin_list_boolean_filters_apply_to_all_searchable_stores()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var resolver = new ReferenceResolver(factory);
+        var prefix = $"it-bool-{ViegardId.New():N}";
+        var filterText = $"{prefix} alpha OR {prefix} beta -blocked";
+        var now = DateTimeOffset.UtcNow;
+
+        var eventStore = new PostgresEventStore(factory, resolver);
+        var eventAlpha = Event($"{prefix} alpha", now.AddMinutes(1));
+        var eventBeta = Event($"{prefix} beta", now.AddMinutes(2));
+        var eventBlocked = Event($"{prefix} beta blocked", now.AddMinutes(3));
+        var eventOther = Event($"{prefix} gamma", now.AddMinutes(4));
+        foreach (var item in new[] { eventOther, eventBlocked, eventBeta, eventAlpha })
+        {
+            await eventStore.AddAsync(item);
+        }
+
+        var eventMatches = await eventStore.ListPageAsync(
+            beforeId: null,
+            pageSize: 10,
+            filter: new EventListFilter(filterText),
+            sort: new ListSort<EventSortColumn>(EventSortColumn.Source, SortDirection.Asc));
+        Assert.Equal([eventAlpha.Id, eventBeta.Id], eventMatches.Items.Select(e => e.Id));
+
+        var incidentStore = new PostgresIncidentStore(factory);
+        var incidentAlpha = Incident($"{prefix} alpha open", now.AddMinutes(1));
+        var incidentBeta = Incident($"{prefix} beta open", now.AddMinutes(2));
+        var incidentBlocked = Incident($"{prefix} beta blocked", now.AddMinutes(3));
+        var incidentClosed = Incident($"{prefix} alpha closed", now.AddMinutes(4)) with { State = IncidentState.Closed };
+        foreach (var item in new[] { incidentClosed, incidentBlocked, incidentBeta, incidentAlpha })
+        {
+            await incidentStore.UpsertAsync(item);
+        }
+
+        var incidentMatches = await incidentStore.ListPageAsync(
+            beforeId: null,
+            pageSize: 10,
+            filter: new IncidentListFilter(filterText, IncidentState.Open),
+            sort: new ListSort<IncidentSortColumn>(IncidentSortColumn.CorrelationKey, SortDirection.Asc));
+        Assert.Equal([incidentAlpha.Id, incidentBeta.Id], incidentMatches.Items.Select(i => i.Id));
+
+        var classificationStore = new PostgresClassificationStore(factory, resolver);
+        var decisionStore = new PostgresDecisionStore(factory, resolver);
+        var classificationAlpha = CreateClassification($"{prefix}-classifier-alpha", "alpha", 1, now.AddMinutes(1));
+        var classificationBeta = CreateClassification($"{prefix}-classifier-beta", "beta", 1, now.AddMinutes(2));
+        var classificationBlocked = CreateClassification($"{prefix}-classifier-blocked", "blocked", 1, now.AddMinutes(3));
+        var classificationDryRun = CreateClassification($"{prefix}-classifier-dry-run", "dry-run", 1, now.AddMinutes(4));
+        foreach (var item in new[] { classificationAlpha, classificationBeta, classificationBlocked, classificationDryRun })
+        {
+            await classificationStore.AddAsync(item);
+        }
+
+        var decisionAlpha = Decision(classificationAlpha.Id, $"{prefix}-policy-alpha", DecisionOutcome.Permit, $"{prefix} alpha approved", now.AddMinutes(1));
+        var decisionBeta = Decision(classificationBeta.Id, $"{prefix}-policy-beta", DecisionOutcome.Permit, $"{prefix} beta approved", now.AddMinutes(2));
+        var decisionBlocked = Decision(classificationBlocked.Id, $"{prefix}-policy-blocked", DecisionOutcome.Permit, $"{prefix} beta blocked", now.AddMinutes(3));
+        var decisionDryRun = Decision(classificationDryRun.Id, $"{prefix}-policy-dry-run", DecisionOutcome.DryRun, $"{prefix} alpha dry-run", now.AddMinutes(4));
+        foreach (var item in new[] { decisionDryRun, decisionBlocked, decisionBeta, decisionAlpha })
+        {
+            await decisionStore.AddAsync(item);
+        }
+
+        var decisionMatches = await decisionStore.ListPageAsync(
+            beforeId: null,
+            pageSize: 10,
+            filter: new DecisionListFilter(filterText, DecisionOutcome.Permit),
+            sort: new ListSort<DecisionSortColumn>(DecisionSortColumn.Created, SortDirection.Asc));
+        Assert.Equal([decisionAlpha.Id, decisionBeta.Id], decisionMatches.Items.Select(d => d.Id));
+
+        var auditLedger = new PostgresAuditLedger(factory, resolver);
+        var auditAlpha = AuditRecord($"{prefix} alpha accepted", null, now.AddMinutes(1));
+        var auditBeta = AuditRecord($"{prefix} beta accepted", null, now.AddMinutes(2));
+        var auditBlocked = AuditRecord($"{prefix} beta blocked", null, now.AddMinutes(3));
+        var auditSystem = AuditRecord($"{prefix} alpha system", null, now.AddMinutes(4)) with { Stage = PipelineStage.System };
+        foreach (var item in new[] { auditSystem, auditBlocked, auditBeta, auditAlpha })
+        {
+            await auditLedger.AppendAsync(item);
+        }
+
+        var auditMatches = await auditLedger.ListPageAsync(
+            beforeId: null,
+            pageSize: 10,
+            filter: new AuditListFilter(filterText, PipelineStage.Admin),
+            sort: new ListSort<AuditSortColumn>(AuditSortColumn.Timestamp, SortDirection.Asc));
+        Assert.Equal([auditAlpha.Id, auditBeta.Id], auditMatches.Items.Select(a => a.Id));
+
+        var signatureStore = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var signatureAlpha = CustomSignature($"{prefix} alpha");
+        var signatureBeta = CustomSignature($"{prefix} beta");
+        var signatureBlocked = CustomSignature($"{prefix} beta blocked");
+        var signatureOther = CustomSignature($"{prefix} gamma");
+        foreach (var item in new[] { signatureOther, signatureBlocked, signatureBeta, signatureAlpha })
+        {
+            await signatureStore.UpsertAsync(item);
+        }
+
+        var signatureMatches = await signatureStore.ListPageAsync(
+            beforeId: null,
+            pageSize: 10,
+            filter: new SignatureListFilter(filterText),
+            sort: new ListSort<SignatureSortColumn>(SignatureSortColumn.Name, SortDirection.Asc));
+        Assert.Equal([signatureAlpha.Id, signatureBeta.Id], signatureMatches.Items.Select(s => s.Id));
     }
 
     [PostgresFact]

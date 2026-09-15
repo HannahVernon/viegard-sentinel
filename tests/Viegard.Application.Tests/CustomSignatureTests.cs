@@ -259,6 +259,29 @@ public sealed class CustomSignatureTests
             return ValueTask.FromResult(new KeysetPage<CustomSignature>(items, nextCursor, totalCount, preceding));
         }
 
+        public ValueTask<Guid?> GetPageCursorAsync(
+            int pageNumber,
+            int pageSize,
+            SignatureListFilter? filter = null,
+            ListSort<SignatureSortColumn>? sort = null,
+            CancellationToken cancellationToken = default)
+        {
+            var safePageSize = Math.Clamp(pageSize, 1, 200);
+            var ordered = CustomSignatureFilter.Apply(Signatures, filter?.Text).ToList();
+            ordered.Sort(SignatureComparison(sort) ?? CompareBy<CustomSignature, Guid>(s => s.Id, s => s.Id, SortDirection.Desc));
+            var totalPages = Math.Max(1, (long)Math.Ceiling(ordered.Count / (double)safePageSize));
+            var safePageNumber = Math.Clamp((long)pageNumber, 1, totalPages);
+            if (safePageNumber <= 1)
+            {
+                return ValueTask.FromResult<Guid?>(null);
+            }
+
+            var boundaryIndex = (safePageNumber - 1) * safePageSize - 1;
+            return ValueTask.FromResult(boundaryIndex >= 0 && boundaryIndex < ordered.Count
+                ? ordered[(int)boundaryIndex].Id
+                : (Guid?)null);
+        }
+
         public ValueTask<CustomSignature?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(Signatures.FirstOrDefault(s => s.Id == id));
 

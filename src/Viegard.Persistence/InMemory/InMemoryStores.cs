@@ -66,6 +66,19 @@ public sealed class InMemoryEventStore : IEventStore
             pageSize,
             e => e.Id,
             InMemoryPaging.EventComparison(sort)));
+
+    public ValueTask<Guid?> GetPageCursorAsync(
+        int pageNumber,
+        int pageSize,
+        EventListFilter? filter = null,
+        ListSort<EventSortColumn>? sort = null,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(InMemoryPaging.PageCursor(
+            InMemoryPaging.ApplyFilter(_events.Values, filter),
+            pageNumber,
+            pageSize,
+            e => e.Id,
+            InMemoryPaging.EventComparison(sort)));
 }
 
 public sealed class InMemoryIncidentStore : IIncidentStore
@@ -97,6 +110,19 @@ public sealed class InMemoryIncidentStore : IIncidentStore
         ValueTask.FromResult(InMemoryPaging.Page(
             InMemoryPaging.ApplyFilter(_incidents.Values, filter),
             beforeId,
+            pageSize,
+            i => i.Id,
+            InMemoryPaging.IncidentComparison(sort)));
+
+    public ValueTask<Guid?> GetPageCursorAsync(
+        int pageNumber,
+        int pageSize,
+        IncidentListFilter? filter = null,
+        ListSort<IncidentSortColumn>? sort = null,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(InMemoryPaging.PageCursor(
+            InMemoryPaging.ApplyFilter(_incidents.Values, filter),
+            pageNumber,
             pageSize,
             i => i.Id,
             InMemoryPaging.IncidentComparison(sort)));
@@ -166,6 +192,19 @@ public sealed class InMemoryDecisionStore : IDecisionStore
             pageSize,
             d => d.Id,
             InMemoryPaging.DecisionComparison(sort)));
+
+    public ValueTask<Guid?> GetPageCursorAsync(
+        int pageNumber,
+        int pageSize,
+        DecisionListFilter? filter = null,
+        ListSort<DecisionSortColumn>? sort = null,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(InMemoryPaging.PageCursor(
+            InMemoryPaging.ApplyFilter(_decisions.Values, filter),
+            pageNumber,
+            pageSize,
+            d => d.Id,
+            InMemoryPaging.DecisionComparison(sort)));
 }
 
 public sealed class InMemoryActionStore : IActionStore
@@ -224,6 +263,19 @@ public sealed class InMemoryAuditLedger : IAuditLedger
             r => r.Id,
             InMemoryPaging.AuditComparison(sort)));
 
+    public ValueTask<Guid?> GetPageCursorAsync(
+        int pageNumber,
+        int pageSize,
+        AuditListFilter? filter = null,
+        ListSort<AuditSortColumn>? sort = null,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(InMemoryPaging.PageCursor(
+            InMemoryPaging.ApplyFilter(_records.ToArray(), filter),
+            pageNumber,
+            pageSize,
+            r => r.Id,
+            InMemoryPaging.AuditComparison(sort)));
+
     public IReadOnlyList<AuditRecord> Snapshot() => _records.ToArray();
 }
 
@@ -257,6 +309,22 @@ public sealed class InMemoryCustomSignatureStore : ICustomSignatureStore
         return ValueTask.FromResult(InMemoryPaging.Page(
             CustomSignatureFilter.Apply(_signatures.Values.ToList(), filter?.Text),
             beforeId,
+            pageSize,
+            s => s.Id,
+            InMemoryPaging.SignatureComparison(sort)));
+    }
+
+    public ValueTask<Guid?> GetPageCursorAsync(
+        int pageNumber,
+        int pageSize,
+        SignatureListFilter? filter = null,
+        ListSort<SignatureSortColumn>? sort = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureSeeded();
+        return ValueTask.FromResult(InMemoryPaging.PageCursor(
+            CustomSignatureFilter.Apply(_signatures.Values.ToList(), filter?.Text),
+            pageNumber,
             pageSize,
             s => s.Id,
             InMemoryPaging.SignatureComparison(sort)));
@@ -734,10 +802,17 @@ internal static class InMemoryPaging
             return source;
         }
 
+        var query = SearchQuery.Parse(text);
+        if (query.IsEmpty)
+        {
+            return source;
+        }
+
         return source.Where(item =>
-            item.SourceId.Contains(text, StringComparison.OrdinalIgnoreCase)
-            || JsonSerializer.Serialize<EventPayload>(item.Payload, JsonOptions)
-                .Contains(text, StringComparison.OrdinalIgnoreCase));
+            Matches(
+                query,
+                item.SourceId,
+                JsonSerializer.Serialize<EventPayload>(item.Payload, JsonOptions)));
     }
 
     public static IEnumerable<Incident> ApplyFilter(
@@ -748,7 +823,11 @@ internal static class InMemoryPaging
         var text = ListFilterText.Normalize(filter?.Text);
         if (text is not null)
         {
-            query = query.Where(item => item.CorrelationKey.Contains(text, StringComparison.OrdinalIgnoreCase));
+            var search = SearchQuery.Parse(text);
+            if (!search.IsEmpty)
+            {
+                query = query.Where(item => Matches(search, item.CorrelationKey));
+            }
         }
 
         if (filter?.State is { } state && Enum.IsDefined(typeof(IncidentState), state))
@@ -767,7 +846,11 @@ internal static class InMemoryPaging
         var text = ListFilterText.Normalize(filter?.Text);
         if (text is not null)
         {
-            query = query.Where(item => item.Rationale.Contains(text, StringComparison.OrdinalIgnoreCase));
+            var search = SearchQuery.Parse(text);
+            if (!search.IsEmpty)
+            {
+                query = query.Where(item => Matches(search, item.Rationale));
+            }
         }
 
         if (filter?.Outcome is { } outcome && Enum.IsDefined(typeof(DecisionOutcome), outcome))
@@ -786,7 +869,11 @@ internal static class InMemoryPaging
         var text = ListFilterText.Normalize(filter?.Text);
         if (text is not null)
         {
-            query = query.Where(item => item.Summary.Contains(text, StringComparison.OrdinalIgnoreCase));
+            var search = SearchQuery.Parse(text);
+            if (!search.IsEmpty)
+            {
+                query = query.Where(item => Matches(search, item.Summary));
+            }
         }
 
         if (filter?.Stage is { } stage && Enum.IsDefined(typeof(PipelineStage), stage))
@@ -828,6 +915,37 @@ internal static class InMemoryPaging
             : ordered.FindIndex(item => getId(item) == getId(items[0]));
         return new KeysetPage<T>(items, nextCursor, totalCount, preceding);
     }
+
+    public static Guid? PageCursor<T>(
+        IEnumerable<T> source,
+        int pageNumber,
+        int pageSize,
+        Func<T, Guid> getId,
+        Comparison<T>? comparison = null)
+    {
+        var safePageSize = Math.Clamp(pageSize, 1, 200);
+        var ordered = source.ToList();
+        ordered.Sort(comparison ?? CompareBy(getId, getId, SortDirection.Desc));
+        var totalPages = Math.Max(1, (long)Math.Ceiling(ordered.Count / (double)safePageSize));
+        var safePageNumber = Math.Clamp((long)pageNumber, 1, totalPages);
+        if (safePageNumber <= 1)
+        {
+            return null;
+        }
+
+        var boundaryIndex = (safePageNumber - 1) * safePageSize - 1;
+        return boundaryIndex >= 0 && boundaryIndex < ordered.Count
+            ? getId(ordered[(int)boundaryIndex])
+            : null;
+    }
+
+    private static bool Matches(SearchQuery query, params string[] values) =>
+        query.Groups.Any(group =>
+            group.Include.All(term => values.Any(value => Contains(value, term)))
+            && group.Exclude.All(term => values.All(value => !Contains(value, term))));
+
+    private static bool Contains(string value, string filter) =>
+        value.Contains(filter, StringComparison.OrdinalIgnoreCase);
 
     public static Comparison<NormalizedEvent>? EventComparison(ListSort<EventSortColumn>? sort)
     {

@@ -94,6 +94,14 @@ public sealed class AdminConfigAuditorTests
             ListSort<AuditSortColumn>? sort = null,
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(new KeysetPage<AuditRecord>(Records, null, Records.Count, 0));
+
+        public ValueTask<Guid?> GetPageCursorAsync(
+            int pageNumber,
+            int pageSize,
+            AuditListFilter? filter = null,
+            ListSort<AuditSortColumn>? sort = null,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<Guid?>(null);
     }
 
     private sealed class SilentLogger<T> : ILogger<T>

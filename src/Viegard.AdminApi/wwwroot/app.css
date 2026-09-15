@@ -418,6 +418,12 @@ button:hover {
     color: var(--accent-strong);
 }
 
+.filter-hint {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-bottom: 0.45rem;
+}
+
 section {
     border-top: 1px solid var(--panel-border);
     margin-top: 1.5rem;
@@ -711,7 +717,8 @@ section {
     font-weight: 600;
 }
 
-.page-size {
+.page-size,
+.page-jump {
     margin-left: auto;
     display: flex;
     align-items: center;
@@ -720,14 +727,20 @@ section {
     font-size: 0.9rem;
 }
 
-.page-size label {
+.page-jump {
+    margin-left: 0;
+}
+
+.page-size label,
+.page-jump label {
     margin: 0;
     color: var(--muted);
     font-size: 0.9rem;
     font-weight: 600;
 }
 
-.page-size select {
+.page-size select,
+.page-jump input {
     display: block;
     width: auto;
     padding: 0.35rem 0.5rem;
@@ -739,7 +752,12 @@ section {
     box-sizing: border-box;
 }
 
-.page-size button {
+.page-jump input {
+    width: 5rem;
+}
+
+.page-size button,
+.page-jump button {
     margin-top: 0;
 }
 

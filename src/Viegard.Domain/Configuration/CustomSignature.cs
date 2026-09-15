@@ -12,12 +12,15 @@ public enum CustomSignatureMatchType
 {
     Contains,
     Prefix,
+    ContainsAll,
 }
 
 public sealed record CustomSignature
 {
     public const int MaxNameLength = 128;
     public const int MaxPatternLength = 512;
+    public const int MaxPatternTermCount = 3;
+    public const int MaxAdditionalPatternCount = MaxPatternTermCount - 1;
     public const int MaxCategoryLength = 128;
     public const int MaxUpdatedByLength = 128;
     public const int MinSeverity = 0;
@@ -34,6 +37,8 @@ public sealed record CustomSignature
     public required CustomSignatureMatchType MatchType { get; init; }
 
     public required string Pattern { get; init; }
+
+    public IReadOnlyList<string> AdditionalPatterns { get; init; } = [];
 
     public required string Category { get; init; }
 
@@ -69,6 +74,7 @@ public static class CustomSignatureValidator
 
         ValidateRequiredText(signature.Name, CustomSignature.MaxNameLength, "Name", errors);
         ValidateRequiredText(signature.Pattern, CustomSignature.MaxPatternLength, "Pattern", errors);
+        ValidateAdditionalPatterns(signature, errors);
         ValidateRequiredText(signature.Category, CustomSignature.MaxCategoryLength, "Category", errors);
         ValidateRequiredText(signature.UpdatedBy, CustomSignature.MaxUpdatedByLength, "Updated by", errors);
 
@@ -100,18 +106,50 @@ public static class CustomSignatureValidator
         return errors.Count == 0 ? CustomSignatureValidationResult.Success : new(false, errors);
     }
 
-    public static CustomSignature Normalize(CustomSignature signature) => signature with
+    public static CustomSignature Normalize(CustomSignature signature)
     {
-        Name = NormalizeText(signature.Name),
-        Pattern = NormalizeText(signature.Pattern),
-        Category = NormalizeText(signature.Category),
-        UpdatedBy = NormalizeText(signature.UpdatedBy),
-    };
+        ArgumentNullException.ThrowIfNull(signature);
+
+        var additionalPatterns = AdditionalPatternsOrEmpty(signature)
+            .Select(NormalizeText)
+            .ToList();
+
+        return signature with
+        {
+            Name = NormalizeText(signature.Name),
+            MatchType = additionalPatterns.Count > 0 ? CustomSignatureMatchType.ContainsAll : signature.MatchType,
+            Pattern = NormalizeText(signature.Pattern),
+            AdditionalPatterns = additionalPatterns,
+            Category = NormalizeText(signature.Category),
+            UpdatedBy = NormalizeText(signature.UpdatedBy),
+        };
+    }
 
     public static string UniformError(CustomSignatureValidationResult result) =>
         result.IsValid ? string.Empty : string.Join(" ", result.Errors);
 
-    private static void ValidateRequiredText(string value, int maxLength, string fieldName, List<string> errors)
+    private static void ValidateAdditionalPatterns(CustomSignature signature, List<string> errors)
+    {
+        var additionalPatterns = AdditionalPatternsOrEmpty(signature);
+        if (additionalPatterns.Count > CustomSignature.MaxAdditionalPatternCount)
+        {
+            errors.Add($"A signature can include at most {CustomSignature.MaxPatternTermCount} required patterns.");
+        }
+
+        for (var i = 0; i < additionalPatterns.Count; i++)
+        {
+            ValidateRequiredText(
+                additionalPatterns[i],
+                CustomSignature.MaxPatternLength,
+                $"Additional required pattern {i + 2}",
+                errors);
+        }
+    }
+
+    private static IReadOnlyList<string> AdditionalPatternsOrEmpty(CustomSignature signature) =>
+        signature.AdditionalPatterns ?? [];
+
+    private static void ValidateRequiredText(string? value, int maxLength, string fieldName, List<string> errors)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -125,7 +163,7 @@ public static class CustomSignatureValidator
         }
     }
 
-    private static string NormalizeText(string value) => value.Trim();
+    private static string NormalizeText(string? value) => (value ?? string.Empty).Trim();
 }
 
 public static class CustomSignatureSeeds

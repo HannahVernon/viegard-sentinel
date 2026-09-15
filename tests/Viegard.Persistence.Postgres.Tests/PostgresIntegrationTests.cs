@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Viegard.Application.Configuration;
+using Viegard.Application.Detection;
 using Viegard.Application.Stores;
 using Viegard.Domain;
 using Viegard.Domain.Admin;
@@ -646,6 +648,82 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Custom_signature_contains_all_round_trips_lists_and_refreshes()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var token = ViegardId.New().ToString("N");
+        var signature = CustomSignature($"it-contains-all-{ViegardId.New():N}") with
+        {
+            MatchType = CustomSignatureMatchType.ContainsAll,
+            Pattern = $"marker={token}",
+            AdditionalPatterns = [$"campaign={token}", $"path={token}"],
+        };
+
+        var saved = await store.UpsertAsync(signature);
+        var listed = await store.ListPageAsync(
+            beforeId: null,
+            pageSize: 10,
+            filter: new SignatureListFilter(saved.Name),
+            sort: new ListSort<SignatureSortColumn>(SignatureSortColumn.Name, SortDirection.Asc));
+        var restored = Assert.Single(listed.Items);
+
+        Assert.Equal(CustomSignatureMatchType.ContainsAll, restored.MatchType);
+        Assert.Equal([$"campaign={token}", $"path={token}"], restored.AdditionalPatterns);
+
+        var source = new CustomSignatureRuleSource(store, new DetectionOptions());
+        await source.RefreshAsync();
+
+        Assert.Single(source.Evaluate(HttpEvent($"/track?marker={token}&campaign={token}&path={token}")));
+        Assert.Empty(source.Evaluate(HttpEvent($"/track?marker={token}&campaign={token}")));
+    }
+
+    [PostgresFact]
+    public async Task Custom_signature_refresh_skips_unparseable_additional_patterns_json()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var logger = new RecordingLogger<PostgresCustomSignatureStore>();
+        var store = new PostgresCustomSignatureStore(factory, _dataSource!, logger);
+        var token = ViegardId.New().ToString("N");
+        var valid = CustomSignature($"it-valid-json-{ViegardId.New():N}") with
+        {
+            Target = CustomSignatureTarget.HttpUri,
+            Pattern = $"/valid-{token}",
+        };
+        await store.UpsertAsync(valid);
+
+        await using (var db = factory.CreateDbContext())
+        {
+            db.CustomSignatures.Add(new CustomSignatureRow
+            {
+                Id = ViegardId.New(),
+                Name = $"it-invalid-json-{ViegardId.New():N}",
+                Enabled = true,
+                Target = (int)CustomSignatureTarget.HttpUri,
+                MatchType = (int)CustomSignatureMatchType.ContainsAll,
+                Pattern = $"/invalid-{token}",
+                AdditionalPatternsJson = "[not-json",
+                Category = "test",
+                Severity = 3,
+                EvidenceWeight = 1.0,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
+                UpdatedBy = "it",
+                Version = 1,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var source = new CustomSignatureRuleSource(store, new DetectionOptions());
+        var exception = await Record.ExceptionAsync(() => source.RefreshAsync());
+
+        Assert.Null(exception);
+        Assert.Single(source.Evaluate(HttpEvent($"/valid-{token}")));
+        Assert.Empty(source.Evaluate(HttpEvent($"/invalid-{token}")));
+        Assert.Contains(logger.Messages, message => message.Contains("Skipping custom signature", StringComparison.Ordinal));
+    }
+
+    [PostgresFact]
     public async Task Custom_signature_store_notify_wakes_waiter()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -969,6 +1047,24 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         RawObservationId = ViegardId.New(),
     };
 
+    private static NormalizedEvent HttpEvent(string uri) => new()
+    {
+        Id = ViegardId.New(),
+        SourceId = "nginx-test",
+        SourceType = "syslog",
+        OccurredAt = DateTimeOffset.UtcNow,
+        Entities = [],
+        Payload = new HttpRequestEvent
+        {
+            RemoteAddress = "203.0.113.7",
+            Method = "GET",
+            Uri = uri,
+            Protocol = "HTTP/1.1",
+            StatusCode = 200,
+        },
+        RawObservationId = ViegardId.New(),
+    };
+
     private static Incident Incident(string correlationKey, DateTimeOffset windowStart) => new()
     {
         Id = ViegardId.New(),
@@ -1286,6 +1382,28 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             var builder = new DbContextOptionsBuilder<ViegardDbContext>();
             ViegardDbContextConfiguration.Configure(builder, dataSource, TestDatabase.Schema);
             return new ViegardDbContext(builder.Options);
+        }
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel >= LogLevel.Warning)
+            {
+                Messages.Add(formatter(state, exception));
+            }
         }
     }
 }

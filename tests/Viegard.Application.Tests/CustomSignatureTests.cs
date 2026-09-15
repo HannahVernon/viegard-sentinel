@@ -40,6 +40,45 @@ public sealed class CustomSignatureTests
     }
 
     [Fact]
+    public void Validation_enforces_additional_pattern_count_and_per_term_rules()
+    {
+        var valid = Signature(additionalPatterns:
+        [
+            new string('a', CustomSignature.MaxPatternLength),
+            "campaign",
+        ]);
+        Assert.True(CustomSignatureValidator.Validate(valid).IsValid);
+
+        var invalid = valid with
+        {
+            AdditionalPatterns =
+            [
+                "",
+                new string('b', CustomSignature.MaxPatternLength + 1),
+                "extra",
+            ],
+        };
+
+        var result = CustomSignatureValidator.Validate(invalid);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains("at most 3 required patterns", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, e => e.Contains("Additional required pattern 2 is required", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, e => e.Contains("Additional required pattern 3 must be", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Normalize_forces_contains_all_when_additional_terms_are_present()
+    {
+        var normalized = CustomSignatureValidator.Normalize(Signature(
+            matchType: CustomSignatureMatchType.Prefix,
+            additionalPatterns: [" second "]));
+
+        Assert.Equal(CustomSignatureMatchType.ContainsAll, normalized.MatchType);
+        Assert.Equal("second", Assert.Single(normalized.AdditionalPatterns));
+    }
+
+    [Fact]
     public async Task Seed_signature_is_inserted_once_by_in_memory_store()
     {
         var store = new InMemoryCustomSignatureStore();
@@ -50,6 +89,22 @@ public sealed class CustomSignatureTests
         var seed = Assert.Single(first);
         Assert.Equal(CustomSignatureSeeds.AftershipReferralBotName, seed.Name);
         Assert.Equal(seed.Id, Assert.Single(second).Id);
+    }
+
+    [Fact]
+    public async Task In_memory_store_round_trips_additional_patterns()
+    {
+        var store = new InMemoryCustomSignatureStore();
+        var signature = Signature(
+            matchType: CustomSignatureMatchType.ContainsAll,
+            additionalPatterns: ["ref=", "%2Fpage%2F"]);
+
+        var saved = await store.UpsertAsync(signature);
+        var restored = await store.GetAsync(saved.Id);
+
+        Assert.NotNull(restored);
+        Assert.Equal(CustomSignatureMatchType.ContainsAll, restored.MatchType);
+        Assert.Equal(["ref=", "%2Fpage%2F"], restored.AdditionalPatterns);
     }
 
     [Fact]
@@ -93,6 +148,82 @@ public sealed class CustomSignatureTests
 
         Assert.Equal(3, evidence.Count);
         Assert.All(evidence, e => Assert.Equal(1.0, e.Score));
+    }
+
+    [Fact]
+    public void Matcher_contains_all_requires_every_literal_term_case_insensitively()
+    {
+        var signature = Signature(
+            target: CustomSignatureTarget.HttpQuery,
+            matchType: CustomSignatureMatchType.ContainsAll,
+            pattern: "ref=",
+            additionalPatterns: ["%2Fpage%2F", "campaign=abc"]);
+        var options = new DetectionOptions();
+
+        Assert.True(CustomSignatureMatcher.Matches(
+            HttpEvent("/track?REF=%2fPAGE%2f&Campaign=ABC"),
+            signature,
+            options));
+        Assert.False(CustomSignatureMatcher.Matches(
+            HttpEvent("/track?ref=%2Fpage%2F"),
+            signature,
+            options));
+    }
+
+    [Fact]
+    public void Matcher_contains_all_respects_scan_cap()
+    {
+        var signature = Signature(
+            matchType: CustomSignatureMatchType.ContainsAll,
+            pattern: "/track",
+            additionalPatterns: ["campaign=aftership"]);
+        var options = new DetectionOptions { MaxInputCharsToScan = "/track?x=1".Length };
+
+        var matched = CustomSignatureMatcher.Matches(
+            HttpEvent("/track?x=1&campaign=aftership"),
+            signature,
+            options);
+
+        Assert.False(matched);
+    }
+
+    [Fact]
+    public void Matcher_contains_all_with_no_additional_terms_matches_like_contains()
+    {
+        var signature = Signature(
+            target: CustomSignatureTarget.HttpQuery,
+            matchType: CustomSignatureMatchType.ContainsAll,
+            pattern: "token=abc");
+
+        Assert.True(CustomSignatureMatcher.Matches(
+            HttpEvent("/callback?TOKEN=ABC"),
+            signature,
+            new DetectionOptions()));
+    }
+
+    [Fact]
+    public async Task Rule_source_and_shared_matcher_return_same_verdict()
+    {
+        var signature = Signature(
+            target: CustomSignatureTarget.HttpQuery,
+            matchType: CustomSignatureMatchType.ContainsAll,
+            pattern: "ref=",
+            additionalPatterns: ["%2Fpage%2F"]);
+        var options = new DetectionOptions();
+        var source = new CustomSignatureRuleSource(
+            new FakeSignatureStore([signature]),
+            options,
+            new RecordingDiagnostics());
+        await source.RefreshAsync();
+        var matchingEvent = HttpEvent("/track?ref=%2Fpage%2F");
+        var nonMatchingEvent = HttpEvent("/track?ref=aftership");
+
+        Assert.Equal(
+            CustomSignatureMatcher.Matches(matchingEvent, signature, options),
+            source.Evaluate(matchingEvent).Count > 0);
+        Assert.Equal(
+            CustomSignatureMatcher.Matches(nonMatchingEvent, signature, options),
+            source.Evaluate(nonMatchingEvent).Count > 0);
     }
 
     [Fact]
@@ -160,6 +291,7 @@ public sealed class CustomSignatureTests
         CustomSignatureTarget target = CustomSignatureTarget.HttpUri,
         CustomSignatureMatchType matchType = CustomSignatureMatchType.Contains,
         string pattern = "needle",
+        IReadOnlyList<string>? additionalPatterns = null,
         string category = "test",
         int severity = 3) => new()
     {
@@ -169,6 +301,7 @@ public sealed class CustomSignatureTests
         Target = target,
         MatchType = matchType,
         Pattern = pattern,
+        AdditionalPatterns = additionalPatterns ?? [],
         Category = category,
         Severity = severity,
         EvidenceWeight = 1.0,

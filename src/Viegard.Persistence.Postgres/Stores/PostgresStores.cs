@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using Viegard.Application.Audit;
 using Viegard.Application.Stores;
@@ -1025,7 +1026,10 @@ public sealed class PostgresSourceOffsetStore(IDbContextFactory<ViegardDbContext
     }
 }
 
-public sealed class PostgresCustomSignatureStore(IDbContextFactory<ViegardDbContext> factory, NpgsqlDataSource dataSource)
+public sealed class PostgresCustomSignatureStore(
+    IDbContextFactory<ViegardDbContext> factory,
+    NpgsqlDataSource dataSource,
+    ILogger<PostgresCustomSignatureStore>? logger = null)
     : ICustomSignatureStore
 {
     private const string NotifyChannel = "viegard_config_signatures";
@@ -1044,7 +1048,7 @@ public sealed class PostgresCustomSignatureStore(IDbContextFactory<ViegardDbCont
             .ThenBy(s => s.Id)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
-        return rows.Select(r => r.ToDomain()).ToList();
+        return MapRows(rows).ToList();
     }
 
     public async ValueTask<KeysetPage<CustomSignature>> ListPageAsync(
@@ -1062,8 +1066,9 @@ public sealed class PostgresCustomSignatureStore(IDbContextFactory<ViegardDbCont
             .AsNoTracking()
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
-        var items = rows.Take(safePageSize).Select(r => r.ToDomain()).ToList();
-        var nextCursor = rows.Count > safePageSize && items.Count > 0 ? items[^1].Id : (Guid?)null;
+        var pageRows = rows.Take(safePageSize).ToList();
+        var items = MapRows(pageRows).ToList();
+        var nextCursor = rows.Count > safePageSize && pageRows.Count > 0 ? pageRows[^1].Id : (Guid?)null;
         var totalCount = await db.CustomSignatures.FromSqlInterpolated(BuildSignatureQuery(filter, sort, seekBeforeId: null, seekAfterId: null, limit: null))
             .LongCountAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -1100,6 +1105,7 @@ public sealed class PostgresCustomSignatureStore(IDbContextFactory<ViegardDbCont
     [
         index => $"s.name ILIKE {{{index}}} ESCAPE '\\'",
         index => $"s.pattern ILIKE {{{index}}} ESCAPE '\\'",
+        index => $"COALESCE(s.additional_patterns_json, '') ILIKE {{{index}}} ESCAPE '\\'",
         index => $"s.category ILIKE {{{index}}} ESCAPE '\\'",
     ];
 
@@ -1175,7 +1181,14 @@ public sealed class PostgresCustomSignatureStore(IDbContextFactory<ViegardDbCont
         var row = await db.CustomSignatures.AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == id, cancellationToken)
             .ConfigureAwait(false);
-        return row?.ToDomain();
+        if (row is null)
+        {
+            return null;
+        }
+
+        return row.TryToDomain(out var signature, out var errors)
+            ? signature
+            : WarnInvalidRow(row, errors);
     }
 
     private static PostgresSortDefinition? SignatureSortDefinition(SignatureSortColumn column) => column switch
@@ -1262,11 +1275,37 @@ public sealed class PostgresCustomSignatureStore(IDbContextFactory<ViegardDbCont
             return null;
         }
 
-        var removed = existing.ToDomain();
+        var removed = existing.TryToDomain(out var signature, out var errors)
+            ? signature
+            : WarnInvalidRow(existing, errors);
         db.CustomSignatures.Remove(existing);
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         await NotifyChangedAsync(cancellationToken).ConfigureAwait(false);
         return removed;
+    }
+
+    private IEnumerable<CustomSignature> MapRows(IEnumerable<CustomSignatureRow> rows)
+    {
+        foreach (var row in rows)
+        {
+            if (row.TryToDomain(out var signature, out var errors))
+            {
+                yield return signature!;
+                continue;
+            }
+
+            WarnInvalidRow(row, errors);
+        }
+    }
+
+    private CustomSignature? WarnInvalidRow(CustomSignatureRow row, IReadOnlyList<string> errors)
+    {
+        logger?.LogWarning(
+            "Skipping custom signature {SignatureId} version {Version}: {Errors}",
+            row.Id,
+            row.Version,
+            string.Join(" ", errors));
+        return null;
     }
 
     public async ValueTask<long> WaitForChangeAsync(

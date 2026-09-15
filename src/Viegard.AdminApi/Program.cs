@@ -14,6 +14,7 @@ using Viegard.AdminApi.Signatures;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
 using Viegard.Application.Configuration;
+using Viegard.Application.Detection;
 using Viegard.Application.Queues;
 using Viegard.Application.Retention;
 using Viegard.Application.Secrets;
@@ -79,6 +80,13 @@ builder.Services
     .Bind(builder.Configuration.GetSection(AdminAuthOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<AdminAuthOptions>, AdminAuthOptionsValidator>();
+
+builder.Services
+    .AddOptions<DetectionOptions>()
+    .Bind(builder.Configuration.GetSection(DetectionOptions.SectionName))
+    .Validate(o => o.MaxInputCharsToScan > 0, "Detection MaxInputCharsToScan must be positive.")
+    .Validate(o => o.MaxEvidencePerRule > 0, "Detection MaxEvidencePerRule must be positive.")
+    .ValidateOnStart();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddRazorComponents();

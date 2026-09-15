@@ -394,6 +394,9 @@ internal static class Mapping
         Target = (int)signature.Target,
         MatchType = (int)signature.MatchType,
         Pattern = signature.Pattern,
+        AdditionalPatternsJson = AdditionalPatternsOrEmpty(signature).Count == 0
+            ? null
+            : ToJson(AdditionalPatternsOrEmpty(signature)),
         Category = signature.Category,
         Severity = signature.Severity,
         EvidenceWeight = signature.EvidenceWeight,
@@ -411,6 +414,7 @@ internal static class Mapping
         Target = (CustomSignatureTarget)row.Target,
         MatchType = (CustomSignatureMatchType)row.MatchType,
         Pattern = row.Pattern,
+        AdditionalPatterns = AdditionalPatternsFromJson(row.AdditionalPatternsJson),
         Category = row.Category,
         Severity = row.Severity,
         EvidenceWeight = row.EvidenceWeight,
@@ -419,6 +423,37 @@ internal static class Mapping
         UpdatedBy = row.UpdatedBy,
         Version = row.Version,
     };
+
+    public static bool TryToDomain(
+        this CustomSignatureRow row,
+        out CustomSignature? signature,
+        out IReadOnlyList<string> errors)
+    {
+        try
+        {
+            signature = row.ToDomain();
+            errors = [];
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            signature = null;
+            errors = [$"Additional patterns JSON is invalid: {ex.Message}"];
+            return false;
+        }
+        catch (InvalidOperationException ex)
+        {
+            signature = null;
+            errors = [$"Additional patterns JSON is invalid: {ex.Message}"];
+            return false;
+        }
+    }
+
+    private static IReadOnlyList<string> AdditionalPatternsFromJson(string? json) =>
+        string.IsNullOrWhiteSpace(json) ? [] : FromJson<List<string>>(json);
+
+    private static IReadOnlyList<string> AdditionalPatternsOrEmpty(CustomSignature signature) =>
+        signature.AdditionalPatterns ?? [];
 
     public static RetentionSettingsRow ToRow(this RetentionSettings settings) => new()
     {

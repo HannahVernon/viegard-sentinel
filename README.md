@@ -20,7 +20,7 @@ Ledger    | Audit       | Immutable audit trail for every decision and action
 
 ## Status
 
-Viegard is in active development and runs live on a production self-hosted deployment, ingesting real SWAG/nginx syslog traffic in dry-run posture.  The pipeline (ingestion, normalization, correlation, deterministic classification, and policy evaluation) and the administrative UI (local accounts with mandatory TOTP, WebAuthn security keys, read views with server-side filtering and sorting, and runtime-editable detection signatures) are implemented.  Local AI inference (Phase 6) and real remediation actions (Phase 7) are not yet implemented; every decision is currently record-only.
+Viegard is in active development and runs live on a production self-hosted deployment, ingesting real SWAG/nginx syslog traffic in dry-run posture.  The pipeline (ingestion, normalization, correlation, deterministic classification, and policy evaluation) and the administrative UI (local accounts with mandatory TOTP, WebAuthn security keys, read views with server-side filtering and sorting, and runtime-editable detection signatures with literal Contains, Prefix, and ContainsAll matching plus bounded preview) are implemented.  Local AI inference (Phase 6) and real remediation actions (Phase 7) are not yet implemented; every decision is currently record-only.
 
 See [TODO.md](TODO.md) for the current work queue, [DECISIONS.md](DECISIONS.md) for the architectural decision record, and [ARCHITECTURE.md](ARCHITECTURE.md) for the system design.
 

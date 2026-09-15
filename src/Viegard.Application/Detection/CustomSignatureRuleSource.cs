@@ -49,14 +49,15 @@ public sealed class CustomSignatureRuleSource(
                     continue;
                 }
 
-                var validation = CustomSignatureValidator.Validate(signature);
+                var normalized = CustomSignatureValidator.Normalize(signature);
+                var validation = CustomSignatureValidator.Validate(normalized);
                 if (!validation.IsValid)
                 {
-                    WarnInvalidOnce(signature, validation.Errors);
+                    WarnInvalidOnce(normalized, validation.Errors);
                     continue;
                 }
 
-                next.Add(new CustomSignatureDetectionRule(signature, options));
+                next.Add(new CustomSignatureDetectionRule(normalized, options));
             }
 
             Interlocked.Exchange(ref _rules, next.ToArray());
@@ -102,26 +103,7 @@ public sealed class CustomSignatureRuleSource(
 
         public IReadOnlyList<EvidenceItem> Evaluate(NormalizedEvent e)
         {
-            if (e.Payload is not HttpRequestEvent http)
-            {
-                return [];
-            }
-
-            var targetValue = GetTargetValue(http, signature.Target);
-            if (string.IsNullOrEmpty(targetValue))
-            {
-                return [];
-            }
-
-            var scanned = DetectionText.Limit(targetValue, options.MaxInputCharsToScan);
-            var matched = signature.MatchType switch
-            {
-                CustomSignatureMatchType.Contains => scanned.Contains(signature.Pattern, StringComparison.OrdinalIgnoreCase),
-                CustomSignatureMatchType.Prefix => scanned.StartsWith(signature.Pattern, StringComparison.OrdinalIgnoreCase),
-                _ => false,
-            };
-
-            if (!matched)
+            if (!CustomSignatureMatcher.Matches(e, signature, options))
             {
                 return [];
             }
@@ -130,53 +112,16 @@ public sealed class CustomSignatureRuleSource(
             [
                 DetectionText.Evidence(
                     RuleId,
-                    $"custom signature '{DetectionText.Display(signature.Name)}' matched {signature.Target} pattern '{DetectionText.Display(signature.Pattern)}' (category {DetectionText.Display(signature.Category)}, severity {signature.Severity}).",
+                    $"custom signature '{DetectionText.Display(signature.Name)}' matched {signature.Target} pattern {PatternDescription(signature)} (category {DetectionText.Display(signature.Category)}, severity {signature.Severity}).",
                     signature.EvidenceWeight,
                     e.Id),
             ];
         }
 
-        private static string GetTargetValue(HttpRequestEvent http, CustomSignatureTarget target) => target switch
-        {
-            CustomSignatureTarget.HttpUri => http.Uri ?? string.Empty,
-            CustomSignatureTarget.HttpQuery => QueryFromUri(http.Uri),
-            CustomSignatureTarget.HttpUserAgent => http.UserAgent ?? string.Empty,
-            CustomSignatureTarget.HttpPath => PathFromUri(http.Uri),
-            _ => string.Empty,
-        };
-
-        private static string QueryFromUri(string? uri)
-        {
-            if (string.IsNullOrEmpty(uri))
-            {
-                return string.Empty;
-            }
-
-            var queryStart = uri.IndexOf('?', StringComparison.Ordinal);
-            if (queryStart < 0 || queryStart == uri.Length - 1)
-            {
-                return string.Empty;
-            }
-
-            var fragmentStart = uri.IndexOf('#', queryStart + 1);
-            return fragmentStart < 0
-                ? uri[(queryStart + 1)..]
-                : uri[(queryStart + 1)..fragmentStart];
-        }
-
-        private static string PathFromUri(string? uri)
-        {
-            if (string.IsNullOrEmpty(uri))
-            {
-                return string.Empty;
-            }
-
-            var queryStart = uri.IndexOf('?', StringComparison.Ordinal);
-            var fragmentStart = uri.IndexOf('#', StringComparison.Ordinal);
-            var end = queryStart < 0
-                ? fragmentStart < 0 ? uri.Length : fragmentStart
-                : fragmentStart < 0 ? queryStart : Math.Min(queryStart, fragmentStart);
-            return uri[..end];
-        }
+        private static string PatternDescription(CustomSignature signature) =>
+            string.Join(" + ", new[] { signature.Pattern }
+                .Concat(signature.AdditionalPatterns ?? [])
+                .Where(term => !string.IsNullOrWhiteSpace(term))
+                .Select(term => $"'{DetectionText.Display(term)}'"));
     }
 }

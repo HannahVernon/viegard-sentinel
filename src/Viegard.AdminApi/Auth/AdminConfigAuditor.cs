@@ -32,6 +32,8 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
                 {
                     Action = action,
                     Username = username,
+                    BeforeTerms = SignatureTerms(before),
+                    AfterTerms = SignatureTerms(after),
                     Before = before,
                     After = after,
                 }, JsonOptions),
@@ -41,6 +43,18 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
         {
             logger.LogError(ex, "Failed to append admin configuration audit record.");
         }
+    }
+
+    private static IReadOnlyList<string>? SignatureTerms(CustomSignature? signature)
+    {
+        if (signature is null)
+        {
+            return null;
+        }
+
+        var terms = new List<string> { signature.Pattern };
+        terms.AddRange(signature.AdditionalPatterns ?? []);
+        return terms;
     }
 
     public async ValueTask RecordRetentionSettingsWriteAsync(

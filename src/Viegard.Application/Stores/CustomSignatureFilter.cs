@@ -24,11 +24,17 @@ public static class CustomSignatureFilter
         return signatures
             .Where(signature => Matches(
                 query,
-                signature.Name,
-                signature.Pattern,
-                signature.Category))
+                SignatureSearchValues(signature)))
             .ToList();
     }
+
+    private static string[] SignatureSearchValues(CustomSignature signature) =>
+    [
+        signature.Name,
+        signature.Pattern,
+        .. (signature.AdditionalPatterns ?? []),
+        signature.Category,
+    ];
 
     private static bool Matches(SearchQuery query, params string[] values) =>
         query.Groups.Any(group =>

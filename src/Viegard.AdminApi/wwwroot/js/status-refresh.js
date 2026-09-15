@@ -91,6 +91,7 @@
                 // redirect rather than a bare 401.  Stop polling either way.
                 if (timer) {
                     clearInterval(timer);
+                    timer = null;
                 }
 
                 return;
@@ -116,4 +117,14 @@
     }
 
     timer = setInterval(refresh, intervalMs);
+
+    // Background tabs get throttled timers, so an overdue tick can leave
+    // stale values visible for a few seconds after switching back.  Refresh
+    // immediately when the tab becomes visible again (unless polling was
+    // stopped because the session ended).
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible" && timer) {
+            refresh();
+        }
+    });
 })();

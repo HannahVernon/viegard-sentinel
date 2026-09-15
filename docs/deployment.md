@@ -28,7 +28,15 @@ sudo ./viegard-deploy.sh upgrade --branch main
 
 # Health, cert expiry, and latest-backup overview:
 ./viegard-deploy.sh status
+
+# Write the automatable compose settings for you (direct TLS, admin
+# allowlist, retention with the reference periods, syslog listener):
+sudo ./viegard-deploy.sh configure --domain admin.example.com \
+    --allowed-sources 192.0.2.0/24 --enable-retention \
+    --enable-syslog --syslog-sources 192.0.2.10
 ```
+
+The `configure` command writes `deploy/docker-compose.generated.yml` and points `COMPOSE_FILE` in `deploy/.env` at `docker-compose.generated.yml:docker-compose.yml`.  Compose applies the files left to right with later files winning per setting, so the generated file provides defaults and **your `docker-compose.yml` always has the final word**: re-declare any variable there to override the generated value.  Re-running `configure` regenerates the whole generated file from the options given, so pass the complete set you want each run.  Generated array entries (allowlists, the maintenance role) use high indices (`__9`, `__50`+) so they never collide with the `__0..N` entries your own file declares.  One caution: published port lists are appended across files, so if your `docker-compose.yml` already publishes an admin HTTPS port, keep TLS configuration there and do not pass `--domain` to `configure`.
 
 Safety properties: secrets are generated only when missing and never overwritten or printed; an existing `docker-compose.yml` is never touched; certificate issuance is skipped when the certificate already exists; re-running `install` is safe.  The script does not edit `docker-compose.yml` for you - after a fresh install it prints a checklist of the operator-specific settings (exposure mode, WebAuthn relying party, AllowedSources, retention periods, data sources).
 

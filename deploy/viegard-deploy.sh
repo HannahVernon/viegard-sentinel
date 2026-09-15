@@ -3,11 +3,17 @@
 # viegard-deploy.sh - stand up, upgrade, and check a Viegard deployment.
 #
 # Commands:
-#   install   First-time setup on a fresh Debian host: prerequisites, clone,
-#             secrets, optional TLS certificate + renewal hook, build, start.
-#   upgrade   Pull the configured branch and rebuild/restart only when new
-#             commits arrived (use --force to rebuild regardless).
-#   status    Show container state, admin liveness, cert expiry, last backup.
+#   install    First-time setup on a fresh Debian host: prerequisites, clone,
+#              secrets, optional TLS certificate + renewal hook, build, start.
+#   configure  Write deploy/docker-compose.generated.yml from the options
+#              below and wire it in via COMPOSE_FILE in deploy/.env.  The
+#              generated file is applied FIRST and your docker-compose.yml
+#              is applied AFTER it, so any setting you declare in your own
+#              file wins.  Re-running configure regenerates the whole file:
+#              pass the complete set of options you want each time.
+#   upgrade    Pull the configured branch and rebuild/restart only when new
+#              commits arrived (use --force to rebuild regardless).
+#   status     Show container state, admin liveness, cert expiry, last backup.
 #
 # Common options:
 #   --dir <path>      Deployment root            (default /opt/viegard-sentinel)
@@ -17,13 +23,35 @@
 #
 # install options:
 #   --repo-url <url>  Clone source (default the public Forgejo repository)
-#   --domain <host>   Admin host name for direct TLS.  Issues a Let's
-#                     Encrypt certificate via host certbot and installs a
+#   --email <addr>    ACME registration email (required with --domain)
+#
+# install + configure options:
+#   --domain <host>   Admin host name for direct TLS.  install: issues a
+#                     Let's Encrypt certificate via host certbot and adds a
 #                     renewal hook that copies each renewed certificate
 #                     into the stack and restarts the admin service
-#                     (decision record D-0034 in DECISIONS.md).  Omit for
-#                     loopback-only exposure (default).
-#   --email <addr>    ACME registration email (required with --domain)
+#                     (decision record D-0034 in DECISIONS.md).  Both
+#                     commands: writes the direct-TLS settings (exposure,
+#                     certificate mounts, WebAuthn relying party/origin)
+#                     into the generated compose file.  Omit for
+#                     loopback-only exposure (default).  NOTE: port lists
+#                     are appended across compose files; if your own
+#                     docker-compose.yml already publishes an admin HTTPS
+#                     port, keep TLS there and do not pass --domain to
+#                     configure, or the two published ports will conflict.
+#   --https-port <n>  Host port published for admin HTTPS (default 443)
+#   --allowed-sources <cidr[,cidr...]>
+#                     Admin allowlist entries (fail-closed; empty keeps
+#                     loopback-only)
+#   --enable-retention
+#                     Adds the singleton 'maintenance' role and the
+#                     reference retention periods (raw 30d, events 90d,
+#                     decision chain 180d, audit 365d, dead-letters 30d,
+#                     expired sessions 30d).  Override any single value by
+#                     declaring it in your own docker-compose.yml.
+#   --enable-syslog --syslog-sources <cidr[,cidr...]>
+#                     Enables the UDP syslog listener, publishes 5514/udp,
+#                     and sets its fail-closed source allowlist.
 #
 # Secrets are generated only when missing and are never overwritten or
 # printed.  docker-compose.yml is copied from the example only when missing;
@@ -39,6 +67,11 @@ BRANCH=dev
 REPO_URL="$DEFAULT_REPO_URL"
 DOMAIN=""
 EMAIL=""
+HTTPS_PORT=443
+ALLOWED_SOURCES=""
+ENABLE_RETENTION=0
+ENABLE_SYSLOG=0
+SYSLOG_SOURCES=""
 ASSUME_YES=0
 FORCE=0
 COMMAND="${1:-}"
@@ -51,15 +84,20 @@ die()   { printf '\033[1;31m[viegard]\033[0m %s\n' "$*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --dir)      DIR="$2"; shift 2 ;;
-        --branch)   BRANCH="$2"; shift 2 ;;
-        --repo-url) REPO_URL="$2"; shift 2 ;;
-        --domain)   DOMAIN="$2"; shift 2 ;;
-        --email)    EMAIL="$2"; shift 2 ;;
-        --yes)      ASSUME_YES=1; shift ;;
-        --force)    FORCE=1; shift ;;
-        -h|--help)  usage 0 ;;
-        *)          die "Unknown option: $1 (try --help)" ;;
+        --dir)              DIR="$2"; shift 2 ;;
+        --branch)           BRANCH="$2"; shift 2 ;;
+        --repo-url)         REPO_URL="$2"; shift 2 ;;
+        --domain)           DOMAIN="$2"; shift 2 ;;
+        --email)            EMAIL="$2"; shift 2 ;;
+        --https-port)       HTTPS_PORT="$2"; shift 2 ;;
+        --allowed-sources)  ALLOWED_SOURCES="$2"; shift 2 ;;
+        --enable-retention) ENABLE_RETENTION=1; shift ;;
+        --enable-syslog)    ENABLE_SYSLOG=1; shift ;;
+        --syslog-sources)   SYSLOG_SOURCES="$2"; shift 2 ;;
+        --yes)              ASSUME_YES=1; shift ;;
+        --force)            FORCE=1; shift ;;
+        -h|--help)          usage 0 ;;
+        *)                  die "Unknown option: $1 (try --help)" ;;
     esac
 done
 
@@ -225,15 +263,18 @@ Post-install checklist (edit deploy/docker-compose.yml, then
     deploy/secrets/viegard-admin-bootstrap-password (root-readable only;
     forced password change + TOTP enrollment on first login; store the
     recovery codes OUTSIDE Viegard).
- 2. Direct TLS exposure: set Viegard__Admin__Exposure=direct, the
-    Tls__CertificatePath/KeyPath mounts, WebAuthn RelyingPartyId +
-    Origins__0 for your domain, and Viegard__Admin__AllowedSources__*.
+ 2. Direct TLS, admin allowlist, retention, and syslog can all be written
+    for you by the configure command (generated file loses to any setting
+    you declare in docker-compose.yml):
+      viegard-deploy.sh configure --domain <host> \
+        --allowed-sources <cidr,...> --enable-retention \
+        --enable-syslog --syslog-sources <cidr,...>
  3. Data sources ship disabled; enable deliberately, one at a time
     (docs/swag-syslog-setup.md for SWAG; firewall UDP 5514 via the
     DOCKER-USER chain per docs/deployment.md).
- 4. Retention is fail-safe OFF: configure Viegard__Retention__* and add
-    the singleton 'maintenance' role to enable purging (example values
-    in the Data retention section of docs/deployment.md).
+ 4. Retention is fail-safe OFF until configured (--enable-retention above
+    writes the reference periods; example values in the Data retention
+    section of docs/deployment.md).
  5. Run the backup restore drill (docs/deployment.md section 4) once the
     first dump appears in deploy/backups/postgres/.
 ------------------------------------------------------------------------
@@ -248,10 +289,139 @@ cmd_install() {
     prepare_secrets_and_dirs
     prepare_compose_file
     issue_certificate
+    if any_configure_flags; then
+        [ "$ENABLE_SYSLOG" -eq 1 ] && [ -z "$SYSLOG_SOURCES" ] && die "--enable-syslog requires --syslog-sources (the allowlist is fail-closed)."
+        generate_compose_fragment
+    fi
     start_stack
     verify_stack || true
     post_install_checklist
     log "Install complete.  Deployment root: $DIR (branch $BRANCH)."
+}
+
+# -------------------------------------------------------------- configure --
+
+any_configure_flags() {
+    [ -n "$DOMAIN" ] || [ -n "$ALLOWED_SOURCES" ] || [ "$ENABLE_RETENTION" -eq 1 ] || [ "$ENABLE_SYSLOG" -eq 1 ]
+}
+
+emit_csv_env() {
+    # emit_csv_env <out-file> <env-prefix> <start-index> <csv>
+    # Generated array entries start at a high index so they never collide
+    # with operator-declared __0..__N entries in docker-compose.yml
+    # (the .NET configuration binder orders sparse indices numerically).
+    local out="$1" prefix="$2" index="$3" csv="$4" item
+    local IFS=','
+    for item in $csv; do
+        item="$(printf '%s' "$item" | tr -d '[:space:]')"
+        [ -n "$item" ] || continue
+        printf '      %s__%s: "%s"\n' "$prefix" "$index" "$item" >> "$out"
+        index=$((index + 1))
+    done
+}
+
+generate_compose_fragment() {
+    local d out tmp; d="$(compose_dir)"
+    out="$d/docker-compose.generated.yml"
+    tmp="$out.tmp"
+
+    {
+        printf '# GENERATED by viegard-deploy.sh - do not hand-edit.\n'
+        printf '# Applied BEFORE docker-compose.yml (see COMPOSE_FILE in .env), so any\n'
+        printf '# setting you declare in docker-compose.yml overrides this file.\n'
+        printf '# Regenerate with: viegard-deploy.sh configure <options>\n'
+        printf 'services:\n'
+    } > "$tmp"
+
+    if [ -n "$DOMAIN" ] || [ -n "$ALLOWED_SOURCES" ]; then
+        printf '  viegard-admin:\n' >> "$tmp"
+        printf '    environment:\n' >> "$tmp"
+        if [ -n "$DOMAIN" ]; then
+            cat >> "$tmp" <<TLS
+      Viegard__Admin__Exposure: direct
+      Viegard__Admin__Tls__CertificatePath: /run/viegard/certs/admin.crt
+      Viegard__Admin__Tls__KeyPath: /run/viegard/certs/admin.key
+      Viegard__Admin__Tls__Port: "8443"
+      Viegard__Admin__WebAuthn__RelyingPartyId: $DOMAIN
+      Viegard__Admin__WebAuthn__Origins__0: https://$DOMAIN
+TLS
+        fi
+        [ -n "$ALLOWED_SOURCES" ] && emit_csv_env "$tmp" "Viegard__Admin__AllowedSources" 50 "$ALLOWED_SOURCES"
+        if [ -n "$DOMAIN" ]; then
+            cat >> "$tmp" <<TLSMOUNT
+    volumes:
+      - ./certs:/run/viegard/certs:ro
+    ports:
+      - "$HTTPS_PORT:8443"
+TLSMOUNT
+        fi
+    fi
+
+    if [ "$ENABLE_RETENTION" -eq 1 ] || [ "$ENABLE_SYSLOG" -eq 1 ]; then
+        printf '  viegard-pipeline:\n' >> "$tmp"
+        printf '    environment:\n' >> "$tmp"
+        if [ "$ENABLE_RETENTION" -eq 1 ]; then
+            cat >> "$tmp" <<'RETENTION'
+      # Singleton maintenance role at a high index so it never collides
+      # with the Roles__0..N your docker-compose.yml declares.
+      Viegard__Host__Roles__9: maintenance
+      Viegard__Retention__RawObservationsDays: "30"
+      Viegard__Retention__EventsDays: "90"
+      Viegard__Retention__IncidentsDays: "180"
+      Viegard__Retention__ClassificationsDays: "180"
+      Viegard__Retention__DecisionsDays: "180"
+      Viegard__Retention__ActionsDays: "180"
+      Viegard__Retention__AuditRecordsDays: "365"
+      Viegard__Retention__DeadLetteredQueueMessagesDays: "30"
+      Viegard__Retention__ExpiredAdminSessionsDays: "30"
+RETENTION
+        fi
+        if [ "$ENABLE_SYSLOG" -eq 1 ]; then
+            printf '      Viegard__Sources__Syslog__Enabled: "true"\n' >> "$tmp"
+            [ -n "$SYSLOG_SOURCES" ] && emit_csv_env "$tmp" "Viegard__Sources__Syslog__AllowedSources" 50 "$SYSLOG_SOURCES"
+            cat >> "$tmp" <<'SYSLOGPORT'
+    ports:
+      - "5514:5514/udp"
+SYSLOGPORT
+        fi
+    fi
+
+    mv "$tmp" "$out"
+    log "Wrote $out."
+
+    # Wire the layering into .env: generated file first, operator file last
+    # (later files win per setting).
+    local envfile="$d/.env" wanted="COMPOSE_FILE=docker-compose.generated.yml:docker-compose.yml"
+    if [ -f "$envfile" ] && grep -q '^COMPOSE_FILE=' "$envfile"; then
+        if ! grep -qxF "$wanted" "$envfile"; then
+            sed -i "s|^COMPOSE_FILE=.*|$wanted|" "$envfile"
+            log "Updated COMPOSE_FILE in $envfile."
+        fi
+    else
+        printf '%s\n' "$wanted" >> "$envfile"
+        log "Added COMPOSE_FILE to $envfile."
+    fi
+
+    if docker compose version >/dev/null 2>&1; then
+        if (cd "$d" && docker compose config --quiet); then
+            log "Merged compose configuration validated."
+        else
+            die "docker compose config rejected the merged configuration; inspect $out and docker-compose.yml."
+        fi
+    fi
+}
+
+cmd_configure() {
+    require_root
+    local d; d="$(compose_dir)"
+    [ -f "$d/docker-compose.yml" ] || die "$d/docker-compose.yml not found; run install first."
+    any_configure_flags || die "configure needs at least one option (--domain, --allowed-sources, --enable-retention, --enable-syslog); pass the complete set you want each run."
+    [ "$ENABLE_SYSLOG" -eq 1 ] && [ -z "$SYSLOG_SOURCES" ] && die "--enable-syslog requires --syslog-sources (the allowlist is fail-closed)."
+    if [ -n "$DOMAIN" ] && [ ! -f "$d/certs/admin.crt" ]; then
+        warn "No certificate at $d/certs/admin.crt yet; direct TLS will not start until one exists (run install --domain --email, or place PEMs manually)."
+    fi
+    generate_compose_fragment
+    log "Apply with: cd $d && docker compose up -d"
 }
 
 # ---------------------------------------------------------------- upgrade --
@@ -316,9 +486,10 @@ cmd_status() {
 # ------------------------------------------------------------------- main --
 
 case "$COMMAND" in
-    install) cmd_install ;;
-    upgrade) cmd_upgrade ;;
-    status)  cmd_status ;;
+    install)   cmd_install ;;
+    configure) cmd_configure ;;
+    upgrade)   cmd_upgrade ;;
+    status)    cmd_status ;;
     -h|--help|help) usage 0 ;;
     *) usage 1 ;;
 esac

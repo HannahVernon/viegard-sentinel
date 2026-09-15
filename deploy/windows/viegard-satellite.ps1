@@ -936,6 +936,14 @@ function Get-ServiceExecutablePath {
         }
     }
 
+    # Unquoted registrations must not be split at the first space: paths under
+    # directories such as Program Files contain spaces.  Take everything
+    # through the executable extension instead.
+    $exeIndex = $trimmedPath.IndexOf(".exe", [System.StringComparison]::OrdinalIgnoreCase)
+    if ($exeIndex -gt 0) {
+        return $trimmedPath.Substring(0, $exeIndex + 4)
+    }
+
     $spaceIndex = $trimmedPath.IndexOf(' ')
     if ($spaceIndex -gt 0) {
         return $trimmedPath.Substring(0, $spaceIndex)
@@ -1376,7 +1384,30 @@ function Set-ServiceRegistration {
         "restart/60000/restart/300000/restart/900000"
     )
     Invoke-Sc -ArgumentList @("failureflag", $script:ServiceName, "1")
+    Set-ServiceImagePath -ExecutablePath $ExecutablePath
     Set-ServiceEnvironment
+}
+
+function Set-ServiceImagePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ExecutablePath
+    )
+
+    # Windows PowerShell 5.1 native-argument quoting can strip the embedded
+    # quotes around a binPath value on its way into sc.exe, silently
+    # registering an UNQUOTED image path.  For a path containing spaces that
+    # is both a hijack risk (the classic unquoted-service-path issue) and the
+    # cause of wrong install-directory resolution on upgrade.  Writing the
+    # registry value directly is deterministic, so enforce the quoted form
+    # here regardless of what sc.exe recorded.
+    $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Services\" + $script:ServiceName
+    $quotedImagePath = '"' + $ExecutablePath + '"'
+    $currentImagePath = (Get-ItemProperty -LiteralPath $registryPath -Name "ImagePath" -ErrorAction SilentlyContinue).ImagePath
+    if ($currentImagePath -cne $quotedImagePath) {
+        Set-ItemProperty -LiteralPath $registryPath -Name "ImagePath" -Value $quotedImagePath
+        Write-InfoLine "Enforced quoted service image path: $quotedImagePath"
+    }
 }
 
 function Get-RelevantApplicationEvents {
@@ -1745,6 +1776,10 @@ function Invoke-Upgrade {
 
     $effectiveInstallDir = Get-EffectiveInstallDir
     $appDirectory = Join-Path $effectiveInstallDir "app"
+    if (-not (Test-Path -LiteralPath (Join-Path $appDirectory "Viegard.PipelineHost.exe") -PathType Leaf)) {
+        Stop-WithMessage ("The resolved install directory does not contain an existing satellite deployment: " + $appDirectory + ".  The service image path may be misregistered.  Re-run install with -InstallDir pointing at the original install directory (for example 'C:\Program Files\Viegard Satellite\" + $script:ClientProfile.Name + "').")
+    }
+
     $serviceAccountConfig = $null
     if ((Test-ParameterProvided -Name "ServiceAccount") -or (Test-ParameterProvided -Name "CustomServiceAccountName") -or (Test-ParameterProvided -Name "CustomServiceAccountPassword")) {
         $serviceAccountConfig = Get-ServiceAccountConfiguration

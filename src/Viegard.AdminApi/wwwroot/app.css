@@ -591,6 +591,12 @@ section {
     margin-top: 1rem;
 }
 
+.data-table caption {
+    color: var(--muted);
+    padding-bottom: 0.5rem;
+    text-align: left;
+}
+
 .data-table th,
 .data-table td {
     border: 1px solid var(--panel-border);

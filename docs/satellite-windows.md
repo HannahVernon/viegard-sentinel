@@ -172,7 +172,7 @@ Choice | Account | Trade-off
 - Registry environment value `DOTNET_ENVIRONMENT=Production` for the service.
 - ACLs granting the selected service account read access to the MDaemon logs and to the local secret file.  The secrets directory is restricted to SYSTEM, Administrators, and that service account.
 
-After the service starts, check the Viegard admin UI `/queues` page for telemetry from the new instance ID.
+After the service starts, check the Viegard admin UI `/queues` page.  The Instances table should show the new instance ID, and the Queues table should continue to show one shared row per queue.
 
 ## Upgrade
 

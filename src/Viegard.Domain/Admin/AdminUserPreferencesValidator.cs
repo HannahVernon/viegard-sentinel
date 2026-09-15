@@ -6,6 +6,7 @@ public static class AdminUserPreferencesValidator
         Guid userId,
         string? timeZoneId,
         int pageSize,
+        int statusRefreshSeconds,
         DateTimeOffset updatedAt,
         out AdminUserPreferences preferences,
         out string error)
@@ -33,6 +34,10 @@ public static class AdminUserPreferencesValidator
         {
             TimeZoneId = normalizedTimeZoneId,
             PageSize = Math.Clamp(pageSize, AdminUserPreferences.MinPageSize, AdminUserPreferences.MaxPageSize),
+            StatusRefreshSeconds = Math.Clamp(
+                statusRefreshSeconds,
+                AdminUserPreferences.MinStatusRefreshSeconds,
+                AdminUserPreferences.MaxStatusRefreshSeconds),
         };
         error = string.Empty;
         return true;

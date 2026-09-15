@@ -19,6 +19,12 @@
     const liveTable = document.querySelector("[data-live-queues]");
     const retentionLastCycle = document.querySelector("[data-retention-last-cycle]");
     const retentionTotal = document.querySelector("[data-retention-total]");
+    // Poll interval comes from the per-user preference rendered on the dot;
+    // clamp to the same 5-300s bounds the server enforces.
+    const configuredMs = parseInt(dot.dataset.refreshMs, 10);
+    const intervalMs = Number.isFinite(configuredMs)
+        ? Math.min(Math.max(configuredMs, 5000), 300000)
+        : 30000;
     let timer = null;
 
     function updateQueueRows(rows) {
@@ -109,5 +115,5 @@
         }
     }
 
-    timer = setInterval(refresh, 30000);
+    timer = setInterval(refresh, intervalMs);
 })();

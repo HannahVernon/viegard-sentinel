@@ -414,6 +414,8 @@ public sealed class AdminUserPreferencesRow
 
     public int PageSize { get; set; } = 50;
 
+    public int StatusRefreshSeconds { get; set; } = 30;
+
     public DateTimeOffset UpdatedAt { get; set; }
 }
 

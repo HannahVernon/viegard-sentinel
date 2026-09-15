@@ -15,6 +15,13 @@ public interface ICustomSignatureStore
         ListSort<SignatureSortColumn>? sort = null,
         CancellationToken cancellationToken = default);
 
+    ValueTask<Guid?> GetPageCursorAsync(
+        int pageNumber,
+        int pageSize,
+        SignatureListFilter? filter = null,
+        ListSort<SignatureSortColumn>? sort = null,
+        CancellationToken cancellationToken = default);
+
     ValueTask<CustomSignature?> GetAsync(Guid id, CancellationToken cancellationToken = default);
 
     ValueTask<CustomSignature> UpsertAsync(CustomSignature signature, CancellationToken cancellationToken = default);

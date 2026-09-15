@@ -4,6 +4,7 @@ namespace Viegard.Persistence.Postgres.Stores;
 
 internal sealed record PostgresSortDefinition(
     string SelectSql,
+    string FromSql,
     string CursorFromSql,
     string OrderExpression,
     string CursorOrderExpression,
@@ -59,6 +60,9 @@ internal static class PostgresKeysetSorting
     public static string OrderByClause(ActivePostgresSort activeSort) =>
         $" ORDER BY {activeSort.Definition.OrderExpression} {activeSort.DirectionSql}, "
         + $"{activeSort.Definition.IdExpression} {activeSort.DirectionSql}";
+
+    public static string SelectIdClause(ActivePostgresSort activeSort) =>
+        $"SELECT {activeSort.Definition.IdExpression} AS \"Value\" {activeSort.Definition.FromSql}";
 
     private static bool TryGetDirection(
         SortDirection direction,

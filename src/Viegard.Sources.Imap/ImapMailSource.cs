@@ -168,7 +168,7 @@ public sealed class ImapMailSource(
             }
 
             var newUids = await folder.SearchAsync(
-                SearchQuery.Uids(new UniqueIdRange(new UniqueId(lastUid + 1), UniqueId.MaxValue)),
+                MailKit.Search.SearchQuery.Uids(new UniqueIdRange(new UniqueId(lastUid + 1), UniqueId.MaxValue)),
                 cancellationToken).ConfigureAwait(false);
 
             foreach (var uid in newUids.Where(u => u.Id > lastUid).OrderBy(u => u.Id))

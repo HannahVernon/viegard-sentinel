@@ -29,6 +29,7 @@
             <input type="hidden" name="@parameter.Key" value="@parameter.Value" />
         }
         <button type="submit">Filter</button>
+        <span class="filter-hint">Syntax: term "a phrase" OR other -exclude</span>
         @if (HasFilters)
         {
             <a class="filter-clear" href="/decisions">Clear</a>
@@ -64,13 +65,15 @@
                 }
             </tbody>
         </table>
-        <KeysetPagination BasePath="/decisions" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" Filters="_filters" />
+        <KeysetPagination BasePath="/decisions" CurrentCursor="_currentCursor" PreviousCursor="_previousCursor" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" Filters="_filters" />
     }
 </main>
 
 @code {
     private KeysetPage<Decision> _page = new([], null, 0, 0);
     private IReadOnlyList<DecisionRow> _rows = [];
+    private Guid? _currentCursor;
+    private Guid? _previousCursor;
     private IReadOnlyDictionary<string, string?> _filters = new Dictionary<string, string?>();
     private IReadOnlyDictionary<string, string?> _sortHeaderParams = new Dictionary<string, string?>();
     private IReadOnlyDictionary<string, string?> _filterHiddenParams = new Dictionary<string, string?>();
@@ -93,6 +96,9 @@
 
     [SupplyParameterFromQuery(Name = "prev")]
     public Guid? Prev { get; set; }
+
+    [SupplyParameterFromQuery(Name = "page")]
+    public int? Page { get; set; }
 
     [SupplyParameterFromQuery(Name = "q")]
     public string? Q { get; set; }
@@ -120,8 +126,15 @@
         _filters = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["sort"] = _sortKey, ["dir"] = direction };
         _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["take"] = take };
         _filterHiddenParams = new Dictionary<string, string?> { ["take"] = take, ["sort"] = _sortKey, ["dir"] = direction };
-        _page = await DecisionStore.ListPageAsync(Cursor, _take, new DecisionListFilter(_filterText, _outcome), sort)
+        var filter = new DecisionListFilter(_filterText, _outcome);
+        _currentCursor = Page is { } requestedPage
+            ? await DecisionStore.GetPageCursorAsync(requestedPage, _take, filter, sort).ConfigureAwait(false)
+            : Cursor;
+        _page = await DecisionStore.ListPageAsync(_currentCursor, _take, filter, sort)
             .ConfigureAwait(false);
+        _previousCursor = Page is null
+            ? Prev
+            : await PreviousPageCursorAsync(filter, sort).ConfigureAwait(false);
         var rows = new List<DecisionRow>();
         foreach (var decision in _page.Items)
         {
@@ -134,6 +147,15 @@
     private static string ClassificationSummary(Classification? classification) => classification is null
         ? "not found"
         : $"{classification.Category} severity {classification.Severity}";
+
+    private async Task<Guid?> PreviousPageCursorAsync(DecisionListFilter filter, ListSort<DecisionSortColumn>? sort)
+    {
+        var pageNumber = PaginationMath.PageNumber(_page.Preceding, _take);
+        return pageNumber <= 1
+            ? null
+            : await DecisionStore.GetPageCursorAsync((int)Math.Min((long)int.MaxValue, pageNumber - 1), _take, filter, sort)
+                .ConfigureAwait(false);
+    }
 
     private static IEnumerable<KeyValuePair<string, string>> ActiveParameters(IReadOnlyDictionary<string, string?> parameters) =>
         parameters

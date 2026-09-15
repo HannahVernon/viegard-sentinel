@@ -28,6 +28,7 @@
             <input type="hidden" name="@parameter.Key" value="@parameter.Value" />
         }
         <button type="submit">Filter</button>
+        <span class="filter-hint">Syntax: term "a phrase" OR other -exclude</span>
         @if (HasFilters)
         {
             <a class="filter-clear" href="/incidents">Clear</a>
@@ -63,12 +64,14 @@
                 }
             </tbody>
         </table>
-        <KeysetPagination BasePath="/incidents" CurrentCursor="Cursor" PreviousCursor="Prev" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" Filters="_filters" />
+        <KeysetPagination BasePath="/incidents" CurrentCursor="_currentCursor" PreviousCursor="_previousCursor" NextCursor="_page.NextCursor" Take="_take" TotalCount="_page.TotalCount" Preceding="_page.Preceding" Filters="_filters" />
     }
 </main>
 
 @code {
     private KeysetPage<Incident> _page = new([], null, 0, 0);
+    private Guid? _currentCursor;
+    private Guid? _previousCursor;
     private IReadOnlyDictionary<string, string?> _filters = new Dictionary<string, string?>();
     private IReadOnlyDictionary<string, string?> _sortHeaderParams = new Dictionary<string, string?>();
     private IReadOnlyDictionary<string, string?> _filterHiddenParams = new Dictionary<string, string?>();
@@ -91,6 +94,9 @@
 
     [SupplyParameterFromQuery(Name = "prev")]
     public Guid? Prev { get; set; }
+
+    [SupplyParameterFromQuery(Name = "page")]
+    public int? Page { get; set; }
 
     [SupplyParameterFromQuery(Name = "q")]
     public string? Q { get; set; }
@@ -118,8 +124,24 @@
         _filters = new Dictionary<string, string?> { ["q"] = _filterText, ["state"] = _state?.ToString(), ["sort"] = _sortKey, ["dir"] = direction };
         _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["state"] = _state?.ToString(), ["take"] = take };
         _filterHiddenParams = new Dictionary<string, string?> { ["take"] = take, ["sort"] = _sortKey, ["dir"] = direction };
-        _page = await IncidentStore.ListPageAsync(Cursor, _take, new IncidentListFilter(_filterText, _state), sort)
+        var filter = new IncidentListFilter(_filterText, _state);
+        _currentCursor = Page is { } requestedPage
+            ? await IncidentStore.GetPageCursorAsync(requestedPage, _take, filter, sort).ConfigureAwait(false)
+            : Cursor;
+        _page = await IncidentStore.ListPageAsync(_currentCursor, _take, filter, sort)
             .ConfigureAwait(false);
+        _previousCursor = Page is null
+            ? Prev
+            : await PreviousPageCursorAsync(filter, sort).ConfigureAwait(false);
+    }
+
+    private async Task<Guid?> PreviousPageCursorAsync(IncidentListFilter filter, ListSort<IncidentSortColumn>? sort)
+    {
+        var pageNumber = PaginationMath.PageNumber(_page.Preceding, _take);
+        return pageNumber <= 1
+            ? null
+            : await IncidentStore.GetPageCursorAsync((int)Math.Min((long)int.MaxValue, pageNumber - 1), _take, filter, sort)
+                .ConfigureAwait(false);
     }
 
     private static IEnumerable<KeyValuePair<string, string>> ActiveParameters(IReadOnlyDictionary<string, string?> parameters) =>

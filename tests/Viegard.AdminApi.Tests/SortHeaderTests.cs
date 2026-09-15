@@ -20,6 +20,7 @@ public sealed class SortHeaderTests
                 ["take"] = "100",
                 ["cursor"] = Guid.NewGuid().ToString(),
                 ["prev"] = Guid.NewGuid().ToString(),
+                ["page"] = "3",
                 ["empty"] = " ",
             });
 

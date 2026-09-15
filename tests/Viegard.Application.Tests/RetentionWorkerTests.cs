@@ -406,6 +406,14 @@ public sealed class RetentionWorkerTests
             ListSort<AuditSortColumn>? sort = null,
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(new KeysetPage<AuditRecord>([], null, 0, 0));
+
+        public ValueTask<Guid?> GetPageCursorAsync(
+            int pageNumber,
+            int pageSize,
+            AuditListFilter? filter = null,
+            ListSort<AuditSortColumn>? sort = null,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<Guid?>(null);
     }
 
     private sealed record RetentionCall(RetentionTarget Target, DateTimeOffset Cutoff, int BatchSize);

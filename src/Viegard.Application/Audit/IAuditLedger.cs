@@ -18,4 +18,11 @@ public interface IAuditLedger
         AuditListFilter? filter = null,
         ListSort<AuditSortColumn>? sort = null,
         CancellationToken cancellationToken = default);
+
+    ValueTask<Guid?> GetPageCursorAsync(
+        int pageNumber,
+        int pageSize,
+        AuditListFilter? filter = null,
+        ListSort<AuditSortColumn>? sort = null,
+        CancellationToken cancellationToken = default);
 }

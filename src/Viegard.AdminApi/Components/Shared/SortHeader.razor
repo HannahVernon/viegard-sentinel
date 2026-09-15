@@ -80,6 +80,7 @@
     private static bool IsReserved(string key) =>
         string.Equals(key, "cursor", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "prev", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(key, "page", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "sort", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "dir", StringComparison.OrdinalIgnoreCase);
 

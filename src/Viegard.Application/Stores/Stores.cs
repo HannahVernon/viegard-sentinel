@@ -32,6 +32,13 @@ public interface IEventStore
         EventListFilter? filter = null,
         ListSort<EventSortColumn>? sort = null,
         CancellationToken cancellationToken = default);
+
+    ValueTask<Guid?> GetPageCursorAsync(
+        int pageNumber,
+        int pageSize,
+        EventListFilter? filter = null,
+        ListSort<EventSortColumn>? sort = null,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence port for incidents (Roost).</summary>
@@ -45,6 +52,13 @@ public interface IIncidentStore
 
     ValueTask<KeysetPage<Incident>> ListPageAsync(
         Guid? beforeId,
+        int pageSize,
+        IncidentListFilter? filter = null,
+        ListSort<IncidentSortColumn>? sort = null,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<Guid?> GetPageCursorAsync(
+        int pageNumber,
         int pageSize,
         IncidentListFilter? filter = null,
         ListSort<IncidentSortColumn>? sort = null,
@@ -82,6 +96,13 @@ public interface IDecisionStore
 
     ValueTask<KeysetPage<Decision>> ListPageAsync(
         Guid? beforeId,
+        int pageSize,
+        DecisionListFilter? filter = null,
+        ListSort<DecisionSortColumn>? sort = null,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<Guid?> GetPageCursorAsync(
+        int pageNumber,
         int pageSize,
         DecisionListFilter? filter = null,
         ListSort<DecisionSortColumn>? sort = null,

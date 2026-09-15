@@ -74,6 +74,8 @@ Every Viegard object lives in a dedicated PostgreSQL schema rather than `public`
 
 The schema is applied via the connection `search_path`, so the migrations and queue SQL are schema-agnostic.  Keeping application objects out of `public` means a `pg_dump --schema=viegard` captures exactly the application state, and other tooling added to the same database later cannot collide with Viegard tables.
 
+Satellite database roles created from the admin UI use the same configured schema.  Create or rotate those roles from `/configuration#satellites`; the generated password is displayed once and is not recoverable later.
+
 ### Data retention
 
 Retention is fail-safe by default.  Deploying the retention worker deletes nothing until explicit per-table periods exist in the database-owned `retention_settings` row; any blank period means keep that table forever.  Corrections are not purgeable because training feedback is retained.
@@ -148,7 +150,7 @@ Sources ship disabled; enable them deliberately, one at a time.
 
 - **SWAG/nginx syslog:** see [swag-syslog-setup.md](swag-syslog-setup.md).  Set `Viegard__Sources__Syslog__Enabled`, the fail-closed `AllowedSources` list, and publish `5514/udp` in your compose copy; firewall the port to the SWAG host.
 - **IMAP accounts:** add entries under `Viegard__Sources__Imap__Accounts__*` with a password secret file per account (`PasswordSecretName`).
-- **MDaemon logs:** runs as a satellite pipeline instance on the mail host (D-0025); see [satellite-windows.md](satellite-windows.md).
+- **MDaemon logs:** runs as a satellite pipeline instance on the mail host (D-0025).  Create the per-host database role in **Configuration** -> **Satellites**, then paste the one-time password into the Windows installer; see [satellite-windows.md](satellite-windows.md).
 
 ## Admin interface exposure and authentication
 

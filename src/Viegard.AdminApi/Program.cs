@@ -13,6 +13,7 @@ using Viegard.AdminApi.Configuration;
 using Viegard.AdminApi.Signatures;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
+using Viegard.Application.Configuration;
 using Viegard.Application.Queues;
 using Viegard.Application.Retention;
 using Viegard.Application.Secrets;
@@ -94,6 +95,7 @@ builder.Services.AddSingleton<WebAuthnConfigurationProvider>();
 builder.Services.AddSingleton<IWebAuthnService, Fido2WebAuthnService>();
 builder.Services.AddSingleton<AdminAuthAuditor>();
 builder.Services.AddSingleton<AdminConfigAuditor>();
+builder.Services.AddSingleton<SatelliteRoleCredentialCookie>();
 builder.Services.AddScoped<AdminCookieAuthenticationEvents>();
 
 builder.Services
@@ -191,6 +193,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
         builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
+        builder.Services.AddSingleton<ISatelliteRoleStore, InMemorySatelliteRoleStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");

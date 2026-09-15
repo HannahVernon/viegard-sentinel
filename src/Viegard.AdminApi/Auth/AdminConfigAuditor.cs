@@ -72,4 +72,35 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
             logger.LogError(ex, "Failed to append admin configuration audit record.");
         }
     }
+
+    public async ValueTask RecordSatelliteRoleWriteAsync(
+        string kind,
+        string username,
+        string roleName,
+        string grantSummary,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config write by {username}: {kind} for satellite role '{roleName}'.",
+                SourceId = "admin:config",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = kind,
+                    Username = username,
+                    RoleName = roleName,
+                    GrantSummary = grantSummary,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
 }

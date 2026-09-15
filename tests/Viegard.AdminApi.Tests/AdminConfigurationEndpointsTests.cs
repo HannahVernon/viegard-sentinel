@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -10,6 +11,7 @@ using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Configuration;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
+using Viegard.Application.Configuration;
 using Viegard.Application.Queues;
 using Viegard.Application.Retention;
 using Viegard.Application.Stores;
@@ -113,6 +115,54 @@ public sealed class AdminConfigurationEndpointsTests
         Assert.Contains("\"eventsDays\":30", audit.DetailJson, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Create_satellite_requires_step_up_before_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        fixture.Context.Request.Form = SatelliteForm("mdaemon01");
+
+        var result = await fixture.InvokeCreateSatelliteAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.Empty(await fixture.SatelliteRoles.ListAsync());
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Create_satellite_rejects_invalid_names_without_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        fixture.Context.Request.Form = SatelliteForm("bad-name");
+
+        var result = await fixture.InvokeCreateSatelliteAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains(Uri.EscapeDataString(SatelliteRoleName.ValidationError), location, StringComparison.Ordinal);
+        Assert.Empty(await fixture.SatelliteRoles.ListAsync());
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Create_satellite_persists_role_and_writes_config_audit_without_password()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        fixture.Context.Request.Form = SatelliteForm("mdaemon01");
+
+        var result = await fixture.InvokeCreateSatelliteAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Satellite%20role%20viegard_sat_mdaemon01%20created", location, StringComparison.Ordinal);
+        var role = Assert.Single(await fixture.SatelliteRoles.ListAsync());
+        Assert.Equal("viegard_sat_mdaemon01", role.RoleName);
+        Assert.True(role.CanLogin);
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("SatelliteRoleCreated", audit.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("viegard_sat_mdaemon01", audit.DetailJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", audit.DetailJson, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task<string> ExecuteRedirectAsync(IResult result, HttpContext context)
     {
         context.Response.Body = new MemoryStream();
@@ -140,6 +190,12 @@ public sealed class AdminConfigurationEndpointsTests
         return new FormCollection(data);
     }
 
+    private static FormCollection SatelliteForm(string name) => new(
+        new Dictionary<string, StringValues>(StringComparer.Ordinal)
+        {
+            ["name"] = name,
+        });
+
     private static RetentionSettings SettingsWith(params (RetentionTarget Target, int? Days)[] values)
     {
         var settings = new RetentionSettings
@@ -165,7 +221,9 @@ public sealed class AdminConfigurationEndpointsTests
         InMemoryAdminUserStore Users,
         InMemoryAdminSessionStore Sessions,
         AdminAuthAuditor AuthAuditor,
-        AdminConfigAuditor ConfigAuditor)
+        AdminConfigAuditor ConfigAuditor,
+        InMemorySatelliteRoleStore SatelliteRoles,
+        SatelliteRoleCredentialCookie SatelliteCredentialCookie)
     {
         public static async Task<EndpointFixture> CreateAsync(bool freshStepUp)
         {
@@ -210,6 +268,8 @@ public sealed class AdminConfigurationEndpointsTests
                 new ChannelWorkQueue<Guid>("admin-test"),
                 NullLogger<AdminAuthAuditor>.Instance);
             var configAuditor = new AdminConfigAuditor(auditLedger, NullLogger<AdminConfigAuditor>.Instance);
+            var satelliteRoles = new InMemorySatelliteRoleStore();
+            var satelliteCredentialCookie = new SatelliteRoleCredentialCookie(new NoopDataProtectionProvider());
             var services = new ServiceCollection()
                 .AddLogging()
                 .AddSingleton<IOptions<AdminAuthOptions>>(Options.Create(new AdminAuthOptions()))
@@ -236,7 +296,9 @@ public sealed class AdminConfigurationEndpointsTests
                 users,
                 sessions,
                 authAuditor,
-                configAuditor);
+                configAuditor,
+                satelliteRoles,
+                satelliteCredentialCookie);
         }
 
         public Task<IResult> InvokeAsync() =>
@@ -248,6 +310,17 @@ public sealed class AdminConfigurationEndpointsTests
                 Sessions,
                 AuthAuditor,
                 ConfigAuditor);
+
+        public Task<IResult> InvokeCreateSatelliteAsync() =>
+            AdminConfigurationEndpoints.CreateSatelliteAsync(
+                Context,
+                Antiforgery,
+                SatelliteRoles,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor,
+                SatelliteCredentialCookie);
     }
 
     private sealed class RecordingAuditLedger : IAuditLedger
@@ -294,5 +367,19 @@ public sealed class AdminConfigurationEndpointsTests
 
         public Task ValidateRequestAsync(HttpContext httpContext) =>
             Task.CompletedTask;
+    }
+
+    private sealed class NoopDataProtectionProvider : IDataProtectionProvider
+    {
+        public IDataProtector CreateProtector(string purpose) => new NoopDataProtector();
+    }
+
+    private sealed class NoopDataProtector : IDataProtector
+    {
+        public IDataProtector CreateProtector(string purpose) => this;
+
+        public byte[] Protect(byte[] plaintext) => plaintext.ToArray();
+
+        public byte[] Unprotect(byte[] protectedData) => protectedData.ToArray();
     }
 }

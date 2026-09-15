@@ -41,38 +41,20 @@ docker compose up -d viegard-db
 
 ### Create a per-satellite database role
 
-Run the snippet as the Viegard database owner, for example from the VM deploy directory with `docker compose exec viegard-db psql -U viegard -d viegard`.  Use one role per MDaemon host so credentials and audit trails stay separable.
+Use the admin UI as the primary path:
 
-```sql
-CREATE ROLE viegard_sat_mdaemon01
-    LOGIN
-    PASSWORD 'replace-with-long-random-password';
+1. Sign in to the Viegard admin UI.
+2. Complete step-up verification.
+3. Open **Configuration** -> **Satellites**.
+4. Enter the satellite name, for example `mdaemon01`, and choose **Add satellite**.  The server creates the PostgreSQL role as `viegard_sat_<name>`.
+5. Copy the one-time password and the connection facts shown after the redirect.  The password cannot be retrieved again; it can only be rotated.
+6. Paste the host, port, database, username, password, and schema into the installer prompts or unattended parameters.
 
-GRANT CONNECT ON DATABASE viegard TO viegard_sat_mdaemon01;
-GRANT USAGE ON SCHEMA viegard TO viegard_sat_mdaemon01;
+The name is limited to lowercase letters, digits, and underscores, up to 32 characters.  Use one role per MDaemon host so credentials and audit trails stay separable.  Repeat the admin UI flow with a different satellite name for the second MDaemon host.
 
-GRANT SELECT, INSERT, UPDATE, DELETE
-    ON ALL TABLES IN SCHEMA viegard
-    TO viegard_sat_mdaemon01;
-
-GRANT USAGE, SELECT, UPDATE
-    ON ALL SEQUENCES IN SCHEMA viegard
-    TO viegard_sat_mdaemon01;
-
-ALTER DEFAULT PRIVILEGES IN SCHEMA viegard
-    GRANT SELECT, INSERT, UPDATE, DELETE
-    ON TABLES
-    TO viegard_sat_mdaemon01;
-
-ALTER DEFAULT PRIVILEGES IN SCHEMA viegard
-    GRANT USAGE, SELECT, UPDATE
-    ON SEQUENCES
-    TO viegard_sat_mdaemon01;
-```
+The application database role must have `CREATEROLE` to create, rotate, and revoke satellite roles from the UI.  If the UI reports that the application role lacks `CREATEROLE`, either grant that capability to the application database role or use the SQL fallback appendix below.
 
 This is intentionally a broad v1 DML grant on the Viegard schema.  The satellite runs only `sources`, but that role still writes raw observations, normalized events, source offsets, source reference rows, durable queue rows, queue telemetry, and audit records, and it reads shared configuration and reference rows.  A narrower table-specific grant can replace this later after the satellite write surface is measured.
-
-Repeat with a different role name and password for the second MDaemon host.
 
 ### Restrict published PostgreSQL traffic
 
@@ -86,6 +68,43 @@ sudo netfilter-persistent save
 ```
 
 Use the actual MDaemon host addresses in place of `192.0.2.21` and `192.0.2.22`.
+
+### SQL fallback for satellite role creation
+
+The admin UI is the recommended path.  Operators who prefer SQL, or deployments where the application role does not have `CREATEROLE`, can run the fallback manually as a database role that can create roles and grant privileges.  Replace the role name, password, database role in `FOR ROLE`, and schema if they differ from the defaults.
+
+```sql
+CREATE ROLE "viegard_sat_mdaemon01"
+    LOGIN
+    PASSWORD 'replaceWithLongRandomAlphanumericPassword'
+    NOSUPERUSER
+    NOCREATEDB
+    NOCREATEROLE
+    NOINHERIT
+    CONNECTION LIMIT 8;
+
+GRANT USAGE
+    ON SCHEMA "viegard"
+    TO "viegard_sat_mdaemon01";
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+    ON ALL TABLES IN SCHEMA "viegard"
+    TO "viegard_sat_mdaemon01";
+
+GRANT USAGE, SELECT
+    ON ALL SEQUENCES IN SCHEMA "viegard"
+    TO "viegard_sat_mdaemon01";
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "viegard" IN SCHEMA "viegard"
+    GRANT SELECT, INSERT, UPDATE, DELETE
+    ON TABLES
+    TO "viegard_sat_mdaemon01";
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "viegard" IN SCHEMA "viegard"
+    GRANT USAGE, SELECT
+    ON SEQUENCES
+    TO "viegard_sat_mdaemon01";
+```
 
 ## Install on the MDaemon host
 
@@ -186,12 +205,11 @@ sc.exe delete ViegardSatelliteMDaemon
 Remove-Item -LiteralPath "C:\Program Files\Viegard Satellite\MDaemon" -Recurse -Force
 ```
 
-Then remove the corresponding database role on the Viegard VM after confirming no other host uses it:
+Then remove the corresponding database role after confirming no other host uses it.  The preferred path is **Configuration** -> **Satellites** -> **Revoke** in the admin UI.  Stop the satellite service first so there is no active database connection.  SQL fallback:
 
 ```sql
-REASSIGN OWNED BY viegard_sat_mdaemon01 TO viegard;
-DROP OWNED BY viegard_sat_mdaemon01;
-DROP ROLE viegard_sat_mdaemon01;
+DROP OWNED BY "viegard_sat_mdaemon01";
+DROP ROLE "viegard_sat_mdaemon01";
 ```
 
 Remove or adjust the matching `DOCKER-USER` firewall allow rule if the host is being retired.

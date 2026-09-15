@@ -60,6 +60,26 @@ public sealed class AdminConfigAuditorTests
         Assert.Contains("\"eventsDays\":30", record.DetailJson, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Satellite_role_write_audit_record_contains_kind_role_and_grants_without_password()
+    {
+        var ledger = new RecordingAuditLedger();
+        var auditor = new AdminConfigAuditor(ledger, new SilentLogger<AdminConfigAuditor>());
+
+        await auditor.RecordSatelliteRoleWriteAsync(
+            "SatelliteRoleCreated",
+            "hannah",
+            "viegard_sat_mdaemon01",
+            "LOGIN and table grants.");
+
+        var record = Assert.Single(ledger.Records);
+        Assert.Equal(PipelineStage.Admin, record.Stage);
+        Assert.Contains("SatelliteRoleCreated", record.Summary, StringComparison.Ordinal);
+        Assert.Contains("viegard_sat_mdaemon01", record.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("LOGIN and table grants", record.DetailJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", record.DetailJson, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static CustomSignature Signature(string pattern) => new()
     {
         Id = ViegardId.New(),

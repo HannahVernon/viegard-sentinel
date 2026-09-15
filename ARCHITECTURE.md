@@ -230,7 +230,7 @@ Both hosts expose health endpoints (liveness + per-component readiness: IMAP con
 
 ### Queue health monitor (traffic-light)
 
-The admin API/GUI displays a per-queue traffic-light status so stalled or lagging queues are immediately visible (D-0012).
+The admin API/GUI displays a `/queues` dashboard with shared Queues rows and per-instance heartbeat rows, so stalled or lagging global queues and stale reporters are immediately visible (D-0012).
 
 - **Signals per queue:** depth (absolute and vs. capacity), age of the oldest unacknowledged message (the primary timeliness signal), consumer heartbeat/liveness, throughput trend, recent poison-message count.
 - **Status derivation (thresholds configurable):** green = consumers alive and oldest-message age below the amber threshold; amber = lag or depth above threshold, or recent poison messages; red = no live consumer heartbeat, oldest-message age above the red threshold, or circuit breaker open.

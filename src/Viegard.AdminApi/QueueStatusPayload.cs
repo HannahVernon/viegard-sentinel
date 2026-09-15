@@ -25,12 +25,22 @@ public static class QueueStatusPayload
         string Reasons,
         bool Green);
 
+    public sealed record InstanceRowPayload(
+        string Key,
+        string LastCaptured,
+        string Light,
+        string LightCss,
+        string QueuesReported,
+        string Reasons,
+        bool Green);
+
     public sealed record RetentionPayload(string LastCycle, long LastRowsRemoved);
 
     public sealed record Payload(
         string Css,
         string Label,
         IReadOnlyList<QueueRowPayload> Rows,
+        IReadOnlyList<InstanceRowPayload> Instances,
         RetentionPayload Retention);
 
     public static Payload Build(
@@ -42,14 +52,15 @@ public static class QueueStatusPayload
         ArgumentNullException.ThrowIfNull(snapshots);
         ArgumentNullException.ThrowIfNull(format);
 
-        var (css, label) = QueueStatusBadge.Summarize(snapshots, now);
-        var evaluator = new QueueHealthEvaluator(new QueueHealthThresholds());
-        var rows = snapshots
-            .Select(snapshot =>
+        var view = QueueStatusView.Build(snapshots, now);
+        var (css, label) = QueueStatusBadge.ToBadge(view.WorstLight);
+        var rows = view.Queues
+            .Select(row =>
             {
-                var status = evaluator.Evaluate(snapshot, now);
+                var snapshot = row.Snapshot;
+                var status = row.Status;
                 return new QueueRowPayload(
-                    Key: $"{snapshot.InstanceId}|{snapshot.QueueName}",
+                    Key: snapshot.QueueName,
                     Light: status.Light.ToString(),
                     LightCss: AdminText.LightCss(status.Light),
                     Depth: snapshot.Depth,
@@ -59,16 +70,27 @@ public static class QueueStatusPayload
                         : string.Empty,
                     DeadLetters: snapshot.DeadLetterCount,
                     Totals: $"{snapshot.TotalEnqueued} / {snapshot.TotalCompleted} / {snapshot.TotalAbandoned}",
-                    Captured: format(snapshot.CapturedAt),
+                    Captured: $"{format(snapshot.CapturedAt)} by {snapshot.InstanceId}",
                     Reasons: string.Join(" ", status.Reasons),
                     Green: status.Light == TrafficLight.Green);
             })
+            .ToList();
+
+        var instances = view.Instances
+            .Select(row => new InstanceRowPayload(
+                Key: row.InstanceId,
+                LastCaptured: format(row.LastCapturedAt),
+                Light: row.Light.ToString(),
+                LightCss: AdminText.LightCss(row.Light),
+                QueuesReported: row.QueuesReported,
+                Reasons: string.Join(" ", row.Reasons),
+                Green: row.Green))
             .ToList();
 
         var retention = new RetentionPayload(
             LastCycle: retentionSettings?.LastCycleAt is { } lastCycle ? format(lastCycle) : "Never",
             LastRowsRemoved: retentionSettings?.LastCycleCounts().Values.Sum() ?? 0);
 
-        return new Payload(css, label, rows, retention);
+        return new Payload(css, label, rows, instances, retention);
     }
 }

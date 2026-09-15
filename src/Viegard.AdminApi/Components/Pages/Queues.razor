@@ -20,53 +20,83 @@
         <p><a href="/configuration#retention">Edit retention configuration</a></p>
     </section>
 
-    @if (_rows.Count == 0)
+    @if (_view.Queues.Count == 0)
     {
         <p>No queue telemetry has been published yet.</p>
     }
     else
     {
-        <table class="data-table" data-live-queues>
-            <thead>
-                <tr>
-                    <th>Instance</th>
-                    <th>Queue</th>
-                    <th>Light</th>
-                    <th>Depth</th>
-                    <th>In-flight</th>
-                    <th>Oldest pending age</th>
-                    <th>Dead letters</th>
-                    <th>Totals</th>
-                    <th>Captured</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var row in _rows)
-                {
-                    var key = $"{row.Snapshot.InstanceId}|{row.Snapshot.QueueName}";
-                    <tr data-q="@key">
-                        <td>@row.Snapshot.InstanceId</td>
-                        <td>@row.Snapshot.QueueName</td>
-                        <td><span data-q-cell="light" class="@AdminText.LightCss(row.Status.Light)">@row.Status.Light</span></td>
-                        <td data-q-cell="depth">@row.Snapshot.Depth</td>
-                        <td data-q-cell="inFlight">@row.Snapshot.InFlight</td>
-                        <td data-q-cell="oldestAge">@OldestAge(row.Snapshot)</td>
-                        <td data-q-cell="deadLetters">@row.Snapshot.DeadLetterCount</td>
-                        <td data-q-cell="totals">@row.Snapshot.TotalEnqueued / @row.Snapshot.TotalCompleted / @row.Snapshot.TotalAbandoned</td>
-                        <td data-q-cell="captured">@Display.Format(row.Snapshot.CapturedAt)</td>
+        <section class="card">
+            <h2>Queues</h2>
+            <table class="data-table" data-live-queues>
+                <caption>Queues are shared across all instances; values come from the freshest report.</caption>
+                <thead>
+                    <tr>
+                        <th>Queue</th>
+                        <th>Light</th>
+                        <th>Depth</th>
+                        <th>In-flight</th>
+                        <th>Oldest pending age</th>
+                        <th>Dead letters</th>
+                        <th>Totals</th>
+                        <th>Captured</th>
                     </tr>
-                    <tr class="details-row" data-q-reasons="@key" hidden="@(row.Status.Light == TrafficLight.Green)">
-                        <td colspan="9">@string.Join(" ", row.Status.Reasons)</td>
+                </thead>
+                <tbody>
+                    @foreach (var row in _view.Queues)
+                    {
+                        var key = row.Snapshot.QueueName;
+                        <tr data-q="@key">
+                            <td>@row.Snapshot.QueueName</td>
+                            <td><span data-q-cell="light" class="@AdminText.LightCss(row.Status.Light)">@row.Status.Light</span></td>
+                            <td data-q-cell="depth">@row.Snapshot.Depth</td>
+                            <td data-q-cell="inFlight">@row.Snapshot.InFlight</td>
+                            <td data-q-cell="oldestAge">@OldestAge(row.Snapshot)</td>
+                            <td data-q-cell="deadLetters">@row.Snapshot.DeadLetterCount</td>
+                            <td data-q-cell="totals">@row.Snapshot.TotalEnqueued / @row.Snapshot.TotalCompleted / @row.Snapshot.TotalAbandoned</td>
+                            <td data-q-cell="captured">@CapturedBy(row.Snapshot)</td>
+                        </tr>
+                        <tr class="details-row" data-q-reasons="@key" hidden="@(row.Status.Light == TrafficLight.Green)">
+                            <td colspan="8">@string.Join(" ", row.Status.Reasons)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+
+        <section class="card">
+            <h2>Instances</h2>
+            <table class="data-table" data-live-instances>
+                <caption>Instances report telemetry every 10 seconds; a stale row means that instance may be down.</caption>
+                <thead>
+                    <tr>
+                        <th>Instance</th>
+                        <th>Queues reported</th>
+                        <th>Last captured</th>
+                        <th>Staleness light</th>
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (var row in _view.Instances)
+                    {
+                        <tr data-inst="@row.InstanceId">
+                            <td>@row.InstanceId</td>
+                            <td data-inst-cell="queuesReported">@row.QueuesReported</td>
+                            <td data-inst-cell="lastCaptured">@Display.Format(row.LastCapturedAt)</td>
+                            <td><span data-inst-cell="light" class="@AdminText.LightCss(row.Light)">@row.Light</span></td>
+                        </tr>
+                        <tr class="details-row" data-inst-reasons="@row.InstanceId" hidden="@row.Green">
+                            <td colspan="4">@string.Join(" ", row.Reasons)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
     }
 </main>
 
 @code {
-    private readonly QueueHealthEvaluator _evaluator = new(new QueueHealthThresholds());
-    private IReadOnlyList<QueueRow> _rows = [];
+    private QueueStatusView.SnapshotView _view = QueueStatusView.Empty;
     private RetentionSettings? _retentionSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _retentionCounts = RetentionSettings.EmptyCounts();
     private DateTimeOffset _now;
@@ -94,9 +124,7 @@
         _retentionSettings = await RetentionSettingsStore.GetAsync().ConfigureAwait(false);
         _retentionCounts = _retentionSettings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
         var snapshots = await QueueTelemetry.GetLatestAsync().ConfigureAwait(false);
-        _rows = snapshots
-            .Select(s => new QueueRow(s, _evaluator.Evaluate(s, _now)))
-            .ToList();
+        _view = QueueStatusView.Build(snapshots, _now);
     }
 
     private string OldestAge(QueueTelemetrySnapshot snapshot) => snapshot.OldestPendingEnqueuedAt is null
@@ -108,5 +136,6 @@
             ? $"{days.ToString(System.Globalization.CultureInfo.InvariantCulture)}d"
             : "forever";
 
-    private sealed record QueueRow(QueueTelemetrySnapshot Snapshot, QueueHealthStatus Status);
+    private string CapturedBy(QueueTelemetrySnapshot snapshot) =>
+        $"{Display.Format(snapshot.CapturedAt)} by {snapshot.InstanceId}";
 }

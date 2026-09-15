@@ -89,8 +89,8 @@ Key invariants:
 
 Deployable | Container | Responsibility
 -----------|-----------|---------------
-`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, maintenance retention, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
-`viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), server-side filtered and sortable read access to incidents, classifications, decisions, and audit; step-up-gated runtime configuration editors for custom signatures, retention periods, and satellite database roles with one-time password display; custom-signature previews that run the same literal matcher as the pipeline against a bounded recent-event scan without writing audit or config rows; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no external integration credentials.
+`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, maintenance retention, ingestion-filter seeding, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
+`viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), server-side filtered and sortable read access to incidents, classifications, decisions, and audit; step-up-gated runtime configuration editors for custom signatures, retention periods, ingestion filters, and satellite database roles with one-time password display; custom-signature previews that run the same literal matcher as the pipeline against a bounded recent-event scan without writing audit or config rows; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no external integration credentials.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
 Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, feedback, telemetry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
 
@@ -138,7 +138,7 @@ src/
   Viegard.Notifications.Email/ Operator status/alert emails via SMTP (MailKit)
   Viegard.PipelineHost/        Worker service executable, including ingestion,
                                correlation, classification, policy, and
-                               maintenance retention workers
+                               maintenance retention and ingestion-filter workers
   Viegard.AdminApi/            Admin API executable, auth endpoints, WebAuthn adapter,
                                static SSR pages, configuration editors, display preferences,
                                keyset pagination, filter, and sort UI, first-party WebAuthn JS bridge
@@ -164,7 +164,7 @@ Implemented source integrations:
 
 - IMAP mail source, using per-account configuration and read-only folder access.
 - Syslog UDP source, with source allowlist, size cap, rate cap, RFC 3164/5424 parsing, and nginx access-log normalization.
-- MDaemon flat-file log source, intended for the Windows satellite pipeline instance on the MDaemon host.  It tails configured per-day log patterns, stores byte offsets per file, baselines existing files by default, skips session-log banners, drops Dynamic Screening noise by default, and normalizes SMTP/IMAP/POP, Screening, and Dynamic Screening lines into shared IP-correlatable events.  The Windows satellite installer publishes the pipeline host as the client-specific `ViegardSatelliteMDaemon` service with only the `sources` role enabled.
+- MDaemon flat-file log source, intended for the Windows satellite pipeline instance on the MDaemon host.  It tails configured per-day log patterns, stores byte offsets per file, baselines existing files by default, skips session-log banners, drops Dynamic Screening noise by default, and normalizes SMTP/IMAP/POP, Screening, and Dynamic Screening lines into shared IP-correlatable events.  Runtime ingestion filters can suppress configured low-value MDaemon kinds before event storage and queueing while raw observations still persist every payload.  The Windows satellite installer publishes the pipeline host as the client-specific `ViegardSatelliteMDaemon` service with only the `sources` role enabled.
 
 ## Core interfaces (ports; final shapes at implementation)
 
@@ -182,6 +182,7 @@ Interface | Metaphor | Contract summary
 `IAuditLedger` | Ledger | Append-only audit records covering every stage
 `IRetentionStore` | Roost | Batched deletes for configured data-retention targets; unset periods keep rows forever
 `IRetentionSettingsStore` | Roost | Database-owned retention periods plus last-cycle status for admin editing and worker execution
+`IIngestionFilterStore` | Roost | Database-owned source-type/event-kind suppression matrix for normalization-time event emission, with notification-backed refresh and fail-open runtime reads
 `ISatelliteRoleStore` | Roost | Lists, creates, rotates, and revokes per-satellite PostgreSQL roles behind the admin UI.  Role names use the enforced `viegard_sat_` prefix; generated passwords are shown once and are never audited.
 `ISecretProvider` | Roost | Named secret retrieval; file-mounted (prod) and user-secrets (dev) implementations
 `IHealthContributor` | - | Per-component health surfaced by both hosts

@@ -1,4 +1,5 @@
 using Viegard.Application.Audit;
+using Viegard.Application.Configuration;
 using Viegard.Application.Queues;
 using Viegard.Application.Sources;
 using Viegard.Application.Stores;
@@ -19,6 +20,7 @@ public sealed class IngestionWorker(
     IEnumerable<IEventNormalizer> normalizers,
     IRawObservationStore rawObservationStore,
     IEventStore eventStore,
+    IngestionFilterSource ingestionFilters,
     IWorkQueue<Guid> eventQueue,
     IAuditLedger auditLedger,
     ILogger<IngestionWorker> logger) : BackgroundService
@@ -37,6 +39,7 @@ public sealed class IngestionWorker(
             sourceList.Count,
             string.Join(", ", sourceList.Select(s => s.SourceId)));
 
+        await ingestionFilters.RefreshAsync(stoppingToken).ConfigureAwait(false);
         var pumps = sourceList.Select(source => PumpSourceAsync(source, stoppingToken)).ToList();
         await Task.WhenAll(pumps).ConfigureAwait(false);
     }
@@ -107,7 +110,7 @@ public sealed class IngestionWorker(
         }
     }
 
-    private async Task IngestAsync(
+    internal async Task IngestAsync(
         IDataSource source,
         IEventNormalizer normalizer,
         ObservedItem item,
@@ -137,6 +140,15 @@ public sealed class IngestionWorker(
                 Summary = $"Normalization failed: {result.FailureReason}",
                 SourceId = source.SourceId,
             }, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (!ingestionFilters.ShouldEmit(result.Event))
+        {
+            logger.LogDebug(
+                "Event from {SourceId} ({PayloadType}) suppressed by ingestion filter before storage and queueing.",
+                source.SourceId,
+                result.Event.Payload.GetType().Name);
             return;
         }
 

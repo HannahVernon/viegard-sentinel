@@ -114,6 +114,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
         builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
+        builder.Services.AddSingleton<IIngestionFilterStore, InMemoryIngestionFilterStore>();
         builder.Services.AddSingleton<IRetentionStore, InMemoryRetentionStore>();
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
 
@@ -132,6 +133,9 @@ switch (persistenceProvider)
         throw new InvalidOperationException(
             $"Unknown persistence provider '{persistenceProvider}'.  Supported: inmemory, postgres.");
 }
+
+builder.Services.AddSingleton<IIngestionFilterDiagnostics, LoggingIngestionFilterDiagnostics>();
+builder.Services.AddSingleton<IngestionFilterSource>();
 
 // IMAP source module (Phase 4; D-0019..D-0022).  Account configuration
 // (hosts, usernames) is environment-specific: in development it lives in
@@ -209,6 +213,7 @@ builder.Services.AddHostedService<QueueTelemetryPublisher>();
 var configuredRoles = builder.Configuration.GetSection($"{ViegardHostOptions.SectionName}:Roles").Get<string[]>() ?? [];
 if (configuredRoles.Contains(RoleNames.Sources, StringComparer.OrdinalIgnoreCase))
 {
+    builder.Services.AddHostedService<IngestionFilterRefreshWorker>();
     builder.Services.AddHostedService<IngestionWorker>();
 }
 

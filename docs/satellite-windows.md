@@ -174,6 +174,8 @@ Choice | Account | Trade-off
 
 After the service starts, check the Viegard admin UI `/queues` page.  The Instances table should show the new instance ID, and the Queues table should continue to show one shared row per queue.
 
+Routine MDaemon transcript chatter can be filtered centrally from **Configuration** -> **Ingestion**.  The default filter suppresses `SessionLine` and `Other` before they become normalized events, which reduces queue and correlation load on every upgraded sources-role instance.  Raw observations still record every tailed log payload on the satellite for forensic review.
+
 ## Upgrade
 
 Run upgrade from the cloned repository in an elevated Windows PowerShell session:

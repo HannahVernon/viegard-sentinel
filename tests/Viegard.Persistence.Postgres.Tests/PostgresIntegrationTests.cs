@@ -260,6 +260,30 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Incident_store_finds_incidents_containing_event_id()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresIncidentStore(factory);
+        var eventId = ViegardId.New();
+        var now = DateTimeOffset.UtcNow;
+        var related = Incident($"it-event-link-{ViegardId.New():N}", now) with
+        {
+            EventIds = [ViegardId.New(), eventId],
+        };
+        var unrelated = Incident($"it-event-link-{ViegardId.New():N}", now.AddMinutes(1)) with
+        {
+            EventIds = [ViegardId.New()],
+        };
+        await store.UpsertAsync(unrelated);
+        await store.UpsertAsync(related);
+
+        var matches = await store.FindByEventIdAsync(eventId);
+
+        Assert.Equal(related.Id, Assert.Single(matches).Id);
+        Assert.Empty(await store.FindByEventIdAsync(ViegardId.New()));
+    }
+
+    [PostgresFact]
     public async Task Admin_list_sorts_use_keyset_ordering_for_the_filtered_result_set()
     {
         var factory = new TestDbContextFactory(_dataSource!);

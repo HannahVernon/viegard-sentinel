@@ -101,6 +101,13 @@ public sealed class InMemoryIncidentStore : IIncidentStore
             .OrderByDescending(i => i.WindowEnd)
             .FirstOrDefault());
 
+    public ValueTask<IReadOnlyList<Incident>> FindByEventIdAsync(Guid eventId, CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult<IReadOnlyList<Incident>>(_incidents.Values
+            .Where(i => i.EventIds.Contains(eventId))
+            .OrderByDescending(i => i.WindowEnd)
+            .ThenByDescending(i => i.Id)
+            .ToList());
+
     public ValueTask<KeysetPage<Incident>> ListPageAsync(
         Guid? beforeId,
         int pageSize,

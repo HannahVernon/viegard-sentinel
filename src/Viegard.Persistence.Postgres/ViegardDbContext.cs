@@ -43,6 +43,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<CustomSignatureRow> CustomSignatures => Set<CustomSignatureRow>();
 
+    public DbSet<RetentionSettingsRow> RetentionSettings => Set<RetentionSettingsRow>();
+
     public DbSet<QueueMessageRow> QueueMessages => Set<QueueMessageRow>();
 
     public DbSet<QueueCounterRow> QueueCounters => Set<QueueCounterRow>();
@@ -201,6 +203,15 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.Pattern).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxPatternLength);
             entity.Property(e => e.Category).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxCategoryLength);
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<RetentionSettingsRow>(entity =>
+        {
+            entity.ToTable("retention_settings", table =>
+                table.HasCheckConstraint("CK_retention_settings_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Retention.RetentionSettings.MaxUpdatedByLength);
         });
 
         modelBuilder.Entity<QueueMessageRow>(entity =>

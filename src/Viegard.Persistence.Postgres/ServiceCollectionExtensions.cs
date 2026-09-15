@@ -80,6 +80,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ISourceOffsetStore, PostgresSourceOffsetStore>();
         services.AddSingleton<ICustomSignatureStore, PostgresCustomSignatureStore>();
         services.AddSingleton<IRetentionStore, PostgresRetentionStore>();
+        services.AddSingleton<IRetentionSettingsStore, PostgresRetentionSettingsStore>();
 
         // Durable events queue and command queue (broker-semantics port).
         services.AddSingleton<IWorkQueue<Guid>>(sp =>

@@ -275,6 +275,41 @@ public sealed class CustomSignatureRow
     public int Version { get; set; }
 }
 
+public sealed class RetentionSettingsRow
+{
+    public int Id { get; set; }
+
+    public int? RawObservationsDays { get; set; }
+
+    public int? EventsDays { get; set; }
+
+    public int? IncidentsDays { get; set; }
+
+    public int? ClassificationsDays { get; set; }
+
+    public int? DecisionsDays { get; set; }
+
+    public int? ActionsDays { get; set; }
+
+    public int? AuditRecordsDays { get; set; }
+
+    public int? DeadLetteredQueueMessagesDays { get; set; }
+
+    public int? ExpiredAdminSessionsDays { get; set; }
+
+    public int Version { get; set; }
+
+    public DateTimeOffset? SeededAt { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+
+    public DateTimeOffset? LastCycleAt { get; set; }
+
+    public string? LastCycleCountsJson { get; set; }
+}
+
 public sealed class QueueMessageRow
 {
     public long Id { get; set; }

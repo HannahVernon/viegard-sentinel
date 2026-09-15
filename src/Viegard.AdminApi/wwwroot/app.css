@@ -174,7 +174,8 @@ a:hover {
 .page-layout:has(#preferences:target) .page-index a[href="/account#preferences"],
 .page-layout:has(#sessions:target) .page-index a[href="/account#sessions"],
 .page-layout:has(#list:target) .page-index a[href="/signatures#list"],
-.page-layout:has(#add:target) .page-index a[href="/signatures#add"] {
+.page-layout:has(#add:target) .page-index a[href="/signatures#add"],
+.page-layout:has(#retention:target) .page-index a[href="/configuration#retention"] {
     color: var(--accent-strong);
     font-weight: 700;
 }

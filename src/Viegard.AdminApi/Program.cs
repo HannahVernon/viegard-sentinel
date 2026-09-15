@@ -14,6 +14,7 @@ using Viegard.AdminApi.Signatures;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
 using Viegard.Application.Queues;
+using Viegard.Application.Retention;
 using Viegard.Application.Secrets;
 using Viegard.Application.Stores;
 using Viegard.Application.Telemetry;
@@ -189,6 +190,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
         builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
+        builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");
@@ -316,6 +318,7 @@ app.MapGet("/status/queues", async (IQueueTelemetryStore telemetry, Cancellation
 }).RequireAuthorization();
 app.MapAdminAuthEndpoints();
 app.MapAdminSignatureEndpoints();
+app.MapAdminConfigurationEndpoints();
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>();
 

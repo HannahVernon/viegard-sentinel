@@ -9,6 +9,7 @@ namespace Viegard.PipelineHost.Workers;
 
 public sealed class RetentionWorker(
     IRetentionStore retentionStore,
+    IRetentionSettingsStore retentionSettingsStore,
     IAuditLedger auditLedger,
     IOptions<RetentionOptions> options,
     TimeProvider timeProvider,
@@ -25,6 +26,10 @@ public sealed class RetentionWorker(
 
         try
         {
+            await retentionSettingsStore
+                .SeedIfMissingAsync(retentionOptions, timeProvider.GetUtcNow(), stoppingToken)
+                .ConfigureAwait(false);
+
             await DelayAsync(retentionOptions.StartupDelay, stoppingToken).ConfigureAwait(false);
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -50,14 +55,28 @@ public sealed class RetentionWorker(
     public async Task<RetentionCycleResult> RunCycleAsync(CancellationToken cancellationToken = default)
     {
         var retentionOptions = options.Value;
-        var configuredPeriods = retentionOptions.ConfiguredPeriods();
-        if (configuredPeriods.Count == 0)
+        var now = timeProvider.GetUtcNow();
+        var settings = await retentionSettingsStore.GetAsync(cancellationToken).ConfigureAwait(false);
+        if (settings is null)
         {
-            logger.LogDebug("Retention purge cycle skipped because no retention periods are configured.");
+            logger.LogDebug("Retention purge cycle skipped because retention settings have not been seeded.");
+            await retentionSettingsStore
+                .UpdateLastCycleAsync(now, RetentionSettings.EmptyCounts(), cancellationToken)
+                .ConfigureAwait(false);
             return new RetentionCycleResult(0, []);
         }
 
-        var now = timeProvider.GetUtcNow();
+        var configuredPeriods = settings.ConfiguredPeriods();
+        var cycleCounts = RetentionSettings.EmptyCounts().ToDictionary(pair => pair.Key, pair => pair.Value);
+        if (configuredPeriods.Count == 0)
+        {
+            logger.LogDebug("Retention purge cycle skipped because no retention periods are configured.");
+            await retentionSettingsStore
+                .UpdateLastCycleAsync(now, cycleCounts, cancellationToken)
+                .ConfigureAwait(false);
+            return new RetentionCycleResult(0, []);
+        }
+
         var batchSize = retentionOptions.EffectiveBatchSize;
         var results = new List<RetentionTargetResult>(configuredPeriods.Count);
 
@@ -68,6 +87,7 @@ public sealed class RetentionWorker(
                 .PurgeAsync(period.Target, cutoff, batchSize, cancellationToken)
                 .ConfigureAwait(false);
             results.Add(new RetentionTargetResult(period.Target.TableName(), period.Days, cutoff, rowsDeleted));
+            cycleCounts[period.Target] = rowsDeleted;
         }
 
         var totalDeleted = results.Sum(r => r.RowsDeleted);
@@ -77,6 +97,9 @@ public sealed class RetentionWorker(
                 "Retention purge cycle completed with no rows removed. ConfiguredTargets={ConfiguredTargets}; BatchSize={BatchSize}.",
                 results.Count,
                 batchSize);
+            await retentionSettingsStore
+                .UpdateLastCycleAsync(now, cycleCounts, cancellationToken)
+                .ConfigureAwait(false);
             return new RetentionCycleResult(0, results);
         }
 
@@ -97,6 +120,10 @@ public sealed class RetentionWorker(
             totalDeleted,
             counts,
             batchSize);
+
+        await retentionSettingsStore
+            .UpdateLastCycleAsync(now, cycleCounts, cancellationToken)
+            .ConfigureAwait(false);
 
         return new RetentionCycleResult(totalDeleted, results);
     }

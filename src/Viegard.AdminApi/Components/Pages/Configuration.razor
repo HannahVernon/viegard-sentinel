@@ -1,0 +1,159 @@
+@page "/configuration"
+@attribute [Authorize]
+@inject IRetentionSettingsStore RetentionSettingsStore
+@inject IAdminUserStore Users
+@inject IAdminSessionStore Sessions
+@inject IHttpContextAccessor HttpContextAccessor
+@inject IOptions<AdminAuthOptions> AuthOptions
+@inject UserDisplay Display
+
+<PageTitle>Viegard configuration</PageTitle>
+
+<main class="admin-panel wide page-layout">
+    <nav class="page-index" aria-label="Configuration sections">
+        <a class="index-default-link" href="/configuration#retention">Retention</a>
+    </nav>
+    <div class="page-content">
+    <h1>Service configuration</h1>
+
+    @if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <p class="message error">@Error</p>
+    }
+    @if (!string.IsNullOrWhiteSpace(Status))
+    {
+        <p class="message">@Status</p>
+    }
+
+    <section id="retention" class="indexed index-default">
+        <h2>Retention</h2>
+        <p class="small">Changes apply at the next daily retention cycle.  Blank values keep that table forever.</p>
+        <p class="small">Corrections are never purgeable and do not have a retention setting.</p>
+
+        <h3>Status</h3>
+        <dl class="detail-list">
+            <dt>Settings row</dt><dd>@SettingsState</dd>
+            <dt>Version</dt><dd>@(_settings?.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")</dd>
+            <dt>Last updated</dt><dd>@LastUpdated</dd>
+            <dt>Last cycle</dt><dd>@LastCycle</dd>
+            <dt>Last rows removed</dt><dd>@LastCycleTotal</dd>
+        </dl>
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Target</th>
+                    <th>Effective period</th>
+                    <th>Last-cycle rows removed</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var descriptor in RetentionTargetMetadata.Descriptors)
+                {
+                    <tr>
+                        <td>@descriptor.SettingName</td>
+                        <td>@FormatPeriod(descriptor.Target)</td>
+                        <td>@FormatLastCycleCount(descriptor.Target)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <h3>Edit retention periods</h3>
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/retention" class="edit-form">
+                <AntiforgeryToken />
+                <input type="hidden" name="version" value="@(_settings?.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")" />
+                @foreach (var descriptor in RetentionTargetMetadata.Descriptors)
+                {
+                    <label>
+                        @descriptor.Label
+                        <input name="@descriptor.SettingName"
+                               type="number"
+                               min="0"
+                               step="1"
+                               value="@PeriodValue(descriptor.Target)"
+                               placeholder="Keep forever" />
+                        <span class="small">@descriptor.HelpText</span>
+                    </label>
+                }
+                <button type="submit">Save retention settings</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Editing retention settings requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#retention" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-retention" />
+            </div>
+        }
+    </section>
+    </div>
+</main>
+
+@code {
+    private RetentionSettings? _settings;
+    private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
+    private bool _stepUpFresh;
+    private bool _hasSecurityKeys;
+
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+
+    private string SettingsState => _settings switch
+    {
+        null => "Not seeded",
+        { SeededAt: { } seededAt } => $"Seeded from deployment configuration at {Display.Format(seededAt)}",
+        _ => "Configured in the admin UI before automatic seeding",
+    };
+
+    private string LastUpdated => _settings is null
+        ? ""
+        : $"{_settings.UpdatedBy} at {Display.Format(_settings.UpdatedAt)}";
+
+    private string LastCycle => _settings?.LastCycleAt is { } lastCycleAt
+        ? Display.Format(lastCycleAt)
+        : "Never";
+
+    private string LastCycleTotal => _lastCycleCounts.Values.Sum().ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _settings = await RetentionSettingsStore.GetAsync().ConfigureAwait(false);
+        _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
+
+        var context = HttpContextAccessor.HttpContext;
+        if (context is null)
+        {
+            return;
+        }
+
+        if (Guid.TryParse(context.User.FindFirstValue(AdminCookieNames.SessionIdClaim), out var sessionId))
+        {
+            var session = await Sessions.GetAsync(sessionId).ConfigureAwait(false);
+            _stepUpFresh = session?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
+        }
+
+        if (Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+        {
+            var credentials = await Users.ListWebAuthnCredentialsAsync(userId).ConfigureAwait(false);
+            _hasSecurityKeys = credentials.Count > 0;
+        }
+    }
+
+    private string FormatPeriod(RetentionTarget target) =>
+        _settings?.GetDays(target) is { } days
+            ? $"{days.ToString(System.Globalization.CultureInfo.InvariantCulture)} day(s)"
+            : "Keep forever";
+
+    private string PeriodValue(RetentionTarget target) =>
+        _settings?.GetDays(target)?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private string FormatLastCycleCount(RetentionTarget target) =>
+        _lastCycleCounts.GetValueOrDefault(target).ToString(System.Globalization.CultureInfo.InvariantCulture);
+}

@@ -19,4 +19,8 @@
     <UserSecretsId>6b873927-6406-4221-b6d2-a32f97258b24</UserSecretsId>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Viegard.AdminApi.Tests" />
+  </ItemGroup>
+
 </Project>

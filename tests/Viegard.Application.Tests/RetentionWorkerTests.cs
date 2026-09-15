@@ -16,13 +16,15 @@ namespace Viegard.Application.Tests;
 public sealed class RetentionWorkerTests
 {
     [Fact]
-    public async Task Worker_runs_after_startup_delay_and_repeats_each_interval()
+    public async Task Worker_seeds_missing_settings_then_runs_after_startup_delay_and_repeats_each_interval()
     {
         var start = new DateTimeOffset(2026, 9, 14, 18, 0, 0, TimeSpan.Zero);
         var time = new FakeTimeProvider(start);
-        var store = new RecordingRetentionStore();
+        var purgeStore = new RecordingRetentionStore();
+        var settingsStore = new RecordingRetentionSettingsStore();
         var worker = CreateWorker(
-            store,
+            purgeStore,
+            settingsStore,
             new RecordingAuditLedger(),
             new RetentionOptions
             {
@@ -36,17 +38,18 @@ public sealed class RetentionWorkerTests
         try
         {
             await Task.Delay(50);
-            Assert.Empty(store.Calls);
+            Assert.Equal(1, settingsStore.SeedCalls);
+            Assert.Empty(purgeStore.Calls);
 
             time.Advance(TimeSpan.FromSeconds(1));
-            await WaitForAsync(() => store.Calls.Count == 1);
-            var first = Assert.Single(store.Calls);
+            await WaitForAsync(() => purgeStore.Calls.Count == 1);
+            var first = Assert.Single(purgeStore.Calls);
             Assert.Equal(RetentionTarget.Events, first.Target);
             Assert.Equal(start.AddSeconds(1).AddDays(-90), first.Cutoff);
 
             time.Advance(TimeSpan.FromHours(24));
-            await WaitForAsync(() => store.Calls.Count == 2);
-            var second = store.Calls[1];
+            await WaitForAsync(() => purgeStore.Calls.Count == 2);
+            var second = purgeStore.Calls[1];
             Assert.Equal(RetentionTarget.Events, second.Target);
             Assert.Equal(start.AddSeconds(1).AddHours(24).AddDays(-90), second.Cutoff);
         }
@@ -57,23 +60,48 @@ public sealed class RetentionWorkerTests
     }
 
     [Fact]
+    public async Task Cycle_reads_database_periods_instead_of_environment_periods()
+    {
+        var start = new DateTimeOffset(2026, 9, 14, 18, 0, 0, TimeSpan.Zero);
+        var time = new FakeTimeProvider(start);
+        var purgeStore = new RecordingRetentionStore();
+        var settingsStore = new RecordingRetentionSettingsStore(SettingsWith((RetentionTarget.Events, 90)));
+        var worker = CreateWorker(
+            purgeStore,
+            settingsStore,
+            new RecordingAuditLedger(),
+            new RetentionOptions
+            {
+                EventsDays = 1,
+                BatchSize = 10,
+            },
+            time);
+
+        await worker.RunCycleAsync();
+
+        var call = Assert.Single(purgeStore.Calls);
+        Assert.Equal(RetentionTarget.Events, call.Target);
+        Assert.Equal(start.AddDays(-90), call.Cutoff);
+        Assert.Equal(10, call.BatchSize);
+    }
+
+    [Fact]
     public async Task Cycle_purges_only_configured_targets_and_audits_deleted_rows()
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 14, 18, 0, 0, TimeSpan.Zero));
-        var store = new RecordingRetentionStore();
-        store.SetRowsDeleted(RetentionTarget.Incidents, 2);
-        store.SetRowsDeleted(RetentionTarget.DeadLetteredQueueMessages, 3);
+        var purgeStore = new RecordingRetentionStore();
+        purgeStore.SetRowsDeleted(RetentionTarget.Incidents, 2);
+        purgeStore.SetRowsDeleted(RetentionTarget.DeadLetteredQueueMessages, 3);
+        var settingsStore = new RecordingRetentionSettingsStore(SettingsWith(
+            (RetentionTarget.Events, 90),
+            (RetentionTarget.Incidents, 180),
+            (RetentionTarget.DeadLetteredQueueMessages, 30)));
         var audit = new RecordingAuditLedger();
         var worker = CreateWorker(
-            store,
+            purgeStore,
+            settingsStore,
             audit,
-            new RetentionOptions
-            {
-                EventsDays = 90,
-                IncidentsDays = 180,
-                DeadLetteredQueueMessagesDays = 30,
-                BatchSize = 10,
-            },
+            new RetentionOptions { BatchSize = 10 },
             time);
 
         var result = await worker.RunCycleAsync();
@@ -81,8 +109,8 @@ public sealed class RetentionWorkerTests
         Assert.Equal(5, result.TotalDeleted);
         Assert.Equal(
             [RetentionTarget.Events, RetentionTarget.Incidents, RetentionTarget.DeadLetteredQueueMessages],
-            store.Calls.Select(c => c.Target));
-        Assert.All(store.Calls, call => Assert.Equal(10, call.BatchSize));
+            purgeStore.Calls.Select(c => c.Target));
+        Assert.All(purgeStore.Calls, call => Assert.Equal(10, call.BatchSize));
 
         var record = Assert.Single(audit.Records);
         Assert.Equal(PipelineStage.System, record.Stage);
@@ -94,15 +122,68 @@ public sealed class RetentionWorkerTests
             t.GetProperty("TableName").GetString() == "incidents"
             && t.GetProperty("Days").GetInt32() == 180
             && t.GetProperty("RowsDeleted").GetInt64() == 2);
+
+        var cycleUpdate = Assert.Single(settingsStore.LastCycleUpdates);
+        Assert.Equal(5, cycleUpdate.Counts.Values.Sum());
+        Assert.Equal(3, cycleUpdate.Counts[RetentionTarget.DeadLetteredQueueMessages]);
     }
 
     [Fact]
-    public async Task Cycle_with_no_deleted_rows_writes_no_audit_record()
+    public async Task Cycle_with_no_deleted_rows_updates_last_cycle_and_writes_no_audit_record()
     {
-        var store = new RecordingRetentionStore();
+        var now = new DateTimeOffset(2026, 9, 14, 18, 0, 0, TimeSpan.Zero);
+        var purgeStore = new RecordingRetentionStore();
+        var settingsStore = new RecordingRetentionSettingsStore(SettingsWith((RetentionTarget.Events, 90)));
         var audit = new RecordingAuditLedger();
         var worker = CreateWorker(
-            store,
+            purgeStore,
+            settingsStore,
+            audit,
+            new RetentionOptions(),
+            new FakeTimeProvider(now));
+
+        var result = await worker.RunCycleAsync();
+
+        Assert.Equal(0, result.TotalDeleted);
+        Assert.Empty(audit.Records);
+        var cycleUpdate = Assert.Single(settingsStore.LastCycleUpdates);
+        Assert.Equal(now, cycleUpdate.LastCycleAt);
+        Assert.All(RetentionSettings.Targets, target => Assert.Equal(0, cycleUpdate.Counts[target]));
+    }
+
+    [Fact]
+    public async Task Cycle_with_settings_row_but_no_configured_periods_updates_last_cycle_without_purging()
+    {
+        var now = new DateTimeOffset(2026, 9, 14, 18, 0, 0, TimeSpan.Zero);
+        var purgeStore = new RecordingRetentionStore();
+        var settingsStore = new RecordingRetentionSettingsStore(SettingsWith());
+        var audit = new RecordingAuditLedger();
+        var worker = CreateWorker(
+            purgeStore,
+            settingsStore,
+            audit,
+            new RetentionOptions(),
+            new FakeTimeProvider(now));
+
+        var result = await worker.RunCycleAsync();
+
+        Assert.Equal(0, result.TotalDeleted);
+        Assert.Empty(result.Targets);
+        Assert.Empty(purgeStore.Calls);
+        Assert.Empty(audit.Records);
+        var cycleUpdate = Assert.Single(settingsStore.LastCycleUpdates);
+        Assert.Equal(now, cycleUpdate.LastCycleAt);
+    }
+
+    [Fact]
+    public async Task Cycle_without_settings_row_is_a_noop()
+    {
+        var purgeStore = new RecordingRetentionStore();
+        var settingsStore = new RecordingRetentionSettingsStore();
+        var audit = new RecordingAuditLedger();
+        var worker = CreateWorker(
+            purgeStore,
+            settingsStore,
             audit,
             new RetentionOptions { EventsDays = 90 },
             new FakeTimeProvider());
@@ -110,26 +191,10 @@ public sealed class RetentionWorkerTests
         var result = await worker.RunCycleAsync();
 
         Assert.Equal(0, result.TotalDeleted);
-        Assert.Empty(audit.Records);
-    }
-
-    [Fact]
-    public async Task Cycle_with_no_configured_periods_skips_store_and_audit()
-    {
-        var store = new RecordingRetentionStore();
-        var audit = new RecordingAuditLedger();
-        var worker = CreateWorker(
-            store,
-            audit,
-            new RetentionOptions(),
-            new FakeTimeProvider());
-
-        var result = await worker.RunCycleAsync();
-
-        Assert.Equal(0, result.TotalDeleted);
         Assert.Empty(result.Targets);
-        Assert.Empty(store.Calls);
+        Assert.Empty(purgeStore.Calls);
         Assert.Empty(audit.Records);
+        Assert.Single(settingsStore.LastCycleUpdates);
     }
 
     [Fact]
@@ -163,15 +228,34 @@ public sealed class RetentionWorkerTests
 
     private static RetentionWorker CreateWorker(
         IRetentionStore store,
+        IRetentionSettingsStore settingsStore,
         IAuditLedger auditLedger,
         RetentionOptions options,
         TimeProvider timeProvider) =>
         new(
             store,
+            settingsStore,
             auditLedger,
             Options.Create(options),
             timeProvider,
             NullLogger<RetentionWorker>.Instance);
+
+    private static RetentionSettings SettingsWith(params (RetentionTarget Target, int? Days)[] values)
+    {
+        var settings = new RetentionSettings
+        {
+            Id = RetentionSettings.FixedId,
+            Version = 1,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = "test",
+        };
+        foreach (var (target, days) in values)
+        {
+            settings = settings.WithDays(target, days);
+        }
+
+        return settings;
+    }
 
     private static async Task WaitForAsync(Func<bool> condition)
     {
@@ -182,6 +266,83 @@ public sealed class RetentionWorkerTests
         }
 
         Assert.True(condition());
+    }
+
+    private sealed class RecordingRetentionSettingsStore(RetentionSettings? initialSettings = null) : IRetentionSettingsStore
+    {
+        private readonly Lock _sync = new();
+        private RetentionSettings? _settings = initialSettings;
+
+        public int SeedCalls { get; private set; }
+
+        public List<LastCycleUpdate> LastCycleUpdates { get; } = [];
+
+        public ValueTask<RetentionSettings?> GetAsync(CancellationToken cancellationToken = default)
+        {
+            lock (_sync)
+            {
+                return ValueTask.FromResult(_settings);
+            }
+        }
+
+        public ValueTask<RetentionSettingsSaveResult> UpsertAsync(
+            RetentionSettings settings,
+            int expectedVersion,
+            string updatedBy,
+            DateTimeOffset updatedAt,
+            CancellationToken cancellationToken = default)
+        {
+            lock (_sync)
+            {
+                if (_settings?.Version != expectedVersion && !(_settings is null && expectedVersion == 0))
+                {
+                    return ValueTask.FromResult(RetentionSettingsSaveResult.Conflict(_settings));
+                }
+
+                _settings = settings with
+                {
+                    Version = expectedVersion + 1,
+                    UpdatedAt = updatedAt.ToUniversalTime(),
+                    UpdatedBy = updatedBy,
+                };
+                return ValueTask.FromResult(RetentionSettingsSaveResult.Saved(_settings));
+            }
+        }
+
+        public ValueTask<RetentionSettings?> SeedIfMissingAsync(
+            RetentionOptions options,
+            DateTimeOffset seededAt,
+            CancellationToken cancellationToken = default)
+        {
+            lock (_sync)
+            {
+                SeedCalls++;
+                _settings ??= RetentionSettings.FromOptions(options, seededAt);
+                return ValueTask.FromResult<RetentionSettings?>(_settings);
+            }
+        }
+
+        public ValueTask UpdateLastCycleAsync(
+            DateTimeOffset lastCycleAt,
+            IReadOnlyDictionary<RetentionTarget, long> counts,
+            CancellationToken cancellationToken = default)
+        {
+            lock (_sync)
+            {
+                var snapshot = counts.ToDictionary(pair => pair.Key, pair => pair.Value);
+                LastCycleUpdates.Add(new LastCycleUpdate(lastCycleAt, snapshot));
+                if (_settings is not null)
+                {
+                    _settings = _settings with
+                    {
+                        LastCycleAt = lastCycleAt.ToUniversalTime(),
+                        LastCycleCountsJson = RetentionSettings.SerializeCounts(snapshot),
+                    };
+                }
+            }
+
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class RecordingRetentionStore : IRetentionStore
@@ -248,4 +409,6 @@ public sealed class RetentionWorkerTests
     }
 
     private sealed record RetentionCall(RetentionTarget Target, DateTimeOffset Cutoff, int BatchSize);
+
+    private sealed record LastCycleUpdate(DateTimeOffset LastCycleAt, IReadOnlyDictionary<RetentionTarget, long> Counts);
 }

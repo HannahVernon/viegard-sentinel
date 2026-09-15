@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Viegard.Application.Retention;
 using Viegard.Domain.Admin;
 using Viegard.Domain.Actions;
 using Viegard.Domain.Audit;
@@ -415,6 +416,46 @@ internal static class Mapping
         UpdatedAt = row.UpdatedAt,
         UpdatedBy = row.UpdatedBy,
         Version = row.Version,
+    };
+
+    public static RetentionSettingsRow ToRow(this RetentionSettings settings) => new()
+    {
+        Id = settings.Id,
+        RawObservationsDays = settings.RawObservationsDays,
+        EventsDays = settings.EventsDays,
+        IncidentsDays = settings.IncidentsDays,
+        ClassificationsDays = settings.ClassificationsDays,
+        DecisionsDays = settings.DecisionsDays,
+        ActionsDays = settings.ActionsDays,
+        AuditRecordsDays = settings.AuditRecordsDays,
+        DeadLetteredQueueMessagesDays = settings.DeadLetteredQueueMessagesDays,
+        ExpiredAdminSessionsDays = settings.ExpiredAdminSessionsDays,
+        Version = settings.Version,
+        SeededAt = Utc(settings.SeededAt),
+        UpdatedAt = Utc(settings.UpdatedAt),
+        UpdatedBy = settings.UpdatedBy,
+        LastCycleAt = Utc(settings.LastCycleAt),
+        LastCycleCountsJson = settings.LastCycleCountsJson,
+    };
+
+    public static RetentionSettings ToDomain(this RetentionSettingsRow row) => new()
+    {
+        Id = row.Id,
+        RawObservationsDays = row.RawObservationsDays,
+        EventsDays = row.EventsDays,
+        IncidentsDays = row.IncidentsDays,
+        ClassificationsDays = row.ClassificationsDays,
+        DecisionsDays = row.DecisionsDays,
+        ActionsDays = row.ActionsDays,
+        AuditRecordsDays = row.AuditRecordsDays,
+        DeadLetteredQueueMessagesDays = row.DeadLetteredQueueMessagesDays,
+        ExpiredAdminSessionsDays = row.ExpiredAdminSessionsDays,
+        Version = row.Version,
+        SeededAt = row.SeededAt,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+        LastCycleAt = row.LastCycleAt,
+        LastCycleCountsJson = row.LastCycleCountsJson,
     };
 
     public static AuditRecord ToDomain(this AuditRecordRow row, string? sourceKey) => new()

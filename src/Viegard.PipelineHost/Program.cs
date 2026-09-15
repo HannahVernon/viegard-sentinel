@@ -109,6 +109,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
         builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
         builder.Services.AddSingleton<IRetentionStore, InMemoryRetentionStore>();
+        builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");

@@ -76,9 +76,11 @@ The schema is applied via the connection `search_path`, so the migrations and qu
 
 ### Data retention
 
-Retention is fail-safe by default.  Deploying the retention worker deletes nothing until explicit per-table periods are configured under `Viegard:Retention`; any unset period means keep that table forever.  Corrections are not purgeable because training feedback is retained.
+Retention is fail-safe by default.  Deploying the retention worker deletes nothing until explicit per-table periods exist in the database-owned `retention_settings` row; any blank period means keep that table forever.  Corrections are not purgeable because training feedback is retained.
 
-Run retention from exactly one pipeline instance by adding the singleton `maintenance` host role.  The worker runs shortly after startup and then once per day.  A purge cycle that removes one or more rows writes an audit record with per-table counts and the configured periods; a no-op cycle writes no audit record.
+Run retention from exactly one pipeline instance by adding the singleton `maintenance` host role.  On first maintenance startup only, the worker creates the `retention_settings` row from the configured `Viegard__Retention__*Days` values.  The deploy script's `configure --enable-retention` option writes those same seed values into the generated compose overlay.  After the row exists, the period values are owned by the admin UI at `/configuration#retention`; changing `Viegard__Retention__*Days` in the environment no longer changes effective retention.  `Viegard__Retention__BatchSize`, `StartupDelay`, and `CheckInterval` remain environment-tunable operational settings.
+
+The worker runs shortly after startup and then once per day.  It reads the database settings fresh at the start of every cycle, so UI changes apply at the next daily retention cycle.  A purge cycle that removes one or more rows writes an audit record with per-table counts and the configured periods; a no-op cycle writes no audit record.  Every cycle, including a no-op cycle, updates the settings row with the last cycle time and per-target row counts so the admin UI can show that retention ran and deleted nothing.
 
 Example policy values from D-0035:
 

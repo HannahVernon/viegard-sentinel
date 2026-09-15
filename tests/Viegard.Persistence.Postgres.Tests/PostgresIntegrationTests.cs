@@ -49,7 +49,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         // Clean slate for queue tables between runs.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE queue_messages, queue_counters");
+            "TRUNCATE queue_messages, queue_counters, retention_settings");
     }
 
     public async Task DisposeAsync()
@@ -475,6 +475,117 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Retention_settings_store_round_trips_and_detects_optimistic_concurrency_conflict()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresRetentionSettingsStore(factory);
+        var now = new DateTimeOffset(2026, 9, 14, 18, 0, 0, TimeSpan.Zero);
+
+        var saved = await store.UpsertAsync(
+            RetentionSettingsWith((RetentionTarget.Events, 90), (RetentionTarget.AuditRecords, 365)),
+            expectedVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: now);
+
+        Assert.True(saved.Succeeded);
+        Assert.Equal(1, saved.Settings!.Version);
+        Assert.Equal(90, saved.Settings.EventsDays);
+        Assert.Equal(365, saved.Settings.AuditRecordsDays);
+        Assert.Equal("hannah", saved.Settings.UpdatedBy);
+
+        var updated = await store.UpsertAsync(
+            saved.Settings with { EventsDays = 120 },
+            expectedVersion: saved.Settings.Version,
+            updatedBy: "operator",
+            updatedAt: now.AddMinutes(1));
+
+        Assert.True(updated.Succeeded);
+        Assert.Equal(2, updated.Settings!.Version);
+        Assert.Equal(120, updated.Settings.EventsDays);
+
+        var conflict = await store.UpsertAsync(
+            updated.Settings with { EventsDays = 7 },
+            expectedVersion: saved.Settings.Version,
+            updatedBy: "stale",
+            updatedAt: now.AddMinutes(2));
+
+        Assert.False(conflict.Succeeded);
+        Assert.Equal(2, conflict.Settings!.Version);
+        Assert.Equal(120, conflict.Settings.EventsDays);
+
+        var counts = RetentionSettings.EmptyCounts().ToDictionary(pair => pair.Key, pair => pair.Value);
+        counts[RetentionTarget.Events] = 3;
+        await store.UpdateLastCycleAsync(now.AddHours(1), counts);
+        var afterCycle = await store.GetAsync();
+        Assert.Equal(2, afterCycle!.Version);
+        Assert.Equal(3, afterCycle.LastCycleCounts()[RetentionTarget.Events]);
+        Assert.Equal(now.AddHours(1), afterCycle.LastCycleAt);
+    }
+
+    [PostgresFact]
+    public async Task Retention_settings_seed_is_create_only_and_race_safe()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var firstStore = new PostgresRetentionSettingsStore(factory);
+        var secondStore = new PostgresRetentionSettingsStore(factory);
+        var seededAt = new DateTimeOffset(2026, 9, 14, 18, 0, 0, TimeSpan.Zero);
+
+        var seeded = await firstStore.SeedIfMissingAsync(
+            new RetentionOptions
+            {
+                EventsDays = 90,
+                AuditRecordsDays = 365,
+            },
+            seededAt);
+
+        Assert.Equal(90, seeded!.EventsDays);
+        Assert.Equal(365, seeded.AuditRecordsDays);
+        Assert.Equal(seededAt, seeded.SeededAt);
+
+        var second = await secondStore.SeedIfMissingAsync(
+            new RetentionOptions
+            {
+                EventsDays = 7,
+                AuditRecordsDays = null,
+            },
+            seededAt.AddMinutes(1));
+
+        Assert.Equal(90, second!.EventsDays);
+        Assert.Equal(365, second.AuditRecordsDays);
+        Assert.Equal(seededAt, second.SeededAt);
+
+        await ClearRetentionSettingsAsync(factory);
+        var admin = await firstStore.UpsertAsync(
+            RetentionSettingsWith((RetentionTarget.Events, 45)),
+            expectedVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: seededAt.AddMinutes(2));
+        Assert.True(admin.Succeeded);
+
+        var afterAdminFirst = await secondStore.SeedIfMissingAsync(
+            new RetentionOptions { EventsDays = 90 },
+            seededAt.AddMinutes(3));
+        Assert.Equal(45, afterAdminFirst!.EventsDays);
+        Assert.Null(afterAdminFirst.SeededAt);
+
+        await ClearRetentionSettingsAsync(factory);
+        var seedA = firstStore.SeedIfMissingAsync(
+            new RetentionOptions { EventsDays = 11 },
+            seededAt.AddMinutes(4)).AsTask();
+        var seedB = secondStore.SeedIfMissingAsync(
+            new RetentionOptions { EventsDays = 22 },
+            seededAt.AddMinutes(5)).AsTask();
+        await Task.WhenAll(seedA, seedB);
+
+        await using var db = factory.CreateDbContext();
+        Assert.Equal(1, await db.RetentionSettings.CountAsync());
+        var raced = await firstStore.GetAsync();
+        Assert.NotNull(raced);
+        Assert.Contains(raced.EventsDays, new int?[] { 11, 22 });
+        Assert.Equal(1, raced.Version);
+    }
+
+    [PostgresFact]
     public async Task Retention_store_purges_only_eligible_rows()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -635,6 +746,28 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         UpdatedBy = "it",
         Version = 0,
     };
+
+    private static RetentionSettings RetentionSettingsWith(params (RetentionTarget Target, int? Days)[] values)
+    {
+        var settings = new RetentionSettings
+        {
+            Id = RetentionSettings.FixedId,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = "it",
+        };
+        foreach (var (target, days) in values)
+        {
+            settings = settings.WithDays(target, days);
+        }
+
+        return settings;
+    }
+
+    private static async Task ClearRetentionSettingsAsync(TestDbContextFactory factory)
+    {
+        await using var db = factory.CreateDbContext();
+        await db.RetentionSettings.ExecuteDeleteAsync();
+    }
 
     private static NormalizedEvent Event(string sourceKey, DateTimeOffset occurredAt) => new()
     {

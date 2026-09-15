@@ -1,12 +1,24 @@
 ﻿@page "/queues"
 @attribute [Authorize]
 @inject IQueueTelemetryStore QueueTelemetry
+@inject IRetentionSettingsStore RetentionSettingsStore
 @inject UserDisplay Display
 
 <PageTitle>Viegard queues</PageTitle>
 
 <main class="admin-panel">
     <h1>Dashboard/Queues</h1>
+
+    <section class="card">
+        <h2>Retention</h2>
+        <dl class="detail-list">
+            <dt>State</dt><dd>@RetentionState</dd>
+            <dt>Effective periods</dt><dd>@RetentionPeriodsSummary</dd>
+            <dt>Last cycle</dt><dd>@RetentionLastCycle</dd>
+            <dt>Last rows removed</dt><dd>@RetentionLastCycleTotal</dd>
+        </dl>
+        <p><a href="/configuration#retention">Edit retention configuration</a></p>
+    </section>
 
     @if (_rows.Count == 0)
     {
@@ -57,12 +69,32 @@
 @code {
     private readonly QueueHealthEvaluator _evaluator = new(new QueueHealthThresholds());
     private IReadOnlyList<QueueRow> _rows = [];
+    private RetentionSettings? _retentionSettings;
+    private IReadOnlyDictionary<RetentionTarget, long> _retentionCounts = RetentionSettings.EmptyCounts();
     private DateTimeOffset _now;
+
+    private string RetentionState => _retentionSettings is null
+        ? "Not seeded"
+        : "Configured";
+
+    private string RetentionPeriodsSummary => _retentionSettings is null
+        ? "No database-owned settings row exists yet."
+        : string.Join("; ", RetentionTargetMetadata.Descriptors.Select(descriptor =>
+            $"{descriptor.SettingName}: {FormatPeriod(descriptor.Target)}"));
+
+    private string RetentionLastCycle => _retentionSettings?.LastCycleAt is { } lastCycleAt
+        ? Display.Format(lastCycleAt)
+        : "Never";
+
+    private string RetentionLastCycleTotal =>
+        _retentionCounts.Values.Sum().ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     protected override async Task OnInitializedAsync()
     {
         await Display.InitializeAsync().ConfigureAwait(false);
         _now = DateTimeOffset.UtcNow;
+        _retentionSettings = await RetentionSettingsStore.GetAsync().ConfigureAwait(false);
+        _retentionCounts = _retentionSettings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
         var snapshots = await QueueTelemetry.GetLatestAsync().ConfigureAwait(false);
         _rows = snapshots
             .Select(s => new QueueRow(s, _evaluator.Evaluate(s, _now)))
@@ -72,6 +104,11 @@
     private string OldestAge(QueueTelemetrySnapshot snapshot) => snapshot.OldestPendingEnqueuedAt is null
         ? ""
         : (_now - snapshot.OldestPendingEnqueuedAt.Value).ToString("g");
+
+    private string FormatPeriod(RetentionTarget target) =>
+        _retentionSettings?.GetDays(target) is { } days
+            ? $"{days.ToString(System.Globalization.CultureInfo.InvariantCulture)}d"
+            : "forever";
 
     private sealed record QueueRow(QueueTelemetrySnapshot Snapshot, QueueHealthStatus Status);
 }

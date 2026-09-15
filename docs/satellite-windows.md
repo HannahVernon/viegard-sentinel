@@ -56,9 +56,9 @@ The application database role must have `CREATEROLE` to create, rotate, and revo
 
 This is intentionally a broad v1 DML grant on the Viegard schema.  The satellite runs only `sources`, but that role still writes raw observations, normalized events, source offsets, source reference rows, durable queue rows, queue telemetry, and audit records, and it reads shared configuration and reference rows.  A narrower table-specific grant can replace this later after the satellite write surface is measured.
 
-### Restrict published PostgreSQL traffic
+### Restrict published PostgreSQL traffic (recommended)
 
-Docker published ports bypass the host `INPUT` chain, so restrict the database listener in `DOCKER-USER`.  Put the allow rules before the drop rule:
+Restricting the published database port is recommended defense in depth, not a requirement for the satellite to function.  Docker published ports bypass the host `INPUT` chain, so restrictions belong in `DOCKER-USER`.  Put the allow rules before the drop rule, and include every legitimate client (satellite hosts, plus any administration workstations that connect with tools such as pgAdmin):
 
 ```bash
 sudo iptables -I DOCKER-USER 1 -p tcp --dport 5432 -s 192.0.2.21 -j RETURN
@@ -67,7 +67,7 @@ sudo iptables -I DOCKER-USER 3 -p tcp --dport 5432 -j DROP
 sudo netfilter-persistent save
 ```
 
-Use the actual MDaemon host addresses in place of `192.0.2.21` and `192.0.2.22`.
+Use the actual client addresses in place of `192.0.2.21` and `192.0.2.22`.  Skipping this leaves PostgreSQL's own authentication as the only gate on the published port; the LAN threat model is the operator's call.
 
 ### SQL fallback for satellite role creation
 

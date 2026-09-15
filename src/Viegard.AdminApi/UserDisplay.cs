@@ -14,9 +14,12 @@ public sealed class UserDisplay(
     private Task? _initializeTask;
     private TimeZoneInfo _timeZone = TimeZoneInfo.Utc;
     private int _defaultPageSize = AdminUserPreferences.DefaultPageSize;
+    private int _statusRefreshSeconds = AdminUserPreferences.DefaultStatusRefreshSeconds;
     private bool _invalidTimeZoneLogged;
 
     public int DefaultPageSize => _defaultPageSize;
+
+    public int StatusRefreshSeconds => _statusRefreshSeconds;
 
     public Task InitializeAsync() => _initializeTask ??= InitializeCoreAsync();
 
@@ -61,6 +64,10 @@ public sealed class UserDisplay(
             preferences.PageSize,
             AdminUserPreferences.MinPageSize,
             AdminUserPreferences.MaxPageSize);
+        _statusRefreshSeconds = Math.Clamp(
+            preferences.StatusRefreshSeconds,
+            AdminUserPreferences.MinStatusRefreshSeconds,
+            AdminUserPreferences.MaxStatusRefreshSeconds);
         _timeZone = ResolveTimeZoneOrUtc(preferences.TimeZoneId);
     }
 

@@ -109,7 +109,7 @@ Rules:
 
 ### Inter-service communication (proposal)
 
-The admin API never calls into the pipeline process.  It reads shared persistence directly and writes **commands** (e.g., `ApproveAction`, `UnblockIp`, `RetryClassification`) to a persisted command table/queue.  The pipeline host polls/subscribes, validates each command against policy, executes, and audits.  Benefits: the pipeline exposes no attack surface, commands are durable and auditable, and manual-approval mode falls out naturally.  Trade-off: command execution is asynchronous (typically sub-second at home scale).
+The admin API never calls into the pipeline process.  It reads shared persistence directly and writes **commands** (e.g., `ApproveAction`, `UnblockIp`, `RetryClassification`) to a persisted command table/queue.  The pipeline host polls/subscribes, validates each command against policy, executes, and audits.  Benefits: the pipeline exposes no attack surface, commands are durable and auditable, and manual-approval mode falls out naturally.  Trade-off: command execution is asynchronous (typically sub-second at single-operator scale).
 
 ## Solution layout (proposed)
 

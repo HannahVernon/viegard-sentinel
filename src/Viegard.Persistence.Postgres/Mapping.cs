@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Viegard.Application.Configuration;
 using Viegard.Application.Retention;
 using Viegard.Domain.Admin;
 using Viegard.Domain.Actions;
@@ -454,6 +455,24 @@ internal static class Mapping
 
     private static IReadOnlyList<string> AdditionalPatternsOrEmpty(CustomSignature signature) =>
         signature.AdditionalPatterns ?? [];
+
+    public static IngestionFilterRow ToRow(this IngestionFilter filter) => new()
+    {
+        SourceType = IngestionFilterValidation.NormalizeSourceType(filter.SourceType),
+        EventKind = IngestionFilterValidation.NormalizeEventKind(filter.EventKind),
+        Suppressed = filter.Suppressed,
+        UpdatedAt = Utc(filter.UpdatedAt),
+        UpdatedBy = IngestionFilterValidation.NormalizeUpdatedBy(filter.UpdatedBy),
+    };
+
+    public static IngestionFilter ToDomain(this IngestionFilterRow row) => new()
+    {
+        SourceType = row.SourceType,
+        EventKind = row.EventKind,
+        Suppressed = row.Suppressed,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+    };
 
     public static RetentionSettingsRow ToRow(this RetentionSettings settings) => new()
     {

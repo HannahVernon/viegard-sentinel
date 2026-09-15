@@ -80,6 +80,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IQueueTelemetryStore, PostgresQueueTelemetryStore>();
         services.AddSingleton<ISourceOffsetStore, PostgresSourceOffsetStore>();
         services.AddSingleton<ICustomSignatureStore, PostgresCustomSignatureStore>();
+        services.AddSingleton<IIngestionFilterStore, PostgresIngestionFilterStore>();
         services.AddSingleton<IRetentionStore, PostgresRetentionStore>();
         services.AddSingleton<IRetentionSettingsStore, PostgresRetentionSettingsStore>();
         services.AddSingleton<ISatelliteRoleStore, PostgresSatelliteRoleStore>();

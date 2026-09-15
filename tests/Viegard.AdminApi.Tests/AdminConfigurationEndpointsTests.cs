@@ -18,6 +18,7 @@ using Viegard.Application.Stores;
 using Viegard.Domain;
 using Viegard.Domain.Admin;
 using Viegard.Domain.Audit;
+using Viegard.Domain.Events;
 using Viegard.Persistence.InMemory;
 
 namespace Viegard.AdminApi.Tests;
@@ -163,6 +164,61 @@ public sealed class AdminConfigurationEndpointsTests
         Assert.DoesNotContain("password", audit.DetailJson, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Save_ingestion_filters_requires_step_up_before_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        fixture.Context.Request.Form = IngestionForm(MDaemonEventKind.Other);
+
+        var result = await fixture.InvokeSaveIngestionFiltersAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.Empty(await fixture.IngestionFilters.ListAsync());
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Save_ingestion_filters_rejects_locked_kind()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        fixture.Context.Request.Form = IngestionForm(MDaemonEventKind.AuthenticationFailed);
+
+        var result = await fixture.InvokeSaveIngestionFiltersAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("AuthenticationFailed", location, StringComparison.Ordinal);
+        Assert.Empty(await fixture.IngestionFilters.ListAsync());
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Save_ingestion_filters_ignores_unknown_kinds_and_audits_before_after_sets()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.IngestionFilters.SeedDefaultsIfMissingAsync(fixture.Now);
+        fixture.Context.Request.Form = IngestionForm(MDaemonEventKind.Other, unknown: "FutureKind");
+
+        var result = await fixture.InvokeSaveIngestionFiltersAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Ingestion%20filters%20saved", location, StringComparison.Ordinal);
+        var rows = await fixture.IngestionFilters.ListForSourceAsync(MDaemonIngestionFilterPolicy.SourceType);
+        Assert.DoesNotContain(rows, filter => filter.EventKind == "FutureKind");
+        Assert.True(rows.Single(filter => filter.EventKind == MDaemonEventKind.Other.ToString()).Suppressed);
+        Assert.False(rows.Single(filter => filter.EventKind == MDaemonEventKind.SessionLine.ToString()).Suppressed);
+
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("changed ingestion filters", audit.Summary, StringComparison.Ordinal);
+        Assert.Contains("IngestionFiltersChanged", audit.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("beforeSuppressed", audit.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("SessionLine", audit.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("afterSuppressed", audit.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("Other", audit.DetailJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("FutureKind", audit.DetailJson, StringComparison.Ordinal);
+    }
+
     private static async Task<string> ExecuteRedirectAsync(IResult result, HttpContext context)
     {
         context.Response.Body = new MemoryStream();
@@ -196,6 +252,26 @@ public sealed class AdminConfigurationEndpointsTests
             ["name"] = name,
         });
 
+    private static FormCollection IngestionForm(params MDaemonEventKind[] suppressed) =>
+        IngestionForm(suppressed, unknown: null);
+
+    private static FormCollection IngestionForm(MDaemonEventKind[] suppressed, string? unknown)
+    {
+        var values = suppressed.Select(kind => kind.ToString()).ToList();
+        if (!string.IsNullOrWhiteSpace(unknown))
+        {
+            values.Add(unknown);
+        }
+
+        return new FormCollection(new Dictionary<string, StringValues>(StringComparer.Ordinal)
+        {
+            ["suppressed"] = new StringValues(values.ToArray()),
+        });
+    }
+
+    private static FormCollection IngestionForm(MDaemonEventKind suppressed, string? unknown) =>
+        IngestionForm([suppressed], unknown);
+
     private static RetentionSettings SettingsWith(params (RetentionTarget Target, int? Days)[] values)
     {
         var settings = new RetentionSettings
@@ -223,6 +299,7 @@ public sealed class AdminConfigurationEndpointsTests
         AdminAuthAuditor AuthAuditor,
         AdminConfigAuditor ConfigAuditor,
         InMemorySatelliteRoleStore SatelliteRoles,
+        InMemoryIngestionFilterStore IngestionFilters,
         SatelliteRoleCredentialCookie SatelliteCredentialCookie)
     {
         public static async Task<EndpointFixture> CreateAsync(bool freshStepUp)
@@ -269,6 +346,7 @@ public sealed class AdminConfigurationEndpointsTests
                 NullLogger<AdminAuthAuditor>.Instance);
             var configAuditor = new AdminConfigAuditor(auditLedger, NullLogger<AdminConfigAuditor>.Instance);
             var satelliteRoles = new InMemorySatelliteRoleStore();
+            var ingestionFilters = new InMemoryIngestionFilterStore();
             var satelliteCredentialCookie = new SatelliteRoleCredentialCookie(new NoopDataProtectionProvider());
             var services = new ServiceCollection()
                 .AddLogging()
@@ -298,6 +376,7 @@ public sealed class AdminConfigurationEndpointsTests
                 authAuditor,
                 configAuditor,
                 satelliteRoles,
+                ingestionFilters,
                 satelliteCredentialCookie);
         }
 
@@ -321,6 +400,16 @@ public sealed class AdminConfigurationEndpointsTests
                 AuthAuditor,
                 ConfigAuditor,
                 SatelliteCredentialCookie);
+
+        public Task<IResult> InvokeSaveIngestionFiltersAsync() =>
+            AdminConfigurationEndpoints.SaveIngestionFiltersAsync(
+                Context,
+                Antiforgery,
+                IngestionFilters,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
     }
 
     private sealed class RecordingAuditLedger : IAuditLedger

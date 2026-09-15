@@ -277,6 +277,19 @@ public sealed class CustomSignatureRow
     public int Version { get; set; }
 }
 
+public sealed class IngestionFilterRow
+{
+    public string SourceType { get; set; } = string.Empty;
+
+    public string EventKind { get; set; } = string.Empty;
+
+    public bool Suppressed { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+}
+
 public sealed class RetentionSettingsRow
 {
     public int Id { get; set; }

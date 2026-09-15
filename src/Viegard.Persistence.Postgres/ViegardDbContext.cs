@@ -43,6 +43,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<CustomSignatureRow> CustomSignatures => Set<CustomSignatureRow>();
 
+    public DbSet<IngestionFilterRow> IngestionFilters => Set<IngestionFilterRow>();
+
     public DbSet<RetentionSettingsRow> RetentionSettings => Set<RetentionSettingsRow>();
 
     public DbSet<QueueMessageRow> QueueMessages => Set<QueueMessageRow>();
@@ -204,6 +206,15 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.AdditionalPatternsJson).HasColumnType("text");
             entity.Property(e => e.Category).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxCategoryLength);
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<IngestionFilterRow>(entity =>
+        {
+            entity.ToTable("ingestion_filters");
+            entity.HasKey(e => new { e.SourceType, e.EventKind });
+            entity.Property(e => e.SourceType).HasMaxLength(Viegard.Application.Configuration.IngestionFilter.MaxSourceTypeLength);
+            entity.Property(e => e.EventKind).HasMaxLength(Viegard.Application.Configuration.IngestionFilter.MaxEventKindLength);
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.IngestionFilter.MaxUpdatedByLength);
         });
 
         modelBuilder.Entity<RetentionSettingsRow>(entity =>

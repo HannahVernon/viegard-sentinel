@@ -54,7 +54,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         // Clean slate for queue tables between runs.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE queue_messages, queue_counters, retention_settings");
+            "TRUNCATE queue_messages, queue_counters, retention_settings, ingestion_filters");
     }
 
     public async Task DisposeAsync()
@@ -742,6 +742,75 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Ingestion_filter_store_round_trips_notifies_and_refreshes()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var listener = new PostgresIngestionFilterStore(factory, _dataSource!);
+        var writer = new PostgresIngestionFilterStore(factory, _dataSource!);
+        var wait = listener.WaitForChangeAsync(
+            listener.CurrentChangeVersion,
+            TimeSpan.FromSeconds(10),
+            CancellationToken.None).AsTask();
+
+        await Task.Delay(300);
+        var save = await writer.SaveMatrixAsync(
+            MDaemonIngestionFilterPolicy.SourceType,
+            IngestionMatrix((MDaemonEventKind.Other, true)),
+            MDaemonIngestionFilterPolicy.LockedEventKindNames,
+            "postgres-it",
+            DateTimeOffset.UtcNow);
+
+        var version = await wait.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.True(version > 0);
+        Assert.Empty(save.Before);
+        var saved = Assert.Single(save.After, filter => filter.EventKind == MDaemonEventKind.Other.ToString());
+        Assert.True(saved.Suppressed);
+
+        var listed = await listener.ListForSourceAsync(MDaemonIngestionFilterPolicy.SourceType);
+        Assert.True(listed.Single(filter => filter.EventKind == MDaemonEventKind.Other.ToString()).Suppressed);
+
+        var source = new IngestionFilterSource(listener);
+        await source.RefreshAsync();
+
+        Assert.False(source.ShouldEmit(MDaemonEvent(MDaemonEventKind.Other)));
+        Assert.True(source.ShouldEmit(MDaemonEvent(MDaemonEventKind.ConnectionAccepted)));
+    }
+
+    [PostgresFact]
+    public async Task Ingestion_filter_refresh_skips_invalid_rows()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var logger = new RecordingDiagnostics();
+        var store = new PostgresIngestionFilterStore(factory, _dataSource!);
+        await store.SaveMatrixAsync(
+            MDaemonIngestionFilterPolicy.SourceType,
+            IngestionMatrix((MDaemonEventKind.Other, true)),
+            MDaemonIngestionFilterPolicy.LockedEventKindNames,
+            "postgres-it",
+            DateTimeOffset.UtcNow);
+
+        await using (var db = factory.CreateDbContext())
+        {
+            db.IngestionFilters.Add(new IngestionFilterRow
+            {
+                SourceType = MDaemonIngestionFilterPolicy.SourceType,
+                EventKind = "NotARealKind",
+                Suppressed = true,
+                UpdatedAt = DateTimeOffset.UtcNow,
+                UpdatedBy = "postgres-it",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var source = new IngestionFilterSource(store, logger);
+        await source.RefreshAsync();
+
+        Assert.Single(logger.InvalidFilters);
+        Assert.False(source.ShouldEmit(MDaemonEvent(MDaemonEventKind.Other)));
+        Assert.True(source.ShouldEmit(MDaemonEvent(MDaemonEventKind.ConnectionAccepted)));
+    }
+
+    [PostgresFact]
     public async Task Retention_settings_store_round_trips_and_detects_optimistic_concurrency_conflict()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -1012,6 +1081,36 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         UpdatedAt = DateTimeOffset.UtcNow,
         UpdatedBy = "it",
         Version = 0,
+    };
+
+    private static IReadOnlyDictionary<string, bool> IngestionMatrix(params (MDaemonEventKind Kind, bool Suppressed)[] overrides)
+    {
+        var matrix = MDaemonIngestionFilterPolicy.Descriptors.ToDictionary(
+            descriptor => descriptor.EventKindName,
+            _ => false,
+            StringComparer.Ordinal);
+        foreach (var (kind, suppressed) in overrides)
+        {
+            matrix[kind.ToString()] = suppressed;
+        }
+
+        return matrix;
+    }
+
+    private static NormalizedEvent MDaemonEvent(MDaemonEventKind eventKind) => new()
+    {
+        Id = ViegardId.New(),
+        SourceId = "mdaemon:logs",
+        SourceType = MDaemonIngestionFilterPolicy.SourceType,
+        OccurredAt = DateTimeOffset.UtcNow,
+        Entities = [],
+        Payload = new MDaemonLogEvent
+        {
+            LogKind = MDaemonLogKind.SmtpIn,
+            EventKind = eventKind,
+            Message = "test",
+        },
+        RawObservationId = ViegardId.New(),
     };
 
     private static RetentionSettings RetentionSettingsWith(params (RetentionTarget Target, int? Days)[] values)
@@ -1383,6 +1482,17 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             ViegardDbContextConfiguration.Configure(builder, dataSource, TestDatabase.Schema);
             return new ViegardDbContext(builder.Options);
         }
+    }
+
+    private sealed class RecordingDiagnostics : IIngestionFilterDiagnostics
+    {
+        public List<IngestionFilter> InvalidFilters { get; } = [];
+
+        public List<Exception> RefreshFailures { get; } = [];
+
+        public void InvalidFilterSkipped(IngestionFilter filter, string reason) => InvalidFilters.Add(filter);
+
+        public void RefreshFailed(Exception exception) => RefreshFailures.Add(exception);
     }
 
     private sealed class RecordingLogger<T> : ILogger<T>

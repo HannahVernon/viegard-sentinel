@@ -14,6 +14,7 @@ public static class AdminConfigurationEndpoints
 {
     private const string RetentionConfigurationPath = "/configuration#retention";
     private const string SatellitesConfigurationPath = "/configuration#satellites";
+    private const string IngestionConfigurationPath = "/configuration#ingestion";
 
     public static void MapAdminConfigurationEndpoints(this WebApplication app)
     {
@@ -27,6 +28,9 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/satellites/revoke", RevokeSatelliteAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/ingestion", SaveIngestionFiltersAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
     }
@@ -207,6 +211,61 @@ public static class AdminConfigurationEndpoints
         }
     }
 
+    internal static async Task<IResult> SaveIngestionFiltersAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IIngestionFilterStore ingestionFilters,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(IngestionConfigurationPath, error: "Step-up verification is required before editing ingestion filters.");
+        }
+
+        if (!TryReadMdaemonIngestionFilterMatrix(form, out var matrix, out var error))
+        {
+            return Redirect(IngestionConfigurationPath, error: error);
+        }
+
+        try
+        {
+            var result = await ingestionFilters.SaveMatrixAsync(
+                MDaemonIngestionFilterPolicy.SourceType,
+                matrix,
+                MDaemonIngestionFilterPolicy.LockedEventKindNames,
+                user.Username,
+                DateTimeOffset.UtcNow,
+                context.RequestAborted).ConfigureAwait(false);
+            await configAuditor.RecordIngestionFiltersWriteAsync(
+                user.Username,
+                MDaemonIngestionFilterPolicy.SourceType,
+                result.Before,
+                result.After,
+                context.RequestAborted).ConfigureAwait(false);
+            return Redirect(IngestionConfigurationPath, status: "Ingestion filters saved.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Redirect(IngestionConfigurationPath, error: ex.Message);
+        }
+    }
+
     private static bool TryReadSettings(
         IFormCollection form,
         RetentionSettings? current,
@@ -241,6 +300,39 @@ public static class AdminConfigurationEndpoints
             settings = settings.WithDays(descriptor.Target, days);
         }
 
+        return true;
+    }
+
+    private static bool TryReadMdaemonIngestionFilterMatrix(
+        IFormCollection form,
+        out IReadOnlyDictionary<string, bool> matrix,
+        out string error)
+    {
+        var requestedSuppression = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var value in form["suppressed"])
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                requestedSuppression.Add(value);
+            }
+        }
+
+        var rows = new Dictionary<string, bool>(StringComparer.Ordinal);
+        foreach (var descriptor in MDaemonIngestionFilterPolicy.Descriptors)
+        {
+            var suppressed = requestedSuppression.Contains(descriptor.EventKindName);
+            if (descriptor.Locked && suppressed)
+            {
+                matrix = rows;
+                error = $"MDaemon event kind {descriptor.EventKindName} is locked and cannot be suppressed.";
+                return false;
+            }
+
+            rows[descriptor.EventKindName] = !descriptor.Locked && suppressed;
+        }
+
+        matrix = rows;
+        error = string.Empty;
         return true;
     }
 

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Options;
 using Viegard.Application.Audit;
 using Viegard.Application.Classifiers;
@@ -20,6 +21,11 @@ using Viegard.Sources.MDaemonLogs;
 using Viegard.Sources.Syslog;
 
 var builder = Host.CreateApplicationBuilder(args);
+var windowsServiceName = builder.Configuration["Viegard:WindowsService:ServiceName"] ?? "ViegardSatellite";
+builder.Services.AddWindowsService(options =>
+{
+    options.ServiceName = windowsServiceName;
+});
 builder.Services.AddSingleton(TimeProvider.System);
 
 // Host topology (roles this instance runs; D-0011).  Invalid topology fails startup.

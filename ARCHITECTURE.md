@@ -154,7 +154,8 @@ tests/
   Viegard.Integration.Tests/   Inference, ingestion, action providers (no real credentials)
   fixtures/                    nginx log corpora, representative emails, malformed AI output
 docs/
-deploy/                        Dockerfiles, sanitized compose examples
+deploy/                        Dockerfiles, sanitized compose examples, Linux deploy
+                               script, and Windows MDaemon satellite installer
 ```
 
 Adapters are separate projects so integrations stay optional, independently testable, and additive: new sources/actions never modify the core.  Project count is higher, but each project is small.
@@ -163,7 +164,7 @@ Implemented source integrations:
 
 - IMAP mail source, using per-account configuration and read-only folder access.
 - Syslog UDP source, with source allowlist, size cap, rate cap, RFC 3164/5424 parsing, and nginx access-log normalization.
-- MDaemon flat-file log source, intended for the Windows satellite pipeline instance on the MDaemon host.  It tails configured per-day log patterns, stores byte offsets per file, baselines existing files by default, skips session-log banners, drops Dynamic Screening noise by default, and normalizes SMTP/IMAP/POP, Screening, and Dynamic Screening lines into shared IP-correlatable events.
+- MDaemon flat-file log source, intended for the Windows satellite pipeline instance on the MDaemon host.  It tails configured per-day log patterns, stores byte offsets per file, baselines existing files by default, skips session-log banners, drops Dynamic Screening noise by default, and normalizes SMTP/IMAP/POP, Screening, and Dynamic Screening lines into shared IP-correlatable events.  The Windows satellite installer publishes the pipeline host as the client-specific `ViegardSatelliteMDaemon` service with only the `sources` role enabled.
 
 ## Core interfaces (ports; final shapes at implementation)
 

@@ -148,7 +148,7 @@ Sources ship disabled; enable them deliberately, one at a time.
 
 - **SWAG/nginx syslog:** see [swag-syslog-setup.md](swag-syslog-setup.md).  Set `Viegard__Sources__Syslog__Enabled`, the fail-closed `AllowedSources` list, and publish `5514/udp` in your compose copy; firewall the port to the SWAG host.
 - **IMAP accounts:** add entries under `Viegard__Sources__Imap__Accounts__*` with a password secret file per account (`PasswordSecretName`).
-- **MDaemon logs:** runs as a satellite pipeline instance on the mail host (D-0025); deployment guide pending.
+- **MDaemon logs:** runs as a satellite pipeline instance on the mail host (D-0025); see [satellite-windows.md](satellite-windows.md).
 
 ## Admin interface exposure and authentication
 

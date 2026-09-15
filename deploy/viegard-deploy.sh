@@ -517,7 +517,10 @@ read_default() {
         return
     fi
 
-    printf '%s [%s] ' "$prompt" "$default"
+    # This function's stdout is captured by command substitution, so the
+    # prompt must go to stderr or it is silently swallowed and the script
+    # appears to hang while read waits on stdin.
+    printf '%s [%s] ' "$prompt" "$default" >&2
     read -r reply
     if [ -n "$reply" ]; then
         printf '%s\n' "$reply"

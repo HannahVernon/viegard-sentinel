@@ -195,6 +195,20 @@ Status does not change the service:
 
 It reports the service state, uptime when running, install directory, configured instance ID, PostgreSQL target, TCP reachability, and recent matching Application event-log entries.
 
+## Troubleshooting: service relocated to a wrong directory
+
+Older script versions could register the service with an unquoted image path.  On a path containing spaces, a later `upgrade` then resolved the install root as `C:\`, published to `C:\app`, and re-pointed the service there, leaving `appsettings.Production.json` behind in the original install directory.  Symptoms: the service runs but produces no telemetry or events, `status` reports the install directory as `C:\` and warns that no readable `appsettings.Production.json` was found, and services.msc shows the executable under `C:\app`.
+
+Recovery, in an elevated session from the cloned repository (after `git pull` to get the fixed script):
+
+```powershell
+Stop-Service -Name ViegardSatelliteMDaemon
+.\deploy\windows\viegard-satellite.ps1 install -Client MDaemon -InstallDir "C:\Program Files\Viegard Satellite\MDaemon"
+Remove-Item -LiteralPath "C:\app" -Recurse -Force
+```
+
+The explicit `-InstallDir` overrides the misregistered service path.  Install re-prompts for configuration values, keeps the existing database password secret file, republishes, re-registers the service with an enforced quoted image path, and restarts.  Current script versions enforce the quoted image path in the registry on every install and upgrade, and `upgrade` refuses to publish into a directory that does not already contain a satellite deployment.
+
 ## Uninstall
 
 Run from an elevated Windows PowerShell session:

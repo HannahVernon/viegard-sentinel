@@ -31,6 +31,7 @@ Viegard monitors mail accounts (IMAP) and infrastructure logs (SWAG/nginx syslog
 - Do not weaken `Directory.Build.props` (NuGetAudit, warnings-as-errors).  New packages need a supply-chain review and a THIRD-PARTY-NOTICES.md entry in the same commit.
 - Never delete `dev`/`main`.  Use `git switch`, not `git checkout`.  Do not touch DECISIONS.md history: append new entries only.
 - Ask Hannah before any consequential architecture, security, privacy, or external-behavior decision; record her answers in DECISIONS.md.  It is acceptable to leave work incomplete rather than guess.
+- Public-facing documents (README, ARCHITECTURE, DECISIONS, docs/) stay operator-neutral: refer to "the project owner" or "the operator", never a personal name, host count, or network detail.  Personal attribution lives only in this file, the LICENSE, and repository URLs.
 
 ## Conventions
 Facts (non-negotiable):

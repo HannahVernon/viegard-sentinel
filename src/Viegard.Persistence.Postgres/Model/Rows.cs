@@ -260,6 +260,8 @@ public sealed class CustomSignatureRow
 
     public string Pattern { get; set; } = string.Empty;
 
+    public string? AdditionalPatternsJson { get; set; }
+
     public string Category { get; set; } = string.Empty;
 
     public int Severity { get; set; }

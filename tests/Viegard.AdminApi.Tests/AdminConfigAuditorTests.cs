@@ -16,8 +16,8 @@ public sealed class AdminConfigAuditorTests
     {
         var ledger = new RecordingAuditLedger();
         var auditor = new AdminConfigAuditor(ledger, new SilentLogger<AdminConfigAuditor>());
-        var before = Signature("before");
-        var after = before with { Pattern = "after", Version = before.Version + 1 };
+        var before = Signature("before", ["term-a"]);
+        var after = before with { Pattern = "after", AdditionalPatterns = ["term-b"], Version = before.Version + 1 };
 
         await auditor.RecordSignatureWriteAsync("updated", "hannah", before, after);
 
@@ -27,6 +27,10 @@ public sealed class AdminConfigAuditorTests
         Assert.Contains("updated", record.Summary, StringComparison.Ordinal);
         Assert.Contains("before", record.DetailJson, StringComparison.Ordinal);
         Assert.Contains("after", record.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("term-a", record.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("term-b", record.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("beforeTerms", record.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("afterTerms", record.DetailJson, StringComparison.Ordinal);
         Assert.Contains("\"username\":\"hannah\"", record.DetailJson, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -80,7 +84,7 @@ public sealed class AdminConfigAuditorTests
         Assert.DoesNotContain("password", record.DetailJson, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static CustomSignature Signature(string pattern) => new()
+    private static CustomSignature Signature(string pattern, IReadOnlyList<string>? additionalPatterns = null) => new()
     {
         Id = ViegardId.New(),
         Name = "audit-test",
@@ -88,6 +92,7 @@ public sealed class AdminConfigAuditorTests
         Target = CustomSignatureTarget.HttpUri,
         MatchType = CustomSignatureMatchType.Contains,
         Pattern = pattern,
+        AdditionalPatterns = additionalPatterns ?? [],
         Category = "test",
         Severity = 3,
         EvidenceWeight = 1.0,

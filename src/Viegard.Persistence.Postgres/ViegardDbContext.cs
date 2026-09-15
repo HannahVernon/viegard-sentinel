@@ -201,6 +201,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasIndex(e => e.Name).IsUnique();
             entity.Property(e => e.Name).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxNameLength);
             entity.Property(e => e.Pattern).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxPatternLength);
+            entity.Property(e => e.AdditionalPatternsJson).HasColumnType("text");
             entity.Property(e => e.Category).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxCategoryLength);
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Domain.Configuration.CustomSignature.MaxUpdatedByLength);
         });

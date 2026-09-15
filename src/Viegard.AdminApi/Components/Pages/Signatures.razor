@@ -1,5 +1,6 @@
 @page "/signatures"
 @attribute [Authorize]
+@using System.Globalization
 @using System.Security.Claims
 @inject ICustomSignatureStore SignatureStore
 @inject IAdminUserStore Users
@@ -81,7 +82,7 @@
                             <td>@signature.Name</td>
                             <td>@signature.Target</td>
                             <td>@signature.MatchType</td>
-                            <td>@AdminText.OneLine(signature.Pattern, 160)</td>
+                            <td>@AdminText.OneLine(SignaturePatterns(signature), 160)</td>
                             <td>@signature.Category</td>
                             <td>@signature.Severity</td>
                             <td><span class="@(signature.Enabled ? "badge badge-green" : "badge")">@(signature.Enabled ? "Enabled" : "Disabled")</span></td>
@@ -117,17 +118,17 @@
         <h2>@(_editing is null ? "Add signature" : "Edit signature")</h2>
         <form method="post" action="/signatures/save" class="edit-form">
             <AntiforgeryToken />
-            <input type="hidden" name="id" value="@(_editing?.Id.ToString() ?? string.Empty)" />
+            <input type="hidden" name="id" value="@FormIdValue" />
             <label>
                 Name
-                <input name="name" maxlength="@CustomSignature.MaxNameLength" required value="@(_editing?.Name ?? string.Empty)" />
+                <input name="name" maxlength="@CustomSignature.MaxNameLength" required value="@FormNameValue" />
             </label>
             <label>
                 Target
                 <select name="target">
                     @foreach (var target in Enum.GetValues<CustomSignatureTarget>())
                     {
-                        <option value="@target" selected="@(target == (_editing?.Target ?? CustomSignatureTarget.HttpQuery))">@target</option>
+                        <option value="@target" selected="@(target == TargetValue)">@target</option>
                     }
                 </select>
             </label>
@@ -136,36 +137,74 @@
                 <select name="matchType">
                     @foreach (var matchType in Enum.GetValues<CustomSignatureMatchType>())
                     {
-                        <option value="@matchType" selected="@(matchType == (_editing?.MatchType ?? CustomSignatureMatchType.Contains))">@matchType</option>
+                        <option value="@matchType" selected="@(matchType == MatchTypeValue)">@matchType</option>
                     }
                 </select>
             </label>
+            <p class="form-hint">Patterns are literal, case-insensitive substrings scanned linearly.  They are not regular expressions; characters such as .* or [] are matched as typed.</p>
             <label>
-                Pattern
-                <input name="pattern" maxlength="@CustomSignature.MaxPatternLength" required value="@(_editing?.Pattern ?? string.Empty)" />
+                Pattern (required term 1)
+                <input name="pattern" maxlength="@CustomSignature.MaxPatternLength" required value="@PatternValue" />
             </label>
             <label>
+                Additional required pattern (term 2, optional)
+                <input name="additionalPattern2" maxlength="@CustomSignature.MaxPatternLength" value="@AdditionalPattern2Value" />
+            </label>
+            <label>
+                Additional required pattern (term 3, optional)
+                <input name="additionalPattern3" maxlength="@CustomSignature.MaxPatternLength" value="@AdditionalPattern3Value" />
+            </label>
+            <p class="form-hint">Filling either optional term previews and saves the signature as ContainsAll.  ContainsAll with only term 1 is valid and behaves like Contains.</p>
+            <label>
                 Category
-                <input name="category" maxlength="@CustomSignature.MaxCategoryLength" required value="@(_editing?.Category ?? string.Empty)" />
+                <input name="category" maxlength="@CustomSignature.MaxCategoryLength" required value="@CategoryValue" />
             </label>
             <label>
                 Severity
-                <input name="severity" type="number" min="0" max="10" required value="@(_editing?.Severity.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "3")" />
+                <input name="severity" type="number" min="0" max="10" required value="@SeverityValue" />
             </label>
             <label>
                 Evidence weight
-                <input name="evidenceWeight" type="number" min="0" max="1" step="0.01" required value="@((_editing?.EvidenceWeight ?? 1.0).ToString(System.Globalization.CultureInfo.InvariantCulture))" />
+                <input name="evidenceWeight" type="number" min="0" max="1" step="0.01" required value="@EvidenceWeightValue" />
             </label>
             <label class="inline-checkbox">
-                <input name="enabled" type="checkbox" value="true" checked="@(_editing?.Enabled ?? true)" />
+                <input name="enabled" type="checkbox" value="true" checked="@EnabledValue" />
                 Enabled
             </label>
-            <button type="submit">Save signature</button>
-            @if (_editing is not null)
-            {
-                <a class="button-link" href="/signatures#list">Cancel edit</a>
-            }
+            <div class="button-row">
+                <button type="submit">Save signature</button>
+                <button type="submit" formaction="/signatures/preview" formmethod="post" class="secondary-button">Preview matches</button>
+                @if (_editing is not null)
+                {
+                    <a class="button-link" href="/signatures#list">Cancel edit</a>
+                }
+            </div>
         </form>
+        @if (_preview is not null)
+        {
+            <div class="preview-results">
+                <h3>Preview matches</h3>
+                <p>@PreviewSummary(_preview)</p>
+                @if (_preview.Capped)
+                {
+                    <p class="form-hint">The 10,000 event scan cap was reached.  Older events were not inspected, so this is a bounded preview rather than a full-history count.</p>
+                }
+                @if (_preview.MatchingEventIds.Count == 0)
+                {
+                    <p>No matching events were found in the scanned window.</p>
+                }
+                else
+                {
+                    <p>Most recent matching events, up to 10:</p>
+                    <ol>
+                        @foreach (var eventId in _preview.MatchingEventIds)
+                        {
+                            <li><a href="/events/@eventId">@AdminText.ShortId(eventId)</a></li>
+                        }
+                    </ol>
+                }
+            </div>
+        }
     </section>
     </div>
 </main>
@@ -184,6 +223,7 @@
     private string? _filterText;
     private string? _sortKey;
     private SortDirection? _sortDirection;
+    private SignaturePreviewView? _preview;
 
     private int _take = KeysetPagination.DefaultPageSize;
 
@@ -221,6 +261,63 @@
     [SupplyParameterFromQuery(Name = "dir")]
     public string? Dir { get; set; }
 
+    [SupplyParameterFromQuery(Name = "form")]
+    public string? Form { get; set; }
+
+    [SupplyParameterFromQuery(Name = "formId")]
+    public string? FormId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "formName")]
+    public string? FormName { get; set; }
+
+    [SupplyParameterFromQuery(Name = "formTarget")]
+    public string? FormTarget { get; set; }
+
+    [SupplyParameterFromQuery(Name = "formMatchType")]
+    public string? FormMatchType { get; set; }
+
+    [SupplyParameterFromQuery(Name = "formPattern")]
+    public string? FormPattern { get; set; }
+
+    [SupplyParameterFromQuery(Name = "formAdditionalPattern2")]
+    public string? FormAdditionalPattern2 { get; set; }
+
+    [SupplyParameterFromQuery(Name = "formAdditionalPattern3")]
+    public string? FormAdditionalPattern3 { get; set; }
+
+    [SupplyParameterFromQuery(Name = "formCategory")]
+    public string? FormCategory { get; set; }
+
+    [SupplyParameterFromQuery(Name = "formSeverity")]
+    public string? FormSeverity { get; set; }
+
+    [SupplyParameterFromQuery(Name = "formEvidenceWeight")]
+    public string? FormEvidenceWeight { get; set; }
+
+    [SupplyParameterFromQuery(Name = "formEnabled")]
+    public string? FormEnabled { get; set; }
+
+    [SupplyParameterFromQuery(Name = "preview")]
+    public string? Preview { get; set; }
+
+    [SupplyParameterFromQuery(Name = "previewScanned")]
+    public string? PreviewScanned { get; set; }
+
+    [SupplyParameterFromQuery(Name = "previewMatchCount")]
+    public string? PreviewMatchCount { get; set; }
+
+    [SupplyParameterFromQuery(Name = "previewCapped")]
+    public string? PreviewCapped { get; set; }
+
+    [SupplyParameterFromQuery(Name = "previewNewest")]
+    public string? PreviewNewest { get; set; }
+
+    [SupplyParameterFromQuery(Name = "previewOldest")]
+    public string? PreviewOldest { get; set; }
+
+    [SupplyParameterFromQuery(Name = "previewMatchIds")]
+    public string? PreviewMatchIds { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         await Display.InitializeAsync().ConfigureAwait(false);
@@ -247,6 +344,8 @@
         {
             _editing = await SignatureStore.GetAsync(EditId.Value).ConfigureAwait(false);
         }
+
+        _preview = ParsePreview();
 
         var context = HttpContextAccessor.HttpContext;
         if (context is null)
@@ -280,4 +379,117 @@
         parameters
             .Where(parameter => !string.IsNullOrWhiteSpace(parameter.Key) && !string.IsNullOrWhiteSpace(parameter.Value))
             .Select(parameter => new KeyValuePair<string, string>(parameter.Key, parameter.Value!));
+
+    private bool HasFormState => string.Equals(Form, "1", StringComparison.Ordinal);
+
+    private string FormIdValue => HasFormState ? FormId ?? string.Empty : _editing?.Id.ToString() ?? string.Empty;
+
+    private string FormNameValue => HasFormState ? FormName ?? string.Empty : _editing?.Name ?? string.Empty;
+
+    private CustomSignatureTarget TargetValue =>
+        HasFormState && Enum.TryParse<CustomSignatureTarget>(FormTarget, ignoreCase: true, out var target)
+            && Enum.IsDefined(typeof(CustomSignatureTarget), target)
+            ? target
+            : _editing?.Target ?? CustomSignatureTarget.HttpQuery;
+
+    private CustomSignatureMatchType MatchTypeValue =>
+        HasFormState && Enum.TryParse<CustomSignatureMatchType>(FormMatchType, ignoreCase: true, out var matchType)
+            && Enum.IsDefined(typeof(CustomSignatureMatchType), matchType)
+            ? matchType
+            : _editing?.MatchType ?? CustomSignatureMatchType.Contains;
+
+    private string PatternValue => HasFormState ? FormPattern ?? string.Empty : _editing?.Pattern ?? string.Empty;
+
+    private string AdditionalPattern2Value => HasFormState ? FormAdditionalPattern2 ?? string.Empty : EditingAdditionalPattern(0);
+
+    private string AdditionalPattern3Value => HasFormState ? FormAdditionalPattern3 ?? string.Empty : EditingAdditionalPattern(1);
+
+    private string CategoryValue => HasFormState ? FormCategory ?? string.Empty : _editing?.Category ?? string.Empty;
+
+    private string SeverityValue => HasFormState
+        ? FormSeverity ?? string.Empty
+        : _editing?.Severity.ToString(CultureInfo.InvariantCulture) ?? "3";
+
+    private string EvidenceWeightValue => HasFormState
+        ? FormEvidenceWeight ?? string.Empty
+        : (_editing?.EvidenceWeight ?? 1.0).ToString(CultureInfo.InvariantCulture);
+
+    private bool EnabledValue => HasFormState
+        ? string.Equals(FormEnabled, "true", StringComparison.OrdinalIgnoreCase)
+        : _editing?.Enabled ?? true;
+
+    private string EditingAdditionalPattern(int index)
+    {
+        var patterns = _editing?.AdditionalPatterns ?? [];
+        return index >= 0 && index < patterns.Count ? patterns[index] : string.Empty;
+    }
+
+    private static string SignaturePatterns(CustomSignature signature) =>
+        string.Join(" + ", new[] { signature.Pattern }
+            .Concat(signature.AdditionalPatterns ?? [])
+            .Where(pattern => !string.IsNullOrWhiteSpace(pattern)));
+
+    private SignaturePreviewView? ParsePreview()
+    {
+        if (!string.Equals(Preview, "1", StringComparison.Ordinal)
+            || !int.TryParse(PreviewScanned, NumberStyles.Integer, CultureInfo.InvariantCulture, out var scanned)
+            || !int.TryParse(PreviewMatchCount, NumberStyles.Integer, CultureInfo.InvariantCulture, out var matchCount))
+        {
+            return null;
+        }
+
+        _ = bool.TryParse(PreviewCapped, out var capped);
+        return new SignaturePreviewView(
+            scanned,
+            matchCount,
+            ParseTimestamp(PreviewNewest),
+            ParseTimestamp(PreviewOldest),
+            ParseMatchIds(PreviewMatchIds),
+            capped);
+    }
+
+    private static IReadOnlyList<Guid> ParseMatchIds(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        var ids = new List<Guid>();
+        foreach (var part in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (Guid.TryParse(part, out var id))
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
+    }
+
+    private static DateTimeOffset? ParseTimestamp(string? value) =>
+        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var timestamp)
+            ? timestamp
+            : null;
+
+    private string PreviewSummary(SignaturePreviewView preview)
+    {
+        if (preview.ScannedCount == 0)
+        {
+            return "No stored events were available to scan.";
+        }
+
+        var window = preview is { NewestOccurredAt: { } newest, OldestOccurredAt: { } oldest }
+            ? $" Window covered: {Display.Format(newest)} through {Display.Format(oldest)}."
+            : string.Empty;
+        return $"Matched {preview.MatchCount} event(s) while scanning {preview.ScannedCount} recent event(s).{window}";
+    }
+
+    private sealed record SignaturePreviewView(
+        int ScannedCount,
+        int MatchCount,
+        DateTimeOffset? NewestOccurredAt,
+        DateTimeOffset? OldestOccurredAt,
+        IReadOnlyList<Guid> MatchingEventIds,
+        bool Capped);
 }

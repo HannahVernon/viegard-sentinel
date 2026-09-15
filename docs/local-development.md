@@ -108,3 +108,5 @@ $client.Dispose()
 ```
 
 After a few seconds, check `/events`, `/incidents`, `/decisions`, `/audit`, `/queues`, and `/signatures`.  The aftership request should produce custom-signature evidence, then deterministic classification and a dry-run policy decision.
+
+Custom signatures entered on `/signatures` use literal, case-insensitive linear string matching.  They are not regular expressions; regex characters are matched as typed.  `ContainsAll` requires the primary pattern and every filled additional required pattern, up to three terms total, and `ContainsAll` with no additional terms behaves like `Contains`.  The Preview matches button validates the unsaved form values, scans up to 10,000 recent stored events with the same matcher used by the pipeline, and reports the scanned window so the result is not presented as a full-history count.

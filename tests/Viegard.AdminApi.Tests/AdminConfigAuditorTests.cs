@@ -84,6 +84,25 @@ public sealed class AdminConfigAuditorTests
         Assert.DoesNotContain("password", record.DetailJson, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Host_upgrade_request_audit_record_contains_only_target_and_command_id_in_detail()
+    {
+        var ledger = new RecordingAuditLedger();
+        var auditor = new AdminConfigAuditor(ledger, new SilentLogger<AdminConfigAuditor>());
+        var commandId = ViegardId.New();
+
+        await auditor.RecordHostUpgradeRequestedAsync("hannah", "vm", commandId);
+
+        var record = Assert.Single(ledger.Records);
+        Assert.Equal(PipelineStage.Admin, record.Stage);
+        Assert.Contains("HostUpgradeRequested", record.Summary, StringComparison.Ordinal);
+        Assert.Contains("hannah", record.Summary, StringComparison.Ordinal);
+        Assert.Contains("\"target\":\"vm\"", record.DetailJson, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(commandId.ToString(), record.DetailJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("hannah", record.DetailJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("parameter", record.DetailJson, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static CustomSignature Signature(string pattern, IReadOnlyList<string>? additionalPatterns = null) => new()
     {
         Id = ViegardId.New(),

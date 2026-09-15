@@ -6,7 +6,7 @@ Installs, upgrades, and reports status for a Viegard Windows satellite.
 Publishes Viegard.PipelineHost as a self-contained win-x64 application, configures it for the sources role only, stores the PostgreSQL password in a locked local secret file, and registers the host as a client-specific Windows service.  The script is written for Windows PowerShell 5.1.  MDaemon is the only implemented client profile today.
 
 .PARAMETER Command
-The command to run: install, upgrade, or status.
+The command to run: install, upgrade, status, register-autoupgrade, or unregister-autoupgrade.
 
 .PARAMETER Client
 The satellite client profile to install, upgrade, or query.  Valid value today: MDaemon.
@@ -56,13 +56,19 @@ The password used when ServiceAccount is Custom.
 .PARAMETER Force
 For install, replace an existing appsettings.Production.json without prompting.  For upgrade, republish even when git reports no incoming commits.
 
+.PARAMETER Daily
+For register-autoupgrade, create a daily scheduled task instead of the default weekly Sunday task.
+
+.PARAMETER Time
+For register-autoupgrade, the local start time in HH:mm format.  The default is 03:30.
+
 .PARAMETER Yes
 Treat confirmation prompts as approved.  Use only for automation where the disruptive steps are intentional.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("install", "upgrade", "status")]
+    [ValidateSet("install", "upgrade", "status", "register-autoupgrade", "unregister-autoupgrade")]
     [string]$Command,
 
     [string]$Client,
@@ -97,6 +103,10 @@ param(
     [securestring]$CustomServiceAccountPassword,
 
     [switch]$Force,
+
+    [switch]$Daily,
+
+    [string]$Time = "03:30",
 
     [switch]$Yes
 )
@@ -180,13 +190,16 @@ function Stop-WithMessage {
 
 function Write-Usage {
     $lines = @(
-        "Usage: .\deploy\windows\viegard-satellite.ps1 <install|upgrade|status> -Client MDaemon [options]",
+        "Usage: .\deploy\windows\viegard-satellite.ps1 <install|upgrade|status|register-autoupgrade|unregister-autoupgrade> -Client MDaemon [options]",
         "",
         "Install example:",
         "  .\deploy\windows\viegard-satellite.ps1 install -Client MDaemon -InstanceId mdaemon-MAIL01",
         "",
         "Automation example:",
         "  .\deploy\windows\viegard-satellite.ps1 install -Yes -Client MDaemon -ServiceAccount VirtualAccount -MDaemonRoot C:\MDaemon -PostgresHost 192.0.2.10 -PostgresUsername viegard_sat_mail01 -PostgresPassword (Read-Host -AsSecureString) -InstanceId mdaemon-MAIL01",
+        "",
+        "Auto-upgrade example:",
+        "  .\deploy\windows\viegard-satellite.ps1 register-autoupgrade -Client MDaemon -Time 03:30",
         "",
         "Run Get-Help .\deploy\windows\viegard-satellite.ps1 -Detailed for all parameters."
     )
@@ -1867,6 +1880,94 @@ function Write-Status {
     Write-EventEntries -Events $events
 }
 
+function Get-AutoUpgradeTaskName {
+    return "ViegardSatellite" + $script:ClientProfile.Name + "AutoUpgrade"
+}
+
+function Get-AutoUpgradeStartTime {
+    $parsedTime = [datetime]::MinValue
+    $formatProvider = [System.Globalization.CultureInfo]::InvariantCulture
+    $styles = [System.Globalization.DateTimeStyles]::None
+    if (-not [datetime]::TryParseExact($Time, "HH:mm", $formatProvider, $styles, [ref]$parsedTime)) {
+        Stop-WithMessage "Time must use HH:mm 24-hour local format, for example 03:30."
+    }
+
+    return $parsedTime
+}
+
+function ConvertTo-ProcessArgument {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Value
+    )
+
+    return '"' + $Value.Replace('"', '\"') + '"'
+}
+
+function Register-AutoUpgradeTask {
+    if (-not (Test-Administrator)) {
+        Stop-WithMessage "The register-autoupgrade command must run from an elevated PowerShell session."
+    }
+
+    $repositoryRoot = Get-RepositoryRoot
+    $scriptPath = $PSCommandPath
+    if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+        $scriptPath = Join-Path $repositoryRoot "deploy\windows\viegard-satellite.ps1"
+    }
+
+    $startTime = Get-AutoUpgradeStartTime
+    $taskName = Get-AutoUpgradeTaskName
+    $argumentList = @(
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        (ConvertTo-ProcessArgument -Value $scriptPath),
+        "upgrade",
+        "-Client",
+        (ConvertTo-ProcessArgument -Value $script:ClientProfile.Name),
+        "-Yes"
+    ) -join " "
+
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argumentList -WorkingDirectory $repositoryRoot
+    if ($Daily.IsPresent) {
+        $trigger = New-ScheduledTaskTrigger -Daily -At $startTime
+        $scheduleText = "daily"
+    }
+    else {
+        $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At $startTime
+        $scheduleText = "weekly on Sunday"
+    }
+
+    Register-ScheduledTask `
+        -TaskName $taskName `
+        -Action $action `
+        -Trigger $trigger `
+        -User "SYSTEM" `
+        -RunLevel Highest `
+        -Description ("Runs Viegard satellite upgrade for " + $script:ClientProfile.Name + " as SYSTEM.") `
+        -Force | Out-Null
+
+    Write-InfoLine ("Registered scheduled task " + $taskName + " to run " + $scheduleText + " at " + $Time + " local time.")
+    Write-InfoLine ("Task action: powershell.exe " + $argumentList)
+}
+
+function Unregister-AutoUpgradeTask {
+    if (-not (Test-Administrator)) {
+        Stop-WithMessage "The unregister-autoupgrade command must run from an elevated PowerShell session."
+    }
+
+    $taskName = Get-AutoUpgradeTaskName
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($null -eq $task) {
+        Write-WarnLine "Scheduled task $taskName is not registered."
+        return
+    }
+
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+    Write-InfoLine "Unregistered scheduled task $taskName."
+}
+
 if ([string]::IsNullOrWhiteSpace($Command)) {
     Write-Usage
     exit 1
@@ -1882,6 +1983,12 @@ elseif ($Command -eq "upgrade") {
 }
 elseif ($Command -eq "status") {
     Write-Status
+}
+elseif ($Command -eq "register-autoupgrade") {
+    Register-AutoUpgradeTask
+}
+elseif ($Command -eq "unregister-autoupgrade") {
+    Unregister-AutoUpgradeTask
 }
 else {
     Write-Usage

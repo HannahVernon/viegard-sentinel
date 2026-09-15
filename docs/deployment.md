@@ -40,6 +40,33 @@ The `configure` command writes `deploy/docker-compose.generated.yml` and points 
 
 Safety properties: secrets are generated only when missing and never overwritten or printed; an existing `docker-compose.yml` is never touched; certificate issuance is skipped when the certificate already exists; re-running `install` is safe.  The script does not edit `docker-compose.yml` for you - after a fresh install it prints a checklist of the operator-specific settings (exposure mode, WebAuthn relying party, AllowedSources, retention periods, data sources).
 
+## Remote upgrades
+
+Remote host upgrades use a fixed-verb trust path.  The admin UI inserts a `host_upgrade_commands` row for target `vm`; it never receives the Docker socket, database credentials for the agent, or host execution rights.  A small root-owned agent on the Docker host already has the Docker privileges required to run an upgrade, polls the database through the adjacent `viegard-db` container, claims a Pending row, and runs only `deploy/viegard-deploy.sh upgrade --yes` with no operator-supplied command parameters.
+
+Install the host agent from the deployment clone:
+
+```bash
+sudo ./viegard-deploy.sh install-agent
+```
+
+The installer writes `/etc/viegard/host-agent.conf`, copies `deploy/viegard-host-agent.service` into systemd, enables the service, and starts it.  The configuration file is simple `KEY=value` text:
+
+```text
+DEPLOY_DIR=/opt/viegard-sentinel/deploy
+TARGET_NAME=vm
+DB_SCHEMA=viegard
+POLL_SECONDS=30
+```
+
+Do not store database credentials in this file.  The agent runs `psql` through the `viegard-db` container with `docker compose exec`, so it uses the local database container context rather than a separate password.  If your deployment root is not `/opt/viegard-sentinel`, pass `--dir <root>` or `--agent-deploy-dir <root>/deploy` to `install-agent`.
+
+Operators request a host upgrade from **Configuration** -> **Upgrades** after step-up verification.  The page shows recent command history, status, and the captured tail of the script output.  While the upgrade runs, the admin UI may briefly disconnect because its own container is rebuilt and restarted.  If no host agent is installed or running, the command stays Pending; the UI flags Pending requests older than a few minutes so the operator can check the service.
+
+Requests are single-flight per target: a new request is rejected while an existing command for that target is Pending or Running.  After any finished command, the store enforces a 10-minute cooldown before accepting another request for the same target.  These checks are enforced in the command store, not only in the UI.
+
+Windows satellites are not upgraded by database commands in this version.  Use the scheduled git-based auto-upgrade task documented in [satellite-windows.md](satellite-windows.md); DB-commanded satellite upgrades are future work.
+
 ## 1. Prepare secrets and directories
 
 Each secret is one file in `deploy/secrets/`; the file name is the secret name (D-0006).  These directories are gitignored and must never be committed.

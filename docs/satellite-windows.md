@@ -187,6 +187,40 @@ Set-Location C:\Viegard
 
 The upgrade command detects the repository root from the script path, refuses to run with local git changes, fetches origin, reports incoming commits, runs `git pull --ff-only`, stops the service, republishes the app, preserves `appsettings.Production.json` and `secrets\viegard-db-password`, restarts the service, and verifies startup.  If there are no incoming commits, it exits without republishing unless `-Force` is supplied.
 
+## Scheduled auto-upgrade
+
+The satellite can register a Windows Scheduled Task that runs the existing git-based upgrade command as `SYSTEM`.  The default schedule is weekly on Sunday at 03:30 local time:
+
+```powershell
+.\deploy\windows\viegard-satellite.ps1 register-autoupgrade -Client MDaemon
+```
+
+Choose a different local time with `-Time HH:mm`:
+
+```powershell
+.\deploy\windows\viegard-satellite.ps1 register-autoupgrade -Client MDaemon -Time 04:15
+```
+
+Use `-Daily` for a daily schedule:
+
+```powershell
+.\deploy\windows\viegard-satellite.ps1 register-autoupgrade -Client MDaemon -Daily -Time 03:30
+```
+
+The task action runs from the clone directory and invokes:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File <clone>\deploy\windows\viegard-satellite.ps1 upgrade -Client MDaemon -Yes
+```
+
+The upgrade command exits quickly when the clone has no new commits, so the scheduled task is safe to leave in place.  Remove it with:
+
+```powershell
+.\deploy\windows\viegard-satellite.ps1 unregister-autoupgrade -Client MDaemon
+```
+
+Database-commanded satellite upgrades are future work.  This version keeps satellite auto-upgrades local to each Windows host and based on the clone's configured git upstream.
+
 ## Status
 
 Status does not change the service:

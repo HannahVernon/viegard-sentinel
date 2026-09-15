@@ -456,6 +456,30 @@ internal static class Mapping
     private static IReadOnlyList<string> AdditionalPatternsOrEmpty(CustomSignature signature) =>
         signature.AdditionalPatterns ?? [];
 
+    public static HostUpgradeCommandRow ToRow(this HostUpgradeCommand command) => new()
+    {
+        Id = command.Id,
+        Target = command.Target,
+        Status = (int)command.Status,
+        RequestedAt = Utc(command.RequestedAt),
+        RequestedBy = command.RequestedBy,
+        StartedAt = Utc(command.StartedAt),
+        FinishedAt = Utc(command.FinishedAt),
+        Detail = command.Detail,
+    };
+
+    public static HostUpgradeCommand ToDomain(this HostUpgradeCommandRow row) => new()
+    {
+        Id = row.Id,
+        Target = row.Target,
+        Status = (HostUpgradeCommandStatus)row.Status,
+        RequestedAt = row.RequestedAt,
+        RequestedBy = row.RequestedBy,
+        StartedAt = row.StartedAt,
+        FinishedAt = row.FinishedAt,
+        Detail = row.Detail,
+    };
+
     public static IngestionFilterRow ToRow(this IngestionFilter filter) => new()
     {
         SourceType = IngestionFilterValidation.NormalizeSourceType(filter.SourceType),

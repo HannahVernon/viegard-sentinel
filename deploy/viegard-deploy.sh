@@ -13,6 +13,9 @@
 #              pass the complete set of options you want each time.
 #   upgrade    Pull the configured branch and rebuild/restart only when new
 #              commits arrived (use --force to rebuild regardless).
+#   install-agent
+#              Install the privileged host-side agent that polls fixed-verb
+#              upgrade requests from PostgreSQL through the db container.
 #   status     Show container state, admin liveness, cert expiry, last backup.
 #
 # Common options:
@@ -53,6 +56,17 @@
 #                     Enables the UDP syslog listener, publishes 5514/udp,
 #                     and sets its fail-closed source allowlist.
 #
+# install-agent options:
+#   --agent-deploy-dir <path>
+#                     Deploy directory containing docker-compose.yml
+#                     (default <deployment root>/deploy)
+#   --agent-target <name>
+#                     Host upgrade target name (default vm)
+#   --agent-schema <name>
+#                     PostgreSQL schema for Viegard objects (default viegard)
+#   --agent-poll-seconds <n>
+#                     Host agent polling interval in seconds (default 30)
+#
 # Secrets are generated only when missing and are never overwritten or
 # printed.  docker-compose.yml is copied from the example only when missing;
 # operator edits are never touched.  Re-running install is safe.
@@ -74,8 +88,13 @@ ENABLE_SYSLOG=0
 SYSLOG_SOURCES=""
 ASSUME_YES=0
 FORCE=0
+AGENT_DEPLOY_DIR=""
+AGENT_TARGET=vm
+AGENT_SCHEMA=viegard
+AGENT_POLL_SECONDS=30
 COMMAND="${1:-}"
 [ $# -gt 0 ] && shift
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() { awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0"; exit "${1:-1}"; }
 log()   { printf '\033[1;36m[viegard]\033[0m %s\n' "$*"; }
@@ -94,6 +113,10 @@ while [ $# -gt 0 ]; do
         --enable-retention) ENABLE_RETENTION=1; shift ;;
         --enable-syslog)    ENABLE_SYSLOG=1; shift ;;
         --syslog-sources)   SYSLOG_SOURCES="$2"; shift 2 ;;
+        --agent-deploy-dir) AGENT_DEPLOY_DIR="$2"; shift 2 ;;
+        --agent-target)     AGENT_TARGET="$2"; shift 2 ;;
+        --agent-schema)     AGENT_SCHEMA="$2"; shift 2 ;;
+        --agent-poll-seconds) AGENT_POLL_SECONDS="$2"; shift 2 ;;
         --yes)              ASSUME_YES=1; shift ;;
         --force)            FORCE=1; shift ;;
         -h|--help)          usage 0 ;;
@@ -485,6 +508,108 @@ cmd_upgrade() {
     log "Upgrade complete on branch '$BRANCH' at $(git -C "$DIR" rev-parse --short HEAD)."
 }
 
+# ---------------------------------------------------------- install-agent --
+
+read_default() {
+    local prompt="$1" default="$2" reply
+    if [ "$ASSUME_YES" -eq 1 ]; then
+        printf '%s\n' "$default"
+        return
+    fi
+
+    printf '%s [%s] ' "$prompt" "$default"
+    read -r reply
+    if [ -n "$reply" ]; then
+        printf '%s\n' "$reply"
+    else
+        printf '%s\n' "$default"
+    fi
+}
+
+validate_agent_name() {
+    local label="$1" value="$2" max="$3" length i character
+    length="${#value}"
+    [ "$length" -gt 0 ] || die "$label is required."
+    [ "$length" -le "$max" ] || die "$label must be $max characters or fewer."
+    for ((i = 0; i < length; i++)); do
+        character="${value:i:1}"
+        case "$character" in
+            [a-z]|[0-9]|-|_) ;;
+            *) die "$label must use only lowercase letters, digits, dash, and underscore." ;;
+        esac
+    done
+}
+
+validate_positive_integer() {
+    local label="$1" value="$2" length i character
+    length="${#value}"
+    [ "$length" -gt 0 ] || die "$label is required."
+    for ((i = 0; i < length; i++)); do
+        character="${value:i:1}"
+        case "$character" in
+            [0-9]) ;;
+            *) die "$label must be a positive integer." ;;
+        esac
+    done
+    [ "$value" -ge 1 ] || die "$label must be at least 1."
+}
+
+validate_agent_deploy_dir() {
+    local deploy_dir="$1"
+    case "$deploy_dir" in
+        *[[:space:]]*) die "Agent DEPLOY_DIR cannot contain whitespace because systemd reads it from an EnvironmentFile." ;;
+    esac
+    [ -d "$deploy_dir" ] || die "Agent DEPLOY_DIR does not exist: $deploy_dir"
+    [ -f "$deploy_dir/docker-compose.yml" ] || die "docker-compose.yml not found in agent DEPLOY_DIR: $deploy_dir"
+    [ -f "$deploy_dir/viegard-host-agent.sh" ] || die "viegard-host-agent.sh not found in agent DEPLOY_DIR: $deploy_dir"
+}
+
+cmd_install_agent() {
+    require_root
+    local default_deploy_dir deploy_dir target schema poll_seconds conf tmp_conf unit_src unit_dest
+    default_deploy_dir="${AGENT_DEPLOY_DIR:-$(compose_dir)}"
+    deploy_dir="$(read_default "Host agent deploy directory" "$default_deploy_dir")"
+    target="$(read_default "Host agent target name" "$AGENT_TARGET")"
+    schema="$(read_default "Host agent PostgreSQL schema" "$AGENT_SCHEMA")"
+    poll_seconds="$(read_default "Host agent poll interval seconds" "$AGENT_POLL_SECONDS")"
+
+    validate_agent_name "AGENT_TARGET" "$target" 64
+    validate_agent_name "AGENT_SCHEMA" "$schema" 63
+    validate_positive_integer "AGENT_POLL_SECONDS" "$poll_seconds"
+    validate_agent_deploy_dir "$deploy_dir"
+
+    conf=/etc/viegard/host-agent.conf
+    tmp_conf="$conf.tmp"
+    unit_src="$SCRIPT_DIR/viegard-host-agent.service"
+    unit_dest=/etc/systemd/system/viegard-host-agent.service
+    [ -f "$unit_src" ] || die "Host agent unit not found: $unit_src"
+
+    mkdir -p /etc/viegard
+    {
+        printf '# Viegard host upgrade agent configuration.\n'
+        printf '# Do not store database credentials here; the agent uses psql through the viegard-db container.\n'
+        printf 'DEPLOY_DIR=%s\n' "$deploy_dir"
+        printf 'TARGET_NAME=%s\n' "$target"
+        printf 'DB_SCHEMA=%s\n' "$schema"
+        printf 'POLL_SECONDS=%s\n' "$poll_seconds"
+    } > "$tmp_conf"
+    chmod 600 "$tmp_conf"
+    mv "$tmp_conf" "$conf"
+
+    cp "$unit_src" "$unit_dest"
+    chmod 644 "$unit_dest"
+    chmod 755 "$deploy_dir/viegard-host-agent.sh"
+    systemctl daemon-reload
+    systemctl enable viegard-host-agent.service >/dev/null
+    systemctl restart viegard-host-agent.service
+
+    if systemctl is-active --quiet viegard-host-agent.service; then
+        log "Host agent installed and running for target '$target'."
+    else
+        die "Host agent service did not start; inspect: systemctl status viegard-host-agent.service --no-pager"
+    fi
+}
+
 # ----------------------------------------------------------------- status --
 
 cmd_status() {
@@ -512,10 +637,11 @@ cmd_status() {
 # ------------------------------------------------------------------- main --
 
 case "$COMMAND" in
-    install)   cmd_install ;;
-    configure) cmd_configure ;;
-    upgrade)   cmd_upgrade ;;
-    status)    cmd_status ;;
+    install)       cmd_install ;;
+    configure)     cmd_configure ;;
+    upgrade)       cmd_upgrade ;;
+    install-agent) cmd_install_agent ;;
+    status)        cmd_status ;;
     -h|--help|help) usage 0 ;;
     *) usage 1 ;;
 esac

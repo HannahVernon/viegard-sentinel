@@ -89,10 +89,13 @@ Key invariants:
 
 Deployable | Container | Responsibility
 -----------|-----------|---------------
+`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, maintenance retention, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
+`viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), server-side filtered and sortable read access to incidents, classifications, decisions, and audit; step-up-gated runtime configuration editors for custom signatures, retention periods, satellite database roles with one-time password display, and fixed-verb host upgrade requests; custom-signature previews that run the same literal matcher as the pipeline against a bounded recent-event scan without writing audit or config rows; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no external integration credentials, Docker socket, or host execution rights.
+`viegard-host-agent` | systemd service on Docker host | Privileged host-side upgrade agent.  Polls fixed-verb `host_upgrade_commands` through the adjacent PostgreSQL container, claims commands for target `vm`, and runs only `deploy/viegard-deploy.sh upgrade --yes`.
 `viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, maintenance retention, ingestion-filter seeding, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
 `viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), server-side filtered and sortable read access to incidents, classifications, decisions, and audit; step-up-gated runtime configuration editors for custom signatures, retention periods, ingestion filters, and satellite database roles with one-time password display; custom-signature previews that run the same literal matcher as the pipeline against a bounded recent-event scan without writing audit or config rows; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no external integration credentials.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
-Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, feedback, telemetry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
+Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, host upgrade requests, feedback, telemetry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
 
 ### Host roles and process topology (proposal)
 
@@ -109,7 +112,7 @@ Rules:
 
 ### Inter-service communication (proposal)
 
-The admin API never calls into the pipeline process.  It reads shared persistence directly and writes **commands** (e.g., `ApproveAction`, `UnblockIp`, `RetryClassification`) to a persisted command table/queue.  The pipeline host polls/subscribes, validates each command against policy, executes, and audits.  Benefits: the pipeline exposes no attack surface, commands are durable and auditable, and manual-approval mode falls out naturally.  Trade-off: command execution is asynchronous (typically sub-second at single-operator scale).
+The admin API never calls into the pipeline process.  It reads shared persistence directly and writes **commands** (e.g., `ApproveAction`, `UnblockIp`, `RetryClassification`) to a persisted command table/queue.  The pipeline host polls/subscribes, validates each command against policy, executes, and audits.  Host upgrades use a separate fixed-verb table consumed by the root-owned `viegard-host-agent`, so the admin container still has no Docker socket or host execution rights.  Benefits: the pipeline exposes no attack surface, commands are durable and auditable, and manual-approval mode falls out naturally.  Trade-off: command execution is asynchronous (typically sub-second at single-operator scale).
 
 ## Solution layout (proposed)
 
@@ -155,7 +158,8 @@ tests/
   fixtures/                    nginx log corpora, representative emails, malformed AI output
 docs/
 deploy/                        Dockerfiles, sanitized compose examples, Linux deploy
-                               script, and Windows MDaemon satellite installer
+                               script, host upgrade agent unit/script, and Windows
+                               MDaemon satellite installer
 ```
 
 Adapters are separate projects so integrations stay optional, independently testable, and additive: new sources/actions never modify the core.  Project count is higher, but each project is small.
@@ -184,6 +188,7 @@ Interface | Metaphor | Contract summary
 `IRetentionSettingsStore` | Roost | Database-owned retention periods plus last-cycle status for admin editing and worker execution
 `IIngestionFilterStore` | Roost | Database-owned source-type/event-kind suppression matrix for normalization-time event emission, with notification-backed refresh and fail-open runtime reads
 `ISatelliteRoleStore` | Roost | Lists, creates, rotates, and revokes per-satellite PostgreSQL roles behind the admin UI.  Role names use the enforced `viegard_sat_` prefix; generated passwords are shown once and are never audited.
+`IHostUpgradeCommandStore` | Roost | Fixed-verb host upgrade request port with per-target single-flight, 10-minute cooldown, recent history, atomic claim, and completion status.
 `ISecretProvider` | Roost | Named secret retrieval; file-mounted (prod) and user-secrets (dev) implementations
 `IHealthContributor` | - | Per-component health surfaced by both hosts
 `ICommandQueue` | - | Durable admin-to-pipeline commands

@@ -165,6 +165,19 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Request_host_upgrade_requires_step_up_before_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        fixture.Context.Request.Form = HostUpgradeForm();
+
+        var result = await fixture.InvokeRequestHostUpgradeAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.Empty(await fixture.HostUpgrades.ListRecentAsync());
+    }
+
+    [Fact]
     public async Task Save_ingestion_filters_requires_step_up_before_mutating()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
@@ -177,6 +190,44 @@ public sealed class AdminConfigurationEndpointsTests
         Assert.Empty(await fixture.IngestionFilters.ListAsync());
         Assert.Contains(fixture.AuditLedger.Records, record =>
             record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Request_host_upgrade_queues_command_and_writes_minimal_audit_detail()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        fixture.Context.Request.Form = HostUpgradeForm();
+
+        var result = await fixture.InvokeRequestHostUpgradeAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Upgrade%20request", location, StringComparison.Ordinal);
+        var command = Assert.Single(await fixture.HostUpgrades.ListRecentAsync());
+        Assert.Equal(HostUpgradeCommandPolicy.DefaultTarget, command.Target);
+        Assert.Equal("hannah", command.RequestedBy);
+        Assert.Equal(HostUpgradeCommandStatus.Pending, command.Status);
+
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("HostUpgradeRequested", audit.Summary, StringComparison.Ordinal);
+        Assert.Contains(command.Id.ToString(), audit.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("\"target\":\"vm\"", audit.DetailJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("hannah", audit.DetailJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("parameter", audit.DetailJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Request_host_upgrade_surfaces_single_flight_rejection()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.HostUpgrades.RequestAsync(HostUpgradeCommandPolicy.DefaultTarget, "hannah");
+        fixture.Context.Request.Form = HostUpgradeForm();
+
+        var result = await fixture.InvokeRequestHostUpgradeAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("already%20pending%20or%20running", location, StringComparison.Ordinal);
+        Assert.Single(await fixture.HostUpgrades.ListRecentAsync());
+        Assert.Empty(fixture.AuditLedger.Records);
     }
 
     [Fact]
@@ -252,6 +303,11 @@ public sealed class AdminConfigurationEndpointsTests
             ["name"] = name,
         });
 
+    private static FormCollection HostUpgradeForm() => new(
+        new Dictionary<string, StringValues>(StringComparer.Ordinal)
+        {
+            ["target"] = HostUpgradeCommandPolicy.DefaultTarget,
+        });
     private static FormCollection IngestionForm(params MDaemonEventKind[] suppressed) =>
         IngestionForm(suppressed, unknown: null);
 
@@ -299,6 +355,7 @@ public sealed class AdminConfigurationEndpointsTests
         AdminAuthAuditor AuthAuditor,
         AdminConfigAuditor ConfigAuditor,
         InMemorySatelliteRoleStore SatelliteRoles,
+        InMemoryHostUpgradeCommandStore HostUpgrades,
         InMemoryIngestionFilterStore IngestionFilters,
         SatelliteRoleCredentialCookie SatelliteCredentialCookie)
     {
@@ -346,6 +403,7 @@ public sealed class AdminConfigurationEndpointsTests
                 NullLogger<AdminAuthAuditor>.Instance);
             var configAuditor = new AdminConfigAuditor(auditLedger, NullLogger<AdminConfigAuditor>.Instance);
             var satelliteRoles = new InMemorySatelliteRoleStore();
+            var hostUpgrades = new InMemoryHostUpgradeCommandStore();
             var ingestionFilters = new InMemoryIngestionFilterStore();
             var satelliteCredentialCookie = new SatelliteRoleCredentialCookie(new NoopDataProtectionProvider());
             var services = new ServiceCollection()
@@ -376,6 +434,7 @@ public sealed class AdminConfigurationEndpointsTests
                 authAuditor,
                 configAuditor,
                 satelliteRoles,
+                hostUpgrades,
                 ingestionFilters,
                 satelliteCredentialCookie);
         }
@@ -400,6 +459,16 @@ public sealed class AdminConfigurationEndpointsTests
                 AuthAuditor,
                 ConfigAuditor,
                 SatelliteCredentialCookie);
+
+        public Task<IResult> InvokeRequestHostUpgradeAsync() =>
+            AdminConfigurationEndpoints.RequestHostUpgradeAsync(
+                Context,
+                Antiforgery,
+                HostUpgrades,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
 
         public Task<IResult> InvokeSaveIngestionFiltersAsync() =>
             AdminConfigurationEndpoints.SaveIngestionFiltersAsync(

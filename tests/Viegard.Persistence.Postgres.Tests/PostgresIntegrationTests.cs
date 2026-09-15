@@ -54,7 +54,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         // Clean slate for queue tables between runs.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE queue_messages, queue_counters, retention_settings, ingestion_filters");
+            "TRUNCATE queue_messages, queue_counters, retention_settings, host_upgrade_commands, ingestion_filters");
     }
 
     public async Task DisposeAsync()
@@ -195,6 +195,68 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         Assert.Equal(50, received.Count);
         Assert.Equal(messages, received.ToHashSet());
+    }
+
+    [PostgresFact]
+    public async Task Host_upgrade_store_enforces_single_flight_and_cooldown()
+    {
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 15, 17, 0, 0, TimeSpan.Zero));
+        var store = new PostgresHostUpgradeCommandStore(_dataSource!, time);
+
+        var requested = await store.RequestAsync("vm", "hannah");
+
+        var pendingReject = await Assert.ThrowsAsync<HostUpgradeCommandRejectedException>(async () =>
+            await store.RequestAsync("vm", "hannah"));
+        Assert.Equal(HostUpgradeCommandRejectionReason.SingleFlight, pendingReject.Reason);
+
+        var claimed = await store.ClaimNextPendingAsync("vm");
+        Assert.NotNull(claimed);
+        Assert.Equal(requested.Id, claimed.Id);
+        Assert.Equal(HostUpgradeCommandStatus.Running, claimed.Status);
+
+        var runningReject = await Assert.ThrowsAsync<HostUpgradeCommandRejectedException>(async () =>
+            await store.RequestAsync("vm", "hannah"));
+        Assert.Equal(HostUpgradeCommandRejectionReason.SingleFlight, runningReject.Reason);
+
+        var completed = await store.CompleteAsync(requested.Id, succeeded: false, detail: "upgrade failed");
+        Assert.NotNull(completed);
+        Assert.Equal(HostUpgradeCommandStatus.Failed, completed.Status);
+        Assert.Equal("upgrade failed", completed.Detail);
+
+        var cooldownReject = await Assert.ThrowsAsync<HostUpgradeCommandRejectedException>(async () =>
+            await store.RequestAsync("vm", "hannah"));
+        Assert.Equal(HostUpgradeCommandRejectionReason.Cooldown, cooldownReject.Reason);
+
+        time.Advance(HostUpgradeCommandPolicy.Cooldown.Add(TimeSpan.FromSeconds(1)));
+        var next = await store.RequestAsync("vm", "hannah");
+        Assert.Equal(HostUpgradeCommandStatus.Pending, next.Status);
+
+        var recent = await store.ListRecentAsync("vm", limit: 10);
+        Assert.Equal(next.Id, recent[0].Id);
+        Assert.Contains(recent, command => command.Id == requested.Id);
+    }
+
+    [PostgresFact]
+    public async Task Concurrent_host_upgrade_claims_never_claim_same_command_twice()
+    {
+        var store = new PostgresHostUpgradeCommandStore(_dataSource!);
+        var requested = await store.RequestAsync("vm", "hannah");
+
+        var claimTasks = Enumerable.Range(0, 10)
+            .Select(_ => store.ClaimNextPendingAsync("vm").AsTask())
+            .ToArray();
+        var claims = await Task.WhenAll(claimTasks);
+        var nonNullClaims = claims.Where(command => command is not null).ToList();
+
+        var claimed = Assert.Single(nonNullClaims);
+        Assert.NotNull(claimed);
+        Assert.Equal(requested.Id, claimed.Id);
+        Assert.Equal(HostUpgradeCommandStatus.Running, claimed.Status);
+        Assert.Null(await store.ClaimNextPendingAsync("vm"));
+
+        var completed = await store.CompleteAsync(requested.Id, succeeded: true, detail: "ok");
+        Assert.NotNull(completed);
+        Assert.Equal(HostUpgradeCommandStatus.Succeeded, completed.Status);
     }
 
     [PostgresFact]
@@ -1482,6 +1544,15 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             ViegardDbContextConfiguration.Configure(builder, dataSource, TestDatabase.Schema);
             return new ViegardDbContext(builder.Options);
         }
+    }
+
+    private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public void Advance(TimeSpan delta) => _utcNow = _utcNow.Add(delta);
     }
 
     private sealed class RecordingDiagnostics : IIngestionFilterDiagnostics

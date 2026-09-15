@@ -1,0 +1,14 @@
+[Unit]
+Description=Viegard host upgrade agent
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/viegard/host-agent.conf
+ExecStart=/bin/bash -c 'exec "$DEPLOY_DIR/viegard-host-agent.sh"'
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

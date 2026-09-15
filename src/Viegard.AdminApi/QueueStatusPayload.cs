@@ -66,7 +66,7 @@ public static class QueueStatusPayload
                     Depth: snapshot.Depth,
                     InFlight: snapshot.InFlight,
                     OldestAge: snapshot.OldestPendingEnqueuedAt is { } oldest
-                        ? (now - oldest).ToString("g")
+                        ? AdminText.Age(now - oldest)
                         : string.Empty,
                     DeadLetters: snapshot.DeadLetterCount,
                     Totals: $"{snapshot.TotalEnqueued} / {snapshot.TotalCompleted} / {snapshot.TotalAbandoned}",

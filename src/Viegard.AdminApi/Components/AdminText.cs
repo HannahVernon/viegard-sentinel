@@ -16,6 +16,41 @@ public static class AdminText
 
     public static string ShortId(Guid id) => id.ToString("N")[..12];
 
+    /// <summary>
+    /// Compact human-readable rendering of an age/duration, e.g. "0.8 s",
+    /// "42 s", "4 m 12 s", "3 h 24 m", "2 d 5 h".  Negative values (clock
+    /// skew) clamp to "0 s".
+    /// </summary>
+    public static string Age(TimeSpan value)
+    {
+        if (value <= TimeSpan.Zero)
+        {
+            return "0 s";
+        }
+
+        if (value.TotalSeconds < 10)
+        {
+            return value.TotalSeconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " s";
+        }
+
+        if (value.TotalMinutes < 1)
+        {
+            return ((int)value.TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture) + " s";
+        }
+
+        if (value.TotalHours < 1)
+        {
+            return $"{(int)value.TotalMinutes} m {value.Seconds} s";
+        }
+
+        if (value.TotalDays < 1)
+        {
+            return $"{(int)value.TotalHours} h {value.Minutes} m";
+        }
+
+        return $"{(int)value.TotalDays} d {value.Hours} h";
+    }
+
     public static string Utc(DateTimeOffset value) => value.UtcDateTime.ToString("u");
 
     public static string Utc(DateTimeOffset? value) => value is null ? "" : Utc(value.Value);

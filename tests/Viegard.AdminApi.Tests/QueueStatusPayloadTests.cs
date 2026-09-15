@@ -68,7 +68,7 @@ public sealed class QueueStatusPayloadTests
         Assert.False(row.Green);
         Assert.Equal(2, row.Depth);
         Assert.Equal(1, row.InFlight);
-        Assert.Equal("0:00:10", row.OldestAge);
+        Assert.Equal("10 s", row.OldestAge);
         Assert.Equal(1, row.DeadLetters);
         Assert.Equal("200 / 190 / 4", row.Totals);
         Assert.Equal("F:19:59:55 by satellite-1", row.Captured);

@@ -129,7 +129,7 @@
 
     private string OldestAge(QueueTelemetrySnapshot snapshot) => snapshot.OldestPendingEnqueuedAt is null
         ? ""
-        : (_now - snapshot.OldestPendingEnqueuedAt.Value).ToString("g");
+        : AdminText.Age(_now - snapshot.OldestPendingEnqueuedAt.Value);
 
     private string FormatPeriod(RetentionTarget target) =>
         _retentionSettings?.GetDays(target) is { } days

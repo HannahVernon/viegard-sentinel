@@ -107,7 +107,7 @@ commands_table() {
 
 psql_exec() {
     docker compose -f "$DEPLOY_DIR/docker-compose.yml" exec -T viegard-db \
-        psql -U viegard -d viegard -v ON_ERROR_STOP=1 "$@"
+        psql -q -U viegard -d viegard -v ON_ERROR_STOP=1 "$@"
 }
 
 # psql performs :'variable' interpolation only for SQL read from stdin or
@@ -136,7 +136,27 @@ WHERE command.id = (
     FOR UPDATE SKIP LOCKED
 )
 RETURNING command.id;"
-    psql_exec_stdin "$sql" -v "target_name=$TARGET_NAME"
+    psql_exec_stdin "$sql" -v "target_name=$TARGET_NAME" | head -n 1
+}
+
+# An agent restart can strand a command in Running (claimed but never
+# completed, e.g. the agent died or, historically, discarded a claim it
+# could not parse).  Exactly one agent serves a target, so at startup any
+# Running command for this target is provably orphaned: requeue it.
+requeue_orphaned_running() {
+    local table sql requeued
+    table="$(commands_table)"
+    sql="
+UPDATE $table
+SET status = 0,
+    started_at = NULL
+WHERE target = :'target_name'
+  AND status = 1
+RETURNING id;"
+    requeued="$(psql_exec_stdin "$sql" -v "target_name=$TARGET_NAME" | grep -c . || true)"
+    if [ "${requeued:-0}" -gt 0 ]; then
+        log "Requeued $requeued orphaned Running command(s) for target '$TARGET_NAME'."
+    fi
 }
 
 complete_command() {
@@ -214,6 +234,7 @@ main() {
     [ -f "$DEPLOY_DIR/docker-compose.yml" ] || die "docker-compose.yml not found in DEPLOY_DIR: $DEPLOY_DIR"
 
     log "Polling for target '$TARGET_NAME' every $POLL_SECONDS second(s); schema '$DB_SCHEMA'."
+    requeue_orphaned_running
     while true; do
         local command_id
         if command_id="$(claim_next_pending)"; then

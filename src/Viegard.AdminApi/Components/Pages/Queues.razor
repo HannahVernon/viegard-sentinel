@@ -14,8 +14,8 @@
         <dl class="detail-list">
             <dt>State</dt><dd>@RetentionState</dd>
             <dt>Effective periods</dt><dd>@RetentionPeriodsSummary</dd>
-            <dt>Last cycle</dt><dd>@RetentionLastCycle</dd>
-            <dt>Last rows removed</dt><dd>@RetentionLastCycleTotal</dd>
+            <dt>Last cycle</dt><dd data-retention-last-cycle>@RetentionLastCycle</dd>
+            <dt>Last rows removed</dt><dd data-retention-total>@RetentionLastCycleTotal</dd>
         </dl>
         <p><a href="/configuration#retention">Edit retention configuration</a></p>
     </section>
@@ -26,7 +26,7 @@
     }
     else
     {
-        <table class="data-table">
+        <table class="data-table" data-live-queues>
             <thead>
                 <tr>
                     <th>Instance</th>
@@ -43,23 +43,21 @@
             <tbody>
                 @foreach (var row in _rows)
                 {
-                    <tr>
+                    var key = $"{row.Snapshot.InstanceId}|{row.Snapshot.QueueName}";
+                    <tr data-q="@key">
                         <td>@row.Snapshot.InstanceId</td>
                         <td>@row.Snapshot.QueueName</td>
-                        <td><span class="@AdminText.LightCss(row.Status.Light)">@row.Status.Light</span></td>
-                        <td>@row.Snapshot.Depth</td>
-                        <td>@row.Snapshot.InFlight</td>
-                        <td>@OldestAge(row.Snapshot)</td>
-                        <td>@row.Snapshot.DeadLetterCount</td>
-                        <td>@row.Snapshot.TotalEnqueued / @row.Snapshot.TotalCompleted / @row.Snapshot.TotalAbandoned</td>
-                        <td>@Display.Format(row.Snapshot.CapturedAt)</td>
+                        <td><span data-q-cell="light" class="@AdminText.LightCss(row.Status.Light)">@row.Status.Light</span></td>
+                        <td data-q-cell="depth">@row.Snapshot.Depth</td>
+                        <td data-q-cell="inFlight">@row.Snapshot.InFlight</td>
+                        <td data-q-cell="oldestAge">@OldestAge(row.Snapshot)</td>
+                        <td data-q-cell="deadLetters">@row.Snapshot.DeadLetterCount</td>
+                        <td data-q-cell="totals">@row.Snapshot.TotalEnqueued / @row.Snapshot.TotalCompleted / @row.Snapshot.TotalAbandoned</td>
+                        <td data-q-cell="captured">@Display.Format(row.Snapshot.CapturedAt)</td>
                     </tr>
-                    @if (row.Status.Light != TrafficLight.Green)
-                    {
-                        <tr class="details-row">
-                            <td colspan="9">@string.Join(" ", row.Status.Reasons)</td>
-                        </tr>
-                    }
+                    <tr class="details-row" data-q-reasons="@key" hidden="@(row.Status.Light == TrafficLight.Green)">
+                        <td colspan="9">@string.Join(" ", row.Status.Reasons)</td>
+                    </tr>
                 }
             </tbody>
         </table>

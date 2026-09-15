@@ -1551,6 +1551,8 @@ function Get-InstallConfiguration {
         $databaseName = Read-TextValue -Prompt "PostgreSQL database" -DefaultValue "viegard"
     }
 
+    $databaseSchema = Get-SchemaValue
+
     if (Test-ParameterProvided -Name "PostgresUsername") {
         if ([string]::IsNullOrWhiteSpace($PostgresUsername)) {
             Stop-WithMessage "PostgresUsername is required."
@@ -1562,7 +1564,20 @@ function Get-InstallConfiguration {
         $databaseUsername = Read-TextValue -Prompt "PostgreSQL username"
     }
 
-    $databaseSchema = Get-SchemaValue
+    $databasePassword = $null
+    if (Test-Path -LiteralPath $passwordFile -PathType Leaf) {
+        Write-InfoLine "Existing database password secret will be kept: $passwordFile"
+    }
+    elseif (Test-ParameterProvided -Name "PostgresPassword") {
+        if ($null -eq $PostgresPassword -or -not (Test-SecureStringHasValue -SecureValue $PostgresPassword)) {
+            Stop-WithMessage "PostgresPassword is required when the local secret file does not exist."
+        }
+
+        $databasePassword = $PostgresPassword
+    }
+    else {
+        $databasePassword = Read-SecureValue
+    }
 
     if (Test-ParameterProvided -Name "InstanceId") {
         if ([string]::IsNullOrWhiteSpace($InstanceId)) {
@@ -1580,21 +1595,6 @@ function Get-InstallConfiguration {
                 break
             }
         }
-    }
-
-    $databasePassword = $null
-    if (Test-Path -LiteralPath $passwordFile -PathType Leaf) {
-        Write-InfoLine "Existing database password secret will be kept: $passwordFile"
-    }
-    elseif (Test-ParameterProvided -Name "PostgresPassword") {
-        if ($null -eq $PostgresPassword -or -not (Test-SecureStringHasValue -SecureValue $PostgresPassword)) {
-            Stop-WithMessage "PostgresPassword is required when the local secret file does not exist."
-        }
-
-        $databasePassword = $PostgresPassword
-    }
-    else {
-        $databasePassword = Read-SecureValue
     }
 
     Write-InfoLine "Testing TCP connectivity to ${databaseHostName}:$databasePort ..."

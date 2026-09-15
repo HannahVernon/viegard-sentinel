@@ -6,7 +6,7 @@ The Windows satellite installer publishes `Viegard.PipelineHost` on a Windows ho
 
 - The main Viegard stack on the VM owns database migrations.  The satellite installer writes `AutoMigrate=false` so a least-privilege satellite role does not need DDL permissions.
 - The examples use placeholder addresses and role names.  Replace `192.0.2.10`, `192.0.2.21`, `192.0.2.22`, and the sample passwords with deployment-specific values before running anything.
-- Hannah has two MDaemon hosts.  Each host needs a distinct `InstanceId`, for example `mdaemon-mail01` and `mdaemon-mail02`.
+- Run one satellite per log-producing host.  Each host needs a distinct `InstanceId`, for example `mdaemon-mail01` and `mdaemon-mail02`; two hosts must never share an instance ID.
 - Service names are client-specific.  The MDaemon profile installs `ViegardSatelliteMDaemon`, so a future Windows satellite client can run on the same host without colliding with the MDaemon service.
 
 ## Prerequisites on each MDaemon host
@@ -131,7 +131,7 @@ The installer asks for:
 - PostgreSQL username.
 - PostgreSQL password as a `SecureString`.  Existing secret files are kept and not overwritten.
 - PostgreSQL schema.  Default: `viegard`.
-- Instance ID.  This is required and has no default because Hannah's two MDaemon hosts must not collide.  The prompt suggests `mdaemon-<hostname>`.
+- Instance ID.  This is required and has no default because instance IDs must be unique across every host that runs a satellite.  The prompt suggests `mdaemon-<hostname>`.
 - MDaemon log kinds.  Valid values are `SmtpIn`, `SmtpOut`, `Imap`, `Pop3`, `Screening`, and `DynamicScreening`.  The default is all supported kinds.
 
 Before changing files or services, the installer checks that the log directory is readable and that the PostgreSQL host and port accept TCP connections.  If PostgreSQL is unreachable, the installer continues only after explicit confirmation.

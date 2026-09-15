@@ -111,6 +111,12 @@ Run retention from exactly one pipeline instance by adding the singleton `mainte
 
 The worker runs shortly after startup and then once per day.  It reads the database settings fresh at the start of every cycle, so UI changes apply at the next daily retention cycle.  A purge cycle that removes one or more rows writes an audit record with per-table counts and the configured periods; a no-op cycle writes no audit record.  Every cycle, including a no-op cycle, updates the settings row with the last cycle time and per-target row counts so the admin UI can show that retention ran and deleted nothing.
 
+### Ingestion filters
+
+Ingestion filters suppress selected high-volume event kinds before they become normalized events.  The first maintenance-role startup seeds MDaemon `SessionLine` and `Other` as suppressed, using insert-if-missing semantics so later admin UI edits are not overwritten.  Operators can review and change the matrix at `/configuration#ingestion` after step-up verification.
+
+Suppression only affects normalized event emission, queueing, and correlation input.  Raw observations still store every source payload for forensic review.  Changes are published through PostgreSQL notifications with a polling fallback, so current sources-role instances pick them up within moments; instances running an older build ignore ingestion filters until upgraded and continue emitting everything.
+
 Example policy values from D-0035:
 
 ```bash

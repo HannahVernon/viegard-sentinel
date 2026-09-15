@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Viegard.Persistence.Postgres;
@@ -11,9 +12,11 @@ using Viegard.Persistence.Postgres;
 namespace Viegard.Persistence.Postgres.Migrations
 {
     [DbContext(typeof(ViegardDbContext))]
-    partial class ViegardDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260915165619_AddIngestionFilters")]
+    partial class AddIngestionFilters
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -654,56 +657,6 @@ namespace Viegard.Persistence.Postgres.Migrations
                     b.HasIndex("PolicyId");
 
                     b.ToTable("decisions", (string)null);
-                });
-
-            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.HostUpgradeCommandRow", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("Detail")
-                        .HasColumnType("text")
-                        .HasColumnName("detail");
-
-                    b.Property<DateTimeOffset?>("FinishedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("finished_at");
-
-                    b.Property<DateTimeOffset>("RequestedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("requested_at");
-
-                    b.Property<string>("RequestedBy")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("requested_by");
-
-                    b.Property<DateTimeOffset?>("StartedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("started_at");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer")
-                        .HasColumnName("status");
-
-                    b.Property<string>("Target")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("target");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Target")
-                        .IsUnique()
-                        .HasFilter("status IN (0, 1)");
-
-                    b.HasIndex("Target", "FinishedAt");
-
-                    b.HasIndex("Target", "Status", "RequestedAt");
-
-                    b.ToTable("host_upgrade_commands", (string)null);
                 });
 
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.IncidentRow", b =>

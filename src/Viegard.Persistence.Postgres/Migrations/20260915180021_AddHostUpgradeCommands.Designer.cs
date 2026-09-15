@@ -12,7 +12,7 @@ using Viegard.Persistence.Postgres;
 namespace Viegard.Persistence.Postgres.Migrations
 {
     [DbContext(typeof(ViegardDbContext))]
-    [Migration("20260915170654_AddHostUpgradeCommands")]
+    [Migration("20260915180021_AddHostUpgradeCommands")]
     partial class AddHostUpgradeCommands
     {
         /// <inheritdoc />
@@ -750,6 +750,37 @@ namespace Viegard.Persistence.Postgres.Migrations
                     b.HasIndex("WindowStart", "State");
 
                     b.ToTable("incidents", (string)null);
+                });
+
+            modelBuilder.Entity("Viegard.Persistence.Postgres.Model.IngestionFilterRow", b =>
+                {
+                    b.Property<string>("SourceType")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("source_type");
+
+                    b.Property<string>("EventKind")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("event_kind");
+
+                    b.Property<bool>("Suppressed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("suppressed");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("SourceType", "EventKind");
+
+                    b.ToTable("ingestion_filters", (string)null);
                 });
 
             modelBuilder.Entity("Viegard.Persistence.Postgres.Model.NormalizedEventRow", b =>

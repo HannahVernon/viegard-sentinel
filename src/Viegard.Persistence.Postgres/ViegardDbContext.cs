@@ -45,6 +45,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<HostUpgradeCommandRow> HostUpgradeCommands => Set<HostUpgradeCommandRow>();
 
+    public DbSet<IngestionFilterRow> IngestionFilters => Set<IngestionFilterRow>();
+
     public DbSet<RetentionSettingsRow> RetentionSettings => Set<RetentionSettingsRow>();
 
     public DbSet<QueueMessageRow> QueueMessages => Set<QueueMessageRow>();
@@ -219,6 +221,15 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
                 .IsUnique()
                 .HasFilter("status IN (0, 1)");
             entity.Property(e => e.RequestedBy).HasMaxLength(Viegard.Application.Configuration.HostUpgradeCommandPolicy.MaxRequestedByLength);
+        });
+
+        modelBuilder.Entity<IngestionFilterRow>(entity =>
+        {
+            entity.ToTable("ingestion_filters");
+            entity.HasKey(e => new { e.SourceType, e.EventKind });
+            entity.Property(e => e.SourceType).HasMaxLength(Viegard.Application.Configuration.IngestionFilter.MaxSourceTypeLength);
+            entity.Property(e => e.EventKind).HasMaxLength(Viegard.Application.Configuration.IngestionFilter.MaxEventKindLength);
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.IngestionFilter.MaxUpdatedByLength);
         });
 
         modelBuilder.Entity<RetentionSettingsRow>(entity =>

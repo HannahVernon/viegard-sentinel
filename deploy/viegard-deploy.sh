@@ -234,11 +234,37 @@ start_stack() {
     (cd "$d" && docker compose up -d --build)
 }
 
+admin_probe_urls() {
+    # Build candidate liveness URLs from the actual published ports.  In
+    # loopback mode 8080 is published on 127.0.0.1; in direct TLS mode 8443
+    # is published (possibly bound to a specific address) and 8080 may not
+    # respond, so probe both.  TLS probes use -k: the certificate names the
+    # public host, not the IP being probed.
+    local d mapping; d="$(compose_dir)"
+    mapping="$( (cd "$d" && docker compose port viegard-admin 8080) 2>/dev/null | head -n 1)"
+    [ -n "$mapping" ] && printf 'http://%s/healthz\n' "${mapping/0.0.0.0/127.0.0.1}"
+    mapping="$( (cd "$d" && docker compose port viegard-admin 8443) 2>/dev/null | head -n 1)"
+    [ -n "$mapping" ] && printf 'https://%s/healthz\n' "${mapping/0.0.0.0/127.0.0.1}"
+}
+
+admin_alive() {
+    local url
+    while IFS= read -r url; do
+        [ -n "$url" ] || continue
+        if curl -fsk --max-time 2 "$url" >/dev/null 2>&1; then
+            return 0
+        fi
+    done <<EOF
+$(admin_probe_urls)
+EOF
+    return 1
+}
+
 verify_stack() {
     local d ok=1; d="$(compose_dir)"
     log "Waiting for the admin liveness endpoint..."
     for _ in $(seq 1 30); do
-        if curl -fsS --max-time 2 http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+        if admin_alive; then
             ok=0; break
         fi
         sleep 2
@@ -466,10 +492,10 @@ cmd_status() {
     local d; d="$(compose_dir)"
     log "Branch: $(git -C "$DIR" branch --show-current) @ $(git -C "$DIR" rev-parse --short HEAD)"
     (cd "$d" && docker compose ps) || true
-    if curl -fsS --max-time 2 http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+    if admin_alive; then
         log "Admin liveness: OK"
     else
-        warn "Admin liveness: NOT RESPONDING on 127.0.0.1:8080"
+        warn "Admin liveness: NOT RESPONDING on any published admin port"
     fi
     if [ -f "$d/certs/admin.crt" ]; then
         log "Admin certificate: $(openssl x509 -in "$d/certs/admin.crt" -noout -enddate | sed 's/notAfter=/expires /')"

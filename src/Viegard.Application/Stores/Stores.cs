@@ -50,6 +50,8 @@ public interface IIncidentStore
 
     ValueTask<Incident?> FindOpenByCorrelationKeyAsync(string correlationKey, CancellationToken cancellationToken = default);
 
+    ValueTask<IReadOnlyList<Incident>> FindByEventIdAsync(Guid eventId, CancellationToken cancellationToken = default);
+
     ValueTask<KeysetPage<Incident>> ListPageAsync(
         Guid? beforeId,
         int pageSize,

@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Viegard.Application.Audit;
@@ -262,6 +263,23 @@ public sealed class PostgresIncidentStore(IDbContextFactory<ViegardDbContext> fa
             .OrderByDescending(r => r.WindowEnd)
             .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
         return row?.ToDomain();
+    }
+
+    public async ValueTask<IReadOnlyList<Incident>> FindByEventIdAsync(Guid eventId, CancellationToken cancellationToken = default)
+    {
+        var eventIdJson = JsonSerializer.Serialize(new[] { eventId }, Mapping.Json);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.Incidents
+            .FromSqlInterpolated($"""
+                SELECT i.*
+                FROM incidents i
+                WHERE i.event_ids_json @> {eventIdJson}::jsonb
+                ORDER BY i.window_end DESC, i.id DESC
+                """)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return rows.Select(r => r.ToDomain()).ToList();
     }
 
     public async ValueTask<KeysetPage<Incident>> ListPageAsync(

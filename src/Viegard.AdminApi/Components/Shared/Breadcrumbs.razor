@@ -1,0 +1,17 @@
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+    <ol>
+        @foreach (var ancestor in Ancestors)
+        {
+            <li><a href="@ancestor.Href">@ancestor.Label</a></li>
+        }
+        <li aria-current="page">@Current</li>
+    </ol>
+</nav>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<BreadcrumbLink> Ancestors { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public string Current { get; set; } = string.Empty;
+}

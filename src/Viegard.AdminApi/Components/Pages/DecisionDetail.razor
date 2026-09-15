@@ -14,6 +14,7 @@
     }
     else
     {
+        <Breadcrumbs Ancestors="DecisionBreadcrumbs" Current="@AdminText.ShortId(_decision.Id)" />
         <h1>Decision @AdminText.ShortId(_decision.Id)</h1>
         <dl class="detail-list">
             <dt>Created</dt><dd>@Display.Format(_decision.CreatedAt)</dd>
@@ -68,6 +69,7 @@
 
     private Decision? _decision;
     private Classification? _classification;
+    private static readonly BreadcrumbLink[] DecisionBreadcrumbs = [new("Decisions", "/decisions")];
 
     private string ClassificationText => _classification is null
         ? "not found"

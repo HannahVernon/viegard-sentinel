@@ -15,6 +15,7 @@
     }
     else
     {
+        <Breadcrumbs Ancestors="IncidentBreadcrumbs" Current="@AdminText.ShortId(_incident.Id)" />
         <h1>Incident @AdminText.ShortId(_incident.Id)</h1>
         <dl class="detail-list">
             <dt>Correlation key</dt><dd>@_incident.CorrelationKey</dd>
@@ -103,6 +104,7 @@
 
     private Incident? _incident;
     private IReadOnlyList<ClassificationRow> _classificationRows = [];
+    private static readonly BreadcrumbLink[] IncidentBreadcrumbs = [new("Incidents", "/incidents")];
 
     protected override async Task OnInitializedAsync()
     {

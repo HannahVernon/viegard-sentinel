@@ -16,6 +16,7 @@ namespace Viegard.Actions.MikroTik;
 
 public sealed class MikroTikBanActionProvider(
     IMikroTikRouterStore routerStore,
+    IActiveBanStore activeBanStore,
     IRouterCredentialProtector credentialProtector,
     ProtectedAddressList protectedAddresses,
     IOptions<PolicyOptions> policyOptions,
@@ -31,6 +32,7 @@ public sealed class MikroTikBanActionProvider(
     private const int MaxBodyBytes = 32 * 1024;
     private const int MaxDetailChars = 512;
     private static readonly TimeSpan MinBanTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan SkipBanCallRemainingThreshold = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan MaxBanTimeout = TimeSpan.FromDays(30);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -116,6 +118,11 @@ public sealed class MikroTikBanActionProvider(
             .ToList();
         if (enabledRouters.Count == 0)
         {
+            if (!policyOptions.Value.Posture.DryRun)
+            {
+                _ = await ApplyDesiredStateChangeAsync(actionRecord, normalized, now, cancellationToken).ConfigureAwait(false);
+            }
+
             return Failed(actionRecord, "MikroTik action provider found zero enabled routers.", now, normalized);
         }
 
@@ -137,6 +144,8 @@ public sealed class MikroTikBanActionProvider(
             };
         }
 
+        var desiredBan = await ApplyDesiredStateChangeAsync(actionRecord, normalized, now, cancellationToken).ConfigureAwait(false);
+
         results = [];
         foreach (var router in enabledRouters)
         {
@@ -144,7 +153,7 @@ public sealed class MikroTikBanActionProvider(
 
             existingResults.TryGetValue(router.Id, out var prior);
             if (prior is not null
-                && string.Equals(prior.Status, ResultStatuses.Applied, StringComparison.Ordinal))
+                && IsAppliedResult(prior))
             {
                 results.Add(prior with { RouterName = router.Name });
                 continue;
@@ -156,7 +165,7 @@ public sealed class MikroTikBanActionProvider(
                 continue;
             }
 
-            var result = await ExecuteRouterAsync(router, normalized, prior, cancellationToken).ConfigureAwait(false);
+            var result = await ExecuteRouterAsync(router, normalized, desiredBan, prior, cancellationToken).ConfigureAwait(false);
             results.Add(result);
         }
 
@@ -271,11 +280,12 @@ public sealed class MikroTikBanActionProvider(
     private async Task<MikroTikRouterActionResult> ExecuteRouterAsync(
         MikroTikRouter router,
         NormalizedAction normalized,
+        ActiveBan? desiredBan,
         MikroTikRouterActionResult? prior,
         CancellationToken cancellationToken)
     {
         var now = timeProvider.GetUtcNow();
-        var attempts = (prior?.Attempts ?? 0) + 1;
+        var priorAttempts = prior?.Attempts ?? 0;
 
         MikroTikRouter savedRouter;
         try
@@ -284,17 +294,38 @@ public sealed class MikroTikBanActionProvider(
         }
         catch (InvalidOperationException ex)
         {
-            return FailedResult(router, attempts, $"Router configuration is invalid: {OneLine(ex.Message, MaxDetailChars)}", now);
+            return FailedResult(router, priorAttempts + 1, $"Router configuration is invalid: {OneLine(ex.Message, MaxDetailChars)}", now);
+        }
+
+        if (desiredBan is not null)
+        {
+            var callNow = timeProvider.GetUtcNow();
+            var remaining = desiredBan.ExpiresAt - callNow;
+            var remainingSeconds = (long)Math.Floor(remaining.TotalSeconds);
+            if (remainingSeconds <= (long)SkipBanCallRemainingThreshold.TotalSeconds)
+            {
+                return AppliedWithoutCallResult(
+                    savedRouter,
+                    priorAttempts,
+                    "Ban was not sent to the router because the desired active ban is about to expire.",
+                    callNow);
+            }
+
+            normalized = normalized with
+            {
+                TimeoutText = FormatRouterOsDuration(TimeSpan.FromSeconds(remainingSeconds)),
+            };
         }
 
         var ciphertext = await routerStore.GetCredentialCiphertextAsync(savedRouter.Id, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(ciphertext))
         {
-            return FailedResult(savedRouter, attempts, "Router credential is not set.", now);
+            return FailedResult(savedRouter, priorAttempts + 1, "Router credential is not set.", now);
         }
 
         using var client = httpClientFactory.CreateClient(savedRouter, out var transportState);
         byte[] authBytes = [];
+        var attempts = priorAttempts + 1;
         try
         {
             var password = credentialProtector.Unprotect(savedRouter.Id, ciphertext);
@@ -428,7 +459,7 @@ public sealed class MikroTikBanActionProvider(
 
     private static ActionStatus DetermineStatus(IReadOnlyCollection<MikroTikRouterActionResult> results)
     {
-        if (results.All(result => string.Equals(result.Status, ResultStatuses.Applied, StringComparison.Ordinal)))
+        if (results.All(IsAppliedResult))
         {
             return ActionStatus.Succeeded;
         }
@@ -438,6 +469,43 @@ public sealed class MikroTikBanActionProvider(
             && result.Attempts < MaxAttemptsPerRouter)
             ? ActionStatus.Pending
             : ActionStatus.Failed;
+    }
+
+    private async ValueTask<ActiveBan?> ApplyDesiredStateChangeAsync(
+        ActionRecord actionRecord,
+        NormalizedAction normalized,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (normalized.OperationId == RemoveBanOperationId)
+        {
+            _ = await activeBanStore.RemoveByIpAsync(normalized.Ip, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
+
+        var existing = await activeBanStore.GetByIpAsync(normalized.Ip, cancellationToken).ConfigureAwait(false);
+        // RequestedAt is the stable desired-state creation time.  This keeps
+        // retries from extending a ban and keeps delayed older actions from
+        // replacing a newer decision for the same IP.
+        var actionCreatedAt = actionRecord.RequestedAt == default
+            ? now
+            : actionRecord.RequestedAt.ToUniversalTime();
+        if (existing is not null
+            && (existing.ActionId == actionRecord.Id || existing.CreatedAt > actionCreatedAt))
+        {
+            return existing;
+        }
+
+        var desired = new ActiveBan
+        {
+            Id = ViegardId.New(),
+            Ip = normalized.Ip,
+            ExpiresAt = now.Add(normalized.Duration ?? throw new InvalidOperationException("Ban duration is required.")),
+            CreatedAt = actionCreatedAt,
+            DecisionId = actionRecord.DecisionId,
+            ActionId = actionRecord.Id,
+        };
+        return await activeBanStore.UpsertByIpAsync(desired, cancellationToken).ConfigureAwait(false);
     }
 
     private static MikroTikRouterActionResult DryRunResult(
@@ -510,7 +578,8 @@ public sealed class MikroTikBanActionProvider(
                 JsonSerializer.Serialize(canonical, Json),
                 JsonSerializer.Serialize(new RemoveBanActionParameters(ip), Json),
                 formattedTimeout,
-                comment);
+                comment,
+                duration);
             return true;
         }
 
@@ -531,6 +600,7 @@ public sealed class MikroTikBanActionProvider(
                 actionRecord.OperationId,
                 ip,
                 JsonSerializer.Serialize(new RemoveBanActionParameters(ip), Json),
+                null,
                 null,
                 null,
                 null);
@@ -608,6 +678,20 @@ public sealed class MikroTikBanActionProvider(
         Detail = BoundDetail(detail),
         LastAttemptAt = default,
     };
+
+    private static MikroTikRouterActionResult AppliedWithoutCallResult(
+        MikroTikRouter router,
+        int attempts,
+        string detail,
+        DateTimeOffset now) => new()
+        {
+            RouterId = router.Id,
+            RouterName = router.Name,
+            Attempts = attempts,
+            Status = ResultStatuses.AppliedWithoutCall,
+            Detail = BoundDetail(detail),
+            LastAttemptAt = now,
+        };
 
     private static MikroTikRouterActionResult FailedResult(string detail) => new()
     {
@@ -748,6 +832,10 @@ public sealed class MikroTikBanActionProvider(
 
     private static string BoundDetail(string value) => OneLine(value, MaxDetailChars);
 
+    private static bool IsAppliedResult(MikroTikRouterActionResult result) =>
+        string.Equals(result.Status, ResultStatuses.Applied, StringComparison.Ordinal)
+        || string.Equals(result.Status, ResultStatuses.AppliedWithoutCall, StringComparison.Ordinal);
+
     private static void AppendComponent(StringBuilder builder, long value, char unit)
     {
         if (value > 0)
@@ -760,6 +848,7 @@ public sealed class MikroTikBanActionProvider(
     private static class ResultStatuses
     {
         public const string Applied = "applied";
+        public const string AppliedWithoutCall = "applied-without-call";
         public const string Failed = "failed";
         public const string DryRun = "dry-run";
     }
@@ -778,7 +867,8 @@ public sealed class MikroTikBanActionProvider(
         string ParametersJson,
         string? RollbackJson,
         string? TimeoutText,
-        string? Comment);
+        string? Comment,
+        TimeSpan? Duration);
 
     private sealed record PlannedRouterOsCall(string Method, string Url, string? Body);
 }

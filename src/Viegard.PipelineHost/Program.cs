@@ -120,6 +120,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IAdminUserStore, InMemoryAdminUserStore>();
         builder.Services.AddSingleton<IAdminSessionStore, InMemoryAdminSessionStore>();
         builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
+        builder.Services.AddSingleton<IActiveBanStore, InMemoryActiveBanStore>();
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
         builder.Services.AddSingleton<IInstanceRegistryStore, InMemoryInstanceRegistryStore>();
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
@@ -300,6 +301,7 @@ if (configuredRoles.Contains(RoleNames.Actions, StringComparer.OrdinalIgnoreCase
     builder.Services.AddSingleton<IMikroTikRouterHttpClientFactory, MikroTikRouterHttpClientFactory>();
     builder.Services.AddSingleton<IActionProvider, MikroTikBanActionProvider>();
     builder.Services.AddHostedService<ActionWorker>();
+    builder.Services.AddHostedService<BanReconciliationWorker>();
 }
 
 builder.Services.AddMaintenanceWorkers(configuredRoles);

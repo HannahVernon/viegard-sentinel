@@ -33,6 +33,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<ActionRecordRow> Actions => Set<ActionRecordRow>();
 
+    public DbSet<ActiveBanRow> ActiveBans => Set<ActiveBanRow>();
+
     public DbSet<AuditRecordRow> AuditRecords => Set<AuditRecordRow>();
 
     public DbSet<CorrectionRow> Corrections => Set<CorrectionRow>();
@@ -174,6 +176,19 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.ParametersJson).HasColumnType("jsonb");
             entity.Property(e => e.RollbackJson).HasColumnType("jsonb");
             entity.Property(e => e.ResultsJson).HasColumnType("text");
+        });
+
+        modelBuilder.Entity<ActiveBanRow>(entity =>
+        {
+            entity.ToTable("active_bans");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.HasIndex(e => e.Ip).IsUnique();
+            entity.Property(e => e.Ip).HasColumnType("text");
+            entity.Property(e => e.ExpiresAt).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.CreatedAt).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.DecisionId).HasColumnType("uuid");
+            entity.Property(e => e.ActionId).HasColumnType("uuid");
         });
 
         modelBuilder.Entity<AuditRecordRow>(entity =>

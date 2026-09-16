@@ -11,6 +11,7 @@ using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Components;
 using Viegard.AdminApi.Configuration;
 using Viegard.AdminApi.Signatures;
+using Viegard.Application.Actions;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
 using Viegard.Application.Configuration;
@@ -207,6 +208,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IAdminUserStore, InMemoryAdminUserStore>();
         builder.Services.AddSingleton<IAdminSessionStore, InMemoryAdminSessionStore>();
         builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
+        builder.Services.AddSingleton<IActiveBanStore, InMemoryActiveBanStore>();
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
         builder.Services.AddSingleton<IInstanceRegistryStore, InMemoryInstanceRegistryStore>();
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();

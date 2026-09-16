@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Viegard.Actions.MikroTik;
+using Viegard.Application.Actions;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
 using Viegard.Domain;
@@ -107,6 +108,48 @@ public sealed class MikroTikActionProviderTests
     }
 
     [Fact]
+    public async Task Ban_ip_persists_active_ban_and_uses_remaining_router_timeout()
+    {
+        var fixture = new ProviderFixture(advanceAfterActiveBanUpsert: TimeSpan.FromSeconds(31));
+        var router = await fixture.AddRouterAsync("router-a");
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, "{}"));
+        var startedAt = fixture.Time.GetUtcNow();
+        var decisionId = Guid.Parse("018f6ad8-98e8-7b71-a62c-2f41829f2e41");
+        var action = Action(
+            MikroTikBanActionProvider.BanIpOperationId,
+            new { ip = "203.0.113.10", timeout = "5m" },
+            decisionId);
+
+        var result = await fixture.Provider.ExecuteAsync(action);
+
+        Assert.Equal(ActionStatus.Succeeded, result.Status);
+        var activeBan = await fixture.ActiveBanRows.GetByIpAsync("203.0.113.10");
+        Assert.NotNull(activeBan);
+        Assert.Equal(startedAt.AddMinutes(5), activeBan.ExpiresAt);
+        Assert.Equal(decisionId, activeBan.DecisionId);
+        Assert.Equal(action.Id, activeBan.ActionId);
+        using var body = JsonDocument.Parse(Assert.Single(fixture.Http.Requests).Body!);
+        Assert.Equal("4m29s", body.RootElement.GetProperty("timeout").GetString());
+    }
+
+    [Fact]
+    public async Task Ban_ip_near_expiry_records_applied_without_router_call()
+    {
+        var fixture = new ProviderFixture(advanceAfterActiveBanUpsert: TimeSpan.FromMinutes(4).Add(TimeSpan.FromSeconds(1)));
+        await fixture.AddRouterAsync("router-a");
+
+        var result = await fixture.Provider.ExecuteAsync(
+            Action(MikroTikBanActionProvider.BanIpOperationId, new { ip = "203.0.113.10", timeout = "5m" }));
+
+        Assert.Equal(ActionStatus.Succeeded, result.Status);
+        Assert.Empty(fixture.Http.Requests);
+        Assert.Equal(0, fixture.Credentials.UnprotectCalls);
+        var routerResult = Assert.Single(Results(result));
+        Assert.Equal("applied-without-call", routerResult.Status);
+        Assert.Contains("about to expire", routerResult.Detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Ban_ip_fans_out_and_succeeds_only_when_all_routers_apply()
     {
         var fixture = new ProviderFixture();
@@ -199,6 +242,34 @@ public sealed class MikroTikActionProviderTests
     }
 
     [Fact]
+    public async Task Remove_ban_removes_active_ban_before_router_fanout()
+    {
+        var fixture = new ProviderFixture();
+        var router = await fixture.AddRouterAsync("router-a");
+        await fixture.ActiveBanRows.UpsertByIpAsync(new ActiveBan
+        {
+            Id = ViegardId.New(),
+            Ip = "203.0.113.10",
+            CreatedAt = fixture.Time.GetUtcNow(),
+            ExpiresAt = fixture.Time.GetUtcNow().AddMinutes(5),
+            DecisionId = ViegardId.New(),
+            ActionId = ViegardId.New(),
+        });
+        fixture.Http.BeforeRequestAsync = async _ =>
+        {
+            Assert.Null(await fixture.ActiveBanRows.GetByIpAsync("203.0.113.10"));
+        };
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, "[]"));
+
+        var result = await fixture.Provider.ExecuteAsync(
+            Action(MikroTikBanActionProvider.RemoveBanOperationId, new { ip = "203.0.113.10" }));
+
+        Assert.Equal(ActionStatus.Succeeded, result.Status);
+        Assert.Null(await fixture.ActiveBanRows.GetByIpAsync("203.0.113.10"));
+        Assert.Single(fixture.Http.Requests);
+    }
+
+    [Fact]
     public async Task Remove_ban_zero_entries_is_applied_for_idempotency()
     {
         var fixture = new ProviderFixture();
@@ -225,6 +296,7 @@ public sealed class MikroTikActionProviderTests
         Assert.Equal(ActionStatus.DryRun, result.Status);
         Assert.Empty(fixture.Http.Requests);
         Assert.Equal(0, fixture.Credentials.UnprotectCalls);
+        Assert.Null(await fixture.ActiveBanRows.GetByIpAsync("203.0.113.10"));
         var detail = Assert.Single(Results(result)).Detail;
         using var calls = JsonDocument.Parse(detail);
         var call = Assert.Single(calls.RootElement.EnumerateArray());
@@ -248,6 +320,7 @@ public sealed class MikroTikActionProviderTests
         Assert.Equal(ActionStatus.Failed, result.Status);
         Assert.Contains("EmergencyStop", result.Error, StringComparison.Ordinal);
         Assert.Empty(fixture.Http.Requests);
+        Assert.Null(await fixture.ActiveBanRows.GetByIpAsync("203.0.113.10"));
     }
 
     [Fact]
@@ -292,8 +365,12 @@ internal sealed class ProviderFixture
     public ProviderFixture(
         bool dryRun = false,
         bool emergencyStop = false,
-        IEnumerable<string>? protectedCidrs = null)
+        IEnumerable<string>? protectedCidrs = null,
+        TimeSpan? advanceAfterActiveBanUpsert = null)
     {
+        ActiveBans = advanceAfterActiveBanUpsert is null
+            ? ActiveBanRows
+            : new AdvancingActiveBanStore(ActiveBanRows, Time, advanceAfterActiveBanUpsert.Value);
         var posture = new PolicyPostureOptions
         {
             DryRun = dryRun,
@@ -302,6 +379,7 @@ internal sealed class ProviderFixture
         };
         Provider = new MikroTikBanActionProvider(
             Routers,
+            ActiveBans,
             Credentials,
             new ProtectedAddressList(protectedCidrs ?? []),
             Options.Create(new PolicyOptions { Posture = posture }),
@@ -312,6 +390,10 @@ internal sealed class ProviderFixture
     public InMemoryMikroTikRouterStore Routers { get; } = new();
 
     public RecordingCredentialProtector Credentials { get; } = new();
+
+    public InMemoryActiveBanStore ActiveBanRows { get; } = new();
+
+    public IActiveBanStore ActiveBans { get; }
 
     public RecordingHttpClientFactory Http { get; } = new();
 
@@ -358,11 +440,40 @@ internal sealed class RecordingCredentialProtector : IRouterCredentialProtector
     }
 }
 
+internal sealed class AdvancingActiveBanStore(
+    IActiveBanStore inner,
+    ManualTimeProvider timeProvider,
+    TimeSpan advanceAfterUpsert) : IActiveBanStore
+{
+    public async ValueTask<ActiveBan> UpsertByIpAsync(ActiveBan activeBan, CancellationToken cancellationToken = default)
+    {
+        var saved = await inner.UpsertByIpAsync(activeBan, cancellationToken).ConfigureAwait(false);
+        timeProvider.Advance(advanceAfterUpsert);
+        return saved;
+    }
+
+    public ValueTask<bool> RemoveByIpAsync(string ip, CancellationToken cancellationToken = default) =>
+        inner.RemoveByIpAsync(ip, cancellationToken);
+
+    public ValueTask<IReadOnlyList<ActiveBan>> ListUnexpiredAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default) =>
+        inner.ListUnexpiredAsync(now, cancellationToken);
+
+    public ValueTask<long> DeleteExpiredAsync(DateTimeOffset now, CancellationToken cancellationToken = default) =>
+        inner.DeleteExpiredAsync(now, cancellationToken);
+
+    public ValueTask<ActiveBan?> GetByIpAsync(string ip, CancellationToken cancellationToken = default) =>
+        inner.GetByIpAsync(ip, cancellationToken);
+}
+
 internal sealed class RecordingHttpClientFactory : IMikroTikRouterHttpClientFactory
 {
     private readonly Dictionary<Guid, Queue<HttpResponseMessage>> _responses = [];
 
     public List<RecordedRouterRequest> Requests { get; } = [];
+
+    public Func<CancellationToken, ValueTask>? BeforeRequestAsync { get; set; }
 
     public void Enqueue(Guid routerId, HttpResponseMessage response)
     {
@@ -378,7 +489,7 @@ internal sealed class RecordingHttpClientFactory : IMikroTikRouterHttpClientFact
     public HttpClient CreateClient(MikroTikRouter router, out RouterTransportValidationState transportState)
     {
         transportState = new RouterTransportValidationState();
-        return new HttpClient(new RecordingHandler(router.Id, _responses, Requests), disposeHandler: true)
+        return new HttpClient(new RecordingHandler(router.Id, _responses, Requests, BeforeRequestAsync), disposeHandler: true)
         {
             Timeout = TimeSpan.FromSeconds(10),
         };
@@ -387,12 +498,18 @@ internal sealed class RecordingHttpClientFactory : IMikroTikRouterHttpClientFact
     private sealed class RecordingHandler(
         Guid routerId,
         Dictionary<Guid, Queue<HttpResponseMessage>> responses,
-        List<RecordedRouterRequest> requests) : HttpMessageHandler
+        List<RecordedRouterRequest> requests,
+        Func<CancellationToken, ValueTask>? beforeRequestAsync) : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            if (beforeRequestAsync is not null)
+            {
+                await beforeRequestAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             var body = request.Content is null
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);

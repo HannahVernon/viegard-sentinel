@@ -84,7 +84,7 @@ When the project owner answers a question, remove or update the item here and re
 - [ ] **Phase 6: Local AI** - optional inference enrichment, llama.cpp adapter, local dev inference install.
 - [ ] **Phase 7: Actions** - DECIDED 2026-09-16 (D-0038): increment one is manual-approval network enforcement.  Build order:
   - [x] **Policy thresholds /configuration slice** - DONE 2026-09-16: review severity/confidence and unattended confidence seeded from env, UI-edited, LISTEN/NOTIFY to the policy engine (D-0029 slice).
-  - [ ] **Router registry /configuration slice**: UI-managed MikroTik router list, DataProtection-encrypted credentials (D-0006 amendment), per-router transport mode (HTTP / HTTPS any-cert / HTTPS pinned), certificate fetch-and-pin workflow, connectivity test.
+  - [x] **Router registry /configuration slice** - DONE 2026-09-16: UI-managed MikroTik router list, AES-256-GCM encrypted credentials (D-0006 amendment), per-router transport mode (HTTP / HTTPS any-cert / HTTPS pinned), certificate fetch-and-pin workflow, connectivity test.
   - [ ] **MikroTik action provider**: RouterOS REST API, `viegard-banned` address-list entries with timeouts only (never firewall rules), fan-out to all enabled routers, per-router results with automatic retry, D-0026 protected-range guard inside the provider, dry-run mode logging exact calls first.
   - [ ] **Approval UI**: approve/reject on RequireApproval decisions with 1d/7d/30d duration choice, unban on action records, step-up gated, fully audited.
   - [ ] **Crawler verification**: forward-confirmed rDNS against known crawler domains; verified crawlers never proposed for bans.

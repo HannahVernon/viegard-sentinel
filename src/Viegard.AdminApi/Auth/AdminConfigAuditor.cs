@@ -192,6 +192,69 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
         }
     }
 
+    public async ValueTask RecordRouterWriteAsync(
+        string kind,
+        string username,
+        MikroTikRouter? before,
+        MikroTikRouter? after,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var label = after?.Name ?? before?.Name ?? "unknown";
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config write by {username}: {kind} for router '{label}'.",
+                SourceId = "admin:config",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = kind,
+                    Username = username,
+                    Before = before,
+                    After = after,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
+
+    public async ValueTask RecordRouterProbeAsync(
+        string kind,
+        string username,
+        string routerName,
+        string outcome,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config action by {username}: {kind} for router '{routerName}'.",
+                SourceId = "admin:config",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = kind,
+                    Username = username,
+                    RouterName = routerName,
+                    Outcome = outcome,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
+
     public async ValueTask RecordHostUpgradeRequestedAsync(
         string username,
         string target,

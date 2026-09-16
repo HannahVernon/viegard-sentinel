@@ -583,6 +583,47 @@ internal static class Mapping
         UpdatedBy = row.UpdatedBy,
     };
 
+    public static MikroTikRouterRow ToRow(this MikroTikRouter router) => new()
+    {
+        Id = router.Id,
+        Name = router.Name,
+        BaseUrl = router.BaseUrl,
+        TransportMode = router.TransportMode.ToString(),
+        PinnedCertificateSha256 = router.PinnedCertificateSha256,
+        Username = router.Username,
+        Enabled = router.Enabled,
+        CreatedAt = Utc(router.CreatedAt),
+        UpdatedAt = Utc(router.UpdatedAt),
+        UpdatedBy = router.UpdatedBy,
+        RowVersion = router.RowVersion,
+    };
+
+    public static MikroTikRouter ToDomain(this MikroTikRouterRow row)
+    {
+        if (!Enum.TryParse<MikroTikRouterTransportMode>(row.TransportMode, ignoreCase: false, out var transportMode)
+            || !Enum.IsDefined(transportMode))
+        {
+            throw new InvalidOperationException($"Persisted MikroTik router transport mode '{row.TransportMode}' is not supported.");
+        }
+
+        var router = new MikroTikRouter
+        {
+            Id = row.Id,
+            Name = row.Name,
+            BaseUrl = row.BaseUrl,
+            TransportMode = transportMode,
+            PinnedCertificateSha256 = row.PinnedCertificateSha256,
+            Username = row.Username,
+            Enabled = row.Enabled,
+            CreatedAt = row.CreatedAt,
+            UpdatedAt = row.UpdatedAt,
+            UpdatedBy = row.UpdatedBy,
+            RowVersion = row.RowVersion,
+        };
+
+        return MikroTikRouterValidator.NormalizeForSave(router);
+    }
+
     public static AuditRecord ToDomain(this AuditRecordRow row, string? sourceKey) => new()
     {
         Id = row.Id,

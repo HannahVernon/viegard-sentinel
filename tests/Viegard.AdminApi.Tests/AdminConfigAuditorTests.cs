@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Viegard.AdminApi.Auth;
 using Viegard.Application.Audit;
+using Viegard.Application.Configuration;
 using Viegard.Application.Retention;
 using Viegard.Application.Stores;
 using Viegard.Domain;
@@ -103,6 +104,41 @@ public sealed class AdminConfigAuditorTests
         Assert.DoesNotContain("parameter", record.DetailJson, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task Router_write_audit_record_contains_before_after_without_password_material()
+    {
+        var ledger = new RecordingAuditLedger();
+        var auditor = new AdminConfigAuditor(ledger, new SilentLogger<AdminConfigAuditor>());
+        var before = Router("router-a") with { Enabled = true, RowVersion = 1 };
+        var after = before with { Enabled = false, RowVersion = 2 };
+
+        await auditor.RecordRouterWriteAsync("RouterDisabled", "hannah", before, after);
+
+        var record = Assert.Single(ledger.Records);
+        Assert.Equal(PipelineStage.Admin, record.Stage);
+        Assert.Contains("RouterDisabled", record.Summary, StringComparison.Ordinal);
+        Assert.Contains("router-a", record.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("\"enabled\":true", record.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("\"enabled\":false", record.DetailJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", record.DetailJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cipher", record.DetailJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Router_probe_audit_record_contains_action_outcome_without_password_material()
+    {
+        var ledger = new RecordingAuditLedger();
+        var auditor = new AdminConfigAuditor(ledger, new SilentLogger<AdminConfigAuditor>());
+
+        await auditor.RecordRouterProbeAsync("router-probe", "hannah", "router-a", "Router test succeeded.");
+
+        var record = Assert.Single(ledger.Records);
+        Assert.Contains("router-probe", record.Summary, StringComparison.Ordinal);
+        Assert.Contains("router-a", record.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("Router test succeeded", record.DetailJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", record.DetailJson, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static CustomSignature Signature(string pattern, IReadOnlyList<string>? additionalPatterns = null) => new()
     {
         Id = ViegardId.New(),
@@ -119,6 +155,21 @@ public sealed class AdminConfigAuditorTests
         UpdatedAt = DateTimeOffset.UtcNow,
         UpdatedBy = "hannah",
         Version = 1,
+    };
+
+    private static MikroTikRouter Router(string name) => new()
+    {
+        Id = ViegardId.New(),
+        Name = name,
+        BaseUrl = $"http://{name}.example.com",
+        TransportMode = MikroTikRouterTransportMode.PlainHttp,
+        PinnedCertificateSha256 = null,
+        Username = "viegard",
+        Enabled = true,
+        CreatedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedBy = "hannah",
+        RowVersion = 1,
     };
 
     private sealed class RecordingAuditLedger : IAuditLedger

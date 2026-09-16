@@ -76,6 +76,7 @@ set -euo pipefail
 
 DEFAULT_REPO_URL="https://code.hannahvernon.com/hannah-vernon/viegard-sentinel.git"
 APP_UID=1654   # non-root 'app' user in the .NET base images (see TODO: per-service UIDs)
+ROUTER_CREDENTIALS_KEY_SECRET="viegard-router-credentials-key"
 
 DIR=/opt/viegard-sentinel
 BRANCH=dev
@@ -239,6 +240,13 @@ create_secret() {
     chmod 400 "$file"
 }
 
+ensure_router_credentials_key_secret() {
+    local d; d="$(compose_dir)"
+    mkdir -p "$d/secrets"
+    create_secret "$d/secrets/$ROUTER_CREDENTIALS_KEY_SECRET" 32
+    chmod 755 "$d/secrets"                          # container user must traverse
+}
+
 prepare_secrets_and_dirs() {
     local d; d="$(compose_dir)"
     log "Preparing directories and secrets under $d..."
@@ -248,6 +256,7 @@ prepare_secrets_and_dirs() {
     chmod 700 "$d/data/dataprotection-keys"
     create_secret "$d/secrets/viegard-db-password" 24
     create_secret "$d/secrets/viegard-admin-bootstrap-password" 32
+    ensure_router_credentials_key_secret
     chmod 755 "$d/secrets"                          # container user must traverse
 }
 
@@ -543,6 +552,7 @@ cmd_upgrade() {
     git -C "$DIR" fetch origin
     git -C "$DIR" pull --ff-only origin "$BRANCH"
     after="$(git -C "$DIR" rev-parse HEAD)"
+    ensure_router_credentials_key_secret
     deployed="$(read_deployed_commit)"
 
     marker_matches=0

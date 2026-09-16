@@ -77,12 +77,15 @@ mkdir -p secrets data/postgres backups/postgres data/dataprotection-keys
 chmod 700 backups/postgres      # dumps will contain full email bodies and security history
 chown 1654 data/dataprotection-keys && chmod 700 data/dataprotection-keys   # admin's ASP.NET Data Protection keys
 openssl rand -base64 24 | tr -d '\n' > secrets/viegard-db-password
+openssl rand -base64 32 | tr -d '\n' > secrets/viegard-router-credentials-key
 
 # The viegard-pipeline and viegard-admin containers run as the non-root
 # 'app' user (UID 1654) from the .NET base images.  Root-owned mode-600
 # files are unreadable to them; the directory also needs traversal.
 chown 1654 secrets/viegard-db-password
+chown 1654 secrets/viegard-router-credentials-key
 chmod 400 secrets/viegard-db-password
+chmod 400 secrets/viegard-router-credentials-key
 chmod 755 secrets
 ```
 
@@ -118,6 +121,33 @@ The worker runs shortly after startup and then once per day.  It reads the datab
 Policy review confidence, action confidence, and AI-path minimum severity are seeded once from the `Viegard__Policy__AiReviewConfidence`, `Viegard__Policy__AiActionConfidence`, and `Viegard__Policy__AiActionMinSeverity` environment values into the database-owned `policy_threshold_settings` row.  The maintenance role creates the row only if it is missing; after the row exists, operators edit the values at `/configuration#thresholds`, and changing those environment variables no longer changes effective policy thresholds.
 
 Policy-role instances refresh threshold settings through PostgreSQL notifications with a polling fallback and keep the last-known-good values if refresh fails.  Until the settings row exists, policy evaluation uses the environment-configured values so first-start behavior is unchanged.
+
+### MikroTik routers
+
+The router registry is managed at `/configuration#routers`.  It lets operators add, edit, enable, disable, delete, fetch certificates for, and test MikroTik border routers before the MikroTik action provider ships.  Managing the list now has no enforcement behavior.
+
+Router credentials are stored encrypted in the database with AES-256-GCM.  The encryption key comes from the mounted secret file `viegard-router-credentials-key`, whose content must be base64 for exactly 32 random bytes.  The deploy script creates it when missing during both install and upgrade.  Replacing this file is key rotation, and it invalidates stored router credentials; re-enter each router password in the UI after rotating it.
+
+RouterOS 7.24.2 live verification on 2026-09-16 showed the dedicated group needs `read`, `write`, `api`, and `rest-api`.  The `rest-api` policy alone is not sufficient; RouterOS also requires `api` for REST calls.  Source-restrict the dedicated user to the Viegard host:
+
+```routeros
+/user group add name=viegard policy=read,write,api,rest-api
+/user add name=viegard group=viegard address=192.0.2.10/32 comment="Viegard action provider" password=<strong-unique>
+```
+
+The RouterOS `www` service must be enabled because REST is served by that service:
+
+```routeros
+/ip service enable www
+```
+
+Verify the least-privilege path from the Viegard host with curl.  Omitting the colon after the username makes curl prompt for the password instead of placing it in shell history:
+
+```bash
+curl -u viegard http://<router>/rest/ip/firewall/address-list
+```
+
+The response should be a JSON array.  Prove the source restriction by running the same curl command from a non-Viegard host and observing that RouterOS rejects the request.
 
 ### Ingestion filters
 

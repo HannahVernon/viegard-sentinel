@@ -87,6 +87,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRetentionSettingsStore, PostgresRetentionSettingsStore>();
         services.AddSingleton<IPolicyThresholdSettingsStore, PostgresPolicyThresholdSettingsStore>();
         services.AddSingleton<ISatelliteRoleStore, PostgresSatelliteRoleStore>();
+        services.AddSingleton<IMikroTikRouterStore, PostgresMikroTikRouterStore>();
         services.AddSingleton<IHostUpgradeCommandStore, PostgresHostUpgradeCommandStore>();
 
         // Durable events queue and command queue (broker-semantics port).

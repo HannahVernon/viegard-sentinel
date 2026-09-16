@@ -378,6 +378,33 @@ public sealed class PolicyThresholdSettingsRow
     public string UpdatedBy { get; set; } = string.Empty;
 }
 
+public sealed class MikroTikRouterRow
+{
+    public Guid Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public string BaseUrl { get; set; } = string.Empty;
+
+    public string TransportMode { get; set; } = string.Empty;
+
+    public string? PinnedCertificateSha256 { get; set; }
+
+    public string Username { get; set; } = string.Empty;
+
+    public string PasswordCiphertext { get; set; } = string.Empty;
+
+    public bool Enabled { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+
+    public int RowVersion { get; set; }
+}
+
 public sealed class QueueMessageRow
 {
     public long Id { get; set; }

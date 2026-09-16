@@ -222,6 +222,7 @@ public sealed class DeterministicIncidentClassifierTests
         var options = new PolicyOptions();
         var policyEngine = new DefaultPolicyEngine(
             Options.Create(options),
+            new PolicyThresholdSource(),
             new ProtectedAddressList(options.ProtectedCidrs),
             incidentStore,
             eventStore,

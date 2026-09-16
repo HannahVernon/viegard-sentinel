@@ -113,6 +113,12 @@ Run retention from exactly one pipeline instance by adding the singleton `mainte
 
 The worker runs shortly after startup and then once per day.  It reads the database settings fresh at the start of every cycle, so UI changes apply at the next daily retention cycle.  A purge cycle that removes one or more rows writes an audit record with per-table counts and the configured periods; a no-op cycle writes no audit record.  Every cycle, including a no-op cycle, updates the settings row with the last cycle time and per-target row counts so the admin UI can show that retention ran and deleted nothing.
 
+### Policy thresholds
+
+Policy review confidence, action confidence, and AI-path minimum severity are seeded once from the `Viegard__Policy__AiReviewConfidence`, `Viegard__Policy__AiActionConfidence`, and `Viegard__Policy__AiActionMinSeverity` environment values into the database-owned `policy_threshold_settings` row.  The maintenance role creates the row only if it is missing; after the row exists, operators edit the values at `/configuration#thresholds`, and changing those environment variables no longer changes effective policy thresholds.
+
+Policy-role instances refresh threshold settings through PostgreSQL notifications with a polling fallback and keep the last-known-good values if refresh fails.  Until the settings row exists, policy evaluation uses the environment-configured values so first-start behavior is unchanged.
+
 ### Ingestion filters
 
 Ingestion filters suppress selected high-volume event kinds before they become normalized events.  The first maintenance-role startup seeds MDaemon `SessionLine` and `Other` as suppressed, using insert-if-missing semantics so later admin UI edits are not overwritten.  Operators can review and change the matrix at `/configuration#ingestion` after step-up verification.

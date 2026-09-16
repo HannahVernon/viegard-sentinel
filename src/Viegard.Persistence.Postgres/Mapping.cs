@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Viegard.Application.Configuration;
+using Viegard.Application.Policy;
 using Viegard.Application.Retention;
 using Viegard.Domain.Admin;
 using Viegard.Domain.Actions;
@@ -558,6 +559,28 @@ internal static class Mapping
         UpdatedBy = row.UpdatedBy,
         LastCycleAt = row.LastCycleAt,
         LastCycleCountsJson = row.LastCycleCountsJson,
+    };
+
+    public static PolicyThresholdSettingsRow ToRow(this PolicyThresholdSettings settings) => new()
+    {
+        Id = settings.Id,
+        ReviewConfidence = settings.ReviewConfidence,
+        ActionConfidence = settings.ActionConfidence,
+        ActionMinSeverity = settings.ActionMinSeverity,
+        RowVersion = settings.RowVersion,
+        UpdatedAt = Utc(settings.UpdatedAt),
+        UpdatedBy = settings.UpdatedBy,
+    };
+
+    public static PolicyThresholdSettings ToDomain(this PolicyThresholdSettingsRow row) => new()
+    {
+        Id = row.Id,
+        ReviewConfidence = row.ReviewConfidence,
+        ActionConfidence = row.ActionConfidence,
+        ActionMinSeverity = row.ActionMinSeverity,
+        RowVersion = row.RowVersion,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
     };
 
     public static AuditRecord ToDomain(this AuditRecordRow row, string? sourceKey) => new()

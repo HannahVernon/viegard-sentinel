@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using Viegard.Application.Configuration;
 using Viegard.Application.Detection;
+using Viegard.Application.Policy;
 using Viegard.Application.Retention;
 using Viegard.Application.Stores;
 using Viegard.Application.Telemetry;
@@ -56,7 +57,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         // Clean slate for queue tables between runs.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE queue_messages, queue_counters, retention_settings, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE queue_messages, queue_counters, retention_settings, policy_threshold_settings, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -1033,6 +1034,133 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Policy_threshold_settings_store_creates_updates_conflicts_and_notifies()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var listener = new PostgresPolicyThresholdSettingsStore(factory, _dataSource!);
+        var writer = new PostgresPolicyThresholdSettingsStore(factory, _dataSource!);
+        var now = new DateTimeOffset(2026, 9, 16, 14, 30, 0, TimeSpan.Zero);
+        var wait = listener.WaitForChangeAsync(
+            listener.CurrentChangeVersion,
+            TimeSpan.FromSeconds(10),
+            CancellationToken.None).AsTask();
+
+        await Task.Delay(300);
+        var saved = await writer.UpdateAsync(
+            PolicyThresholdSettingsWith(reviewConfidence: 0.6, actionConfidence: 0.9, actionMinSeverity: 7),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: now);
+
+        var version = await wait.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.True(version > 0);
+        Assert.True(saved.Succeeded);
+        var savedSettings = saved.Settings!;
+        Assert.Equal(1, savedSettings.RowVersion);
+        Assert.Equal(0.6, savedSettings.ReviewConfidence);
+        Assert.Equal("hannah", savedSettings.UpdatedBy);
+
+        var updated = await writer.UpdateAsync(
+            savedSettings with
+            {
+                ReviewConfidence = 0.7,
+                ActionConfidence = 0.95,
+                ActionMinSeverity = 8,
+            },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "operator",
+            updatedAt: now.AddMinutes(1));
+
+        Assert.True(updated.Succeeded);
+        var updatedSettings = updated.Settings!;
+        Assert.Equal(2, updatedSettings.RowVersion);
+        Assert.Equal(0.7, updatedSettings.ReviewConfidence);
+        Assert.Equal(0.95, updatedSettings.ActionConfidence);
+        Assert.Equal(8, updatedSettings.ActionMinSeverity);
+
+        var conflict = await writer.UpdateAsync(
+            updatedSettings with { ReviewConfidence = 0.5 },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "stale",
+            updatedAt: now.AddMinutes(2));
+
+        Assert.False(conflict.Succeeded);
+        Assert.Equal(2, conflict.Settings!.RowVersion);
+        Assert.Equal(0.7, conflict.Settings.ReviewConfidence);
+    }
+
+    [PostgresFact]
+    public async Task Policy_threshold_settings_seed_is_create_only_and_race_safe()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var firstStore = new PostgresPolicyThresholdSettingsStore(factory, _dataSource!);
+        var secondStore = new PostgresPolicyThresholdSettingsStore(factory, _dataSource!);
+        var seededAt = new DateTimeOffset(2026, 9, 16, 14, 30, 0, TimeSpan.Zero);
+
+        var seeded = await firstStore.TryCreateAsync(
+            PolicyThresholdSettings.FromOptions(
+                new PolicyOptions
+                {
+                    AiReviewConfidence = 0.6,
+                    AiActionConfidence = 0.9,
+                    AiActionMinSeverity = 7,
+                },
+                seededAt));
+
+        Assert.True(seeded.Created);
+        Assert.Equal(0.6, seeded.Settings.ReviewConfidence);
+        Assert.Equal(0.9, seeded.Settings.ActionConfidence);
+        Assert.Equal(7, seeded.Settings.ActionMinSeverity);
+        Assert.Equal(seededAt, seeded.Settings.UpdatedAt);
+
+        var second = await secondStore.TryCreateAsync(
+            PolicyThresholdSettings.FromOptions(
+                new PolicyOptions
+                {
+                    AiReviewConfidence = 0.3,
+                    AiActionConfidence = 0.8,
+                    AiActionMinSeverity = 4,
+                },
+                seededAt.AddMinutes(1)));
+
+        Assert.False(second.Created);
+        Assert.Equal(0.6, second.Settings.ReviewConfidence);
+        Assert.Equal(seededAt, second.Settings.UpdatedAt);
+
+        await ClearPolicyThresholdSettingsAsync(factory);
+        var admin = await firstStore.UpdateAsync(
+            PolicyThresholdSettingsWith(reviewConfidence: 0.55, actionConfidence: 0.85, actionMinSeverity: 6),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: seededAt.AddMinutes(2));
+        Assert.True(admin.Succeeded);
+
+        var afterAdminFirst = await secondStore.TryCreateAsync(
+            PolicyThresholdSettings.FromOptions(new PolicyOptions(), seededAt.AddMinutes(3)));
+        Assert.False(afterAdminFirst.Created);
+        Assert.Equal(0.55, afterAdminFirst.Settings.ReviewConfidence);
+        Assert.Equal("hannah", afterAdminFirst.Settings.UpdatedBy);
+
+        await ClearPolicyThresholdSettingsAsync(factory);
+        var seedA = firstStore.TryCreateAsync(
+            PolicyThresholdSettings.FromOptions(
+                new PolicyOptions { AiReviewConfidence = 0.11, AiActionConfidence = 0.8, AiActionMinSeverity = 4 },
+                seededAt.AddMinutes(4))).AsTask();
+        var seedB = secondStore.TryCreateAsync(
+            PolicyThresholdSettings.FromOptions(
+                new PolicyOptions { AiReviewConfidence = 0.22, AiActionConfidence = 0.8, AiActionMinSeverity = 5 },
+                seededAt.AddMinutes(5))).AsTask();
+        await Task.WhenAll(seedA, seedB);
+
+        await using var db = factory.CreateDbContext();
+        Assert.Equal(1, await db.PolicyThresholdSettings.CountAsync());
+        var raced = await firstStore.GetAsync();
+        Assert.NotNull(raced);
+        Assert.Contains(raced!.ReviewConfidence, new[] { 0.11, 0.22 });
+        Assert.Equal(1, raced.RowVersion);
+    }
+
+    [PostgresFact]
     public async Task Retention_store_purges_only_eligible_rows()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -1244,6 +1372,25 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     {
         await using var db = factory.CreateDbContext();
         await db.RetentionSettings.ExecuteDeleteAsync();
+    }
+
+    private static PolicyThresholdSettings PolicyThresholdSettingsWith(
+        double reviewConfidence,
+        double actionConfidence,
+        int actionMinSeverity) => new()
+        {
+            Id = PolicyThresholdSettings.FixedId,
+            ReviewConfidence = reviewConfidence,
+            ActionConfidence = actionConfidence,
+            ActionMinSeverity = actionMinSeverity,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = "it",
+        };
+
+    private static async Task ClearPolicyThresholdSettingsAsync(TestDbContextFactory factory)
+    {
+        await using var db = factory.CreateDbContext();
+        await db.PolicyThresholdSettings.ExecuteDeleteAsync();
     }
 
     private static NormalizedEvent Event(string sourceKey, DateTimeOffset occurredAt) => new()

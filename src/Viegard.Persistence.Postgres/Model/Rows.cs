@@ -361,6 +361,23 @@ public sealed class RetentionSettingsRow
     public string? LastCycleCountsJson { get; set; }
 }
 
+public sealed class PolicyThresholdSettingsRow
+{
+    public int Id { get; set; }
+
+    public double ReviewConfidence { get; set; }
+
+    public double ActionConfidence { get; set; }
+
+    public int ActionMinSeverity { get; set; }
+
+    public int RowVersion { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+}
+
 public sealed class QueueMessageRow
 {
     public long Id { get; set; }

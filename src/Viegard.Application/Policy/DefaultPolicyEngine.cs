@@ -22,6 +22,7 @@ public static class PolicyGuardrailNames
 
 public sealed class DefaultPolicyEngine(
     IOptions<PolicyOptions> options,
+    PolicyThresholdSource thresholdSource,
     ProtectedAddressList protectedAddresses,
     IIncidentStore incidentStore,
     IEventStore eventStore,
@@ -117,7 +118,10 @@ public sealed class DefaultPolicyEngine(
         }
         else
         {
-            var threshold = EvaluateThresholds(classification, policyOptions);
+            var threshold = EvaluateThresholds(
+                classification,
+                policyOptions,
+                thresholdSource.CurrentValues(policyOptions));
             outcome = threshold.Outcome;
             guardrails.Add(new GuardrailEvaluation
             {
@@ -313,59 +317,62 @@ public sealed class DefaultPolicyEngine(
             : TargetIpResult.Found(ip, incident);
     }
 
-    private static ThresholdDecision EvaluateThresholds(Classification classification, PolicyOptions options)
+    private static ThresholdDecision EvaluateThresholds(
+        Classification classification,
+        PolicyOptions options,
+        PolicyThresholdValues thresholds)
     {
         if (classification.Model is not null)
         {
-            if (classification.Confidence >= options.AiActionConfidence
-                && classification.Severity >= options.AiActionMinSeverity)
+            if (classification.Confidence >= thresholds.ActionConfidence
+                && classification.Severity >= thresholds.ActionMinSeverity)
             {
                 return new ThresholdDecision(
                     DecisionOutcome.Permit,
                     true,
-                    $"AI gate passed: confidence {classification.Confidence:0.###} >= {options.AiActionConfidence:0.###} and severity {classification.Severity} >= {options.AiActionMinSeverity}.",
+                    $"AI gate passed: confidence {classification.Confidence:0.###} >= {thresholds.ActionConfidence:0.###} and severity {classification.Severity} >= {thresholds.ActionMinSeverity}.",
                     "AI classification met the automatic-action band.");
             }
 
-            if (classification.Confidence >= options.AiReviewConfidence
-                && classification.Severity >= options.AiActionMinSeverity)
+            if (classification.Confidence >= thresholds.ReviewConfidence
+                && classification.Severity >= thresholds.ActionMinSeverity)
             {
                 return new ThresholdDecision(
                     DecisionOutcome.RequireApproval,
                     true,
-                    $"AI gate is in the review band: confidence {classification.Confidence:0.###}, severity {classification.Severity}.",
+                    $"AI gate is in the review band: confidence {classification.Confidence:0.###} >= {thresholds.ReviewConfidence:0.###}, severity {classification.Severity} >= {thresholds.ActionMinSeverity}.",
                     "AI classification is flagged for review.");
             }
 
             return new ThresholdDecision(
                 DecisionOutcome.Deny,
                 false,
-                $"AI gate is below the review band: confidence {classification.Confidence:0.###}, severity {classification.Severity}.",
+                $"AI gate is below the review band: confidence {classification.Confidence:0.###}, severity {classification.Severity}; review requires confidence >= {thresholds.ReviewConfidence:0.###} and severity >= {thresholds.ActionMinSeverity}.",
                 "AI classification is record-only.");
         }
 
-        if (classification.Confidence >= options.AiActionConfidence)
+        if (classification.Confidence >= thresholds.ActionConfidence)
         {
             return new ThresholdDecision(
                 DecisionOutcome.Permit,
                 true,
-                $"Deterministic gate passed: normalized evidence confidence {classification.Confidence:0.###} >= {options.AiActionConfidence:0.###}.  Raw evidence threshold {options.EvidenceScoreBlockThreshold:0.###} is applied upstream by detection.",
+                $"Deterministic gate passed: normalized evidence confidence {classification.Confidence:0.###} >= {thresholds.ActionConfidence:0.###}.  Raw evidence threshold {options.EvidenceScoreBlockThreshold:0.###} is applied upstream by detection.",
                 $"Deterministic classification met the automatic-action band; raw evidence threshold {options.EvidenceScoreBlockThreshold:0.###} is applied upstream.");
         }
 
-        if (classification.Confidence >= options.AiReviewConfidence)
+        if (classification.Confidence >= thresholds.ReviewConfidence)
         {
             return new ThresholdDecision(
                 DecisionOutcome.RequireApproval,
                 true,
-                $"Deterministic gate is in the review band: normalized evidence confidence {classification.Confidence:0.###}.  Raw evidence threshold {options.EvidenceScoreBlockThreshold:0.###} is applied upstream by detection.",
+                $"Deterministic gate is in the review band: normalized evidence confidence {classification.Confidence:0.###} >= {thresholds.ReviewConfidence:0.###}.  Raw evidence threshold {options.EvidenceScoreBlockThreshold:0.###} is applied upstream by detection.",
                 $"Deterministic classification is flagged for review; raw evidence threshold {options.EvidenceScoreBlockThreshold:0.###} is applied upstream.");
         }
 
         return new ThresholdDecision(
             DecisionOutcome.Deny,
             false,
-            $"Deterministic gate is below the review band: normalized evidence confidence {classification.Confidence:0.###}.",
+            $"Deterministic gate is below the review band: normalized evidence confidence {classification.Confidence:0.###}; review requires confidence >= {thresholds.ReviewConfidence:0.###}.",
             "Deterministic classification is record-only.");
     }
 

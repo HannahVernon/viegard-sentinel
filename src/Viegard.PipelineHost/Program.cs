@@ -118,6 +118,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IIngestionFilterStore, InMemoryIngestionFilterStore>();
         builder.Services.AddSingleton<IRetentionStore, InMemoryRetentionStore>();
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
+        builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");
@@ -137,6 +138,8 @@ switch (persistenceProvider)
 
 builder.Services.AddSingleton<IIngestionFilterDiagnostics, LoggingIngestionFilterDiagnostics>();
 builder.Services.AddSingleton<IngestionFilterSource>();
+builder.Services.AddSingleton<IPolicyThresholdDiagnostics, LoggingPolicyThresholdDiagnostics>();
+builder.Services.AddSingleton<PolicyThresholdSource>();
 
 // IMAP source module (Phase 4; D-0019..D-0022).  Account configuration
 // (hosts, usernames) is environment-specific: in development it lives in
@@ -274,6 +277,7 @@ if (configuredRoles.Contains(RoleNames.Classification, StringComparer.OrdinalIgn
 if (configuredRoles.Contains(RoleNames.Policy, StringComparer.OrdinalIgnoreCase))
 {
     builder.Services.AddSingleton<IPolicyEngine, DefaultPolicyEngine>();
+    builder.Services.AddHostedService<PolicyThresholdRefreshWorker>();
     builder.Services.AddHostedService<PolicyWorker>();
 }
 

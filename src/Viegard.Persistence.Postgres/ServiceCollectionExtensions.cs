@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using Viegard.Application.Audit;
 using Viegard.Application.Configuration;
+using Viegard.Application.Policy;
 using Viegard.Application.Queues;
 using Viegard.Application.Retention;
 using Viegard.Application.Secrets;
@@ -84,6 +85,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IIngestionFilterStore, PostgresIngestionFilterStore>();
         services.AddSingleton<IRetentionStore, PostgresRetentionStore>();
         services.AddSingleton<IRetentionSettingsStore, PostgresRetentionSettingsStore>();
+        services.AddSingleton<IPolicyThresholdSettingsStore, PostgresPolicyThresholdSettingsStore>();
         services.AddSingleton<ISatelliteRoleStore, PostgresSatelliteRoleStore>();
         services.AddSingleton<IHostUpgradeCommandStore, PostgresHostUpgradeCommandStore>();
 

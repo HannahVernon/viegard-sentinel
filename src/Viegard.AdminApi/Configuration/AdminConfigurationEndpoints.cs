@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.RateLimiting;
 using Viegard.AdminApi.Auth;
 using Viegard.Application.Configuration;
+using Viegard.Application.Policy;
 using Viegard.Application.Retention;
 using Viegard.Application.Stores;
 using Viegard.Domain.Events;
@@ -15,6 +16,7 @@ public static class AdminConfigurationEndpoints
     private const string RetentionConfigurationPath = "/configuration#retention";
     private const string SatellitesConfigurationPath = "/configuration#satellites";
     private const string UpgradesConfigurationPath = "/configuration#upgrades";
+    private const string ThresholdsConfigurationPath = "/configuration#thresholds";
     private const string IngestionConfigurationPath = "/configuration#ingestion";
 
     public static void MapAdminConfigurationEndpoints(this WebApplication app)
@@ -32,6 +34,9 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/upgrades/request", RequestHostUpgradeAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/thresholds", SavePolicyThresholdsAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/ingestion", SaveIngestionFiltersAsync)
@@ -322,6 +327,64 @@ public static class AdminConfigurationEndpoints
         }
     }
 
+    internal static async Task<IResult> SavePolicyThresholdsAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IPolicyThresholdSettingsStore policyThresholds,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(ThresholdsConfigurationPath, error: "Step-up verification is required before editing policy thresholds.");
+        }
+
+        if (!int.TryParse(form["rowVersion"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedRowVersion)
+            || expectedRowVersion < 0)
+        {
+            return Redirect(ThresholdsConfigurationPath, error: "Policy threshold settings version was not valid.  Reload the page and try again.");
+        }
+
+        var before = await policyThresholds.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        if (!TryReadPolicyThresholdSettings(form, before, out var candidate, out var error))
+        {
+            return Redirect(ThresholdsConfigurationPath, error: error);
+        }
+
+        var result = await policyThresholds.UpdateAsync(
+            candidate,
+            expectedRowVersion,
+            user.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(ThresholdsConfigurationPath, error: "Policy threshold settings were changed by another session.  Review the current values and save again.");
+        }
+
+        await configAuditor.RecordPolicyThresholdSettingsWriteAsync(
+            user.Username,
+            before,
+            result.Settings,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(ThresholdsConfigurationPath, status: "Policy threshold settings saved.");
+    }
+
     private static bool TryReadSettings(
         IFormCollection form,
         RetentionSettings? current,
@@ -354,6 +417,61 @@ public static class AdminConfigurationEndpoints
             }
 
             settings = settings.WithDays(descriptor.Target, days);
+        }
+
+        return true;
+    }
+
+    private static bool TryReadPolicyThresholdSettings(
+        IFormCollection form,
+        PolicyThresholdSettings? current,
+        out PolicyThresholdSettings settings,
+        out string error)
+    {
+        settings = current ?? new PolicyThresholdSettings
+        {
+            Id = PolicyThresholdSettings.FixedId,
+            RowVersion = 0,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = "admin",
+        };
+        error = string.Empty;
+
+        if (!double.TryParse(
+                form["reviewConfidence"].ToString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var reviewConfidence)
+            || !double.TryParse(
+                form["actionConfidence"].ToString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var actionConfidence))
+        {
+            error = PolicyThresholdSettingsValidator.ConfidenceBoundsError;
+            return false;
+        }
+
+        if (!int.TryParse(
+                form["actionMinSeverity"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var actionMinSeverity))
+        {
+            error = PolicyThresholdSettingsValidator.SeverityRangeError;
+            return false;
+        }
+
+        settings = settings with
+        {
+            ReviewConfidence = reviewConfidence,
+            ActionConfidence = actionConfidence,
+            ActionMinSeverity = actionMinSeverity,
+        };
+
+        if (!PolicyThresholdSettingsValidator.TryValidate(settings, out error))
+        {
+            return false;
         }
 
         return true;

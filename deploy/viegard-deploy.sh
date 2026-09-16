@@ -140,6 +140,17 @@ deployed_commit_label() {
     fi
 }
 
+# The Docker build context excludes .git, so SourceLink cannot stamp the
+# commit SHA inside container builds.  Write the clone HEAD to a file in the
+# build context; the Dockerfiles pass it to dotnet publish as
+# SourceRevisionId when present.
+write_build_commit_file() {
+    local head
+    head="$(git -C "$DIR" rev-parse HEAD)"
+    printf '%s\n' "$head" > "$DIR/.build-commit"
+    log "Recorded build commit $(short_commit "$head") for the container image build."
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --dir)              DIR="$2"; shift 2 ;;
@@ -292,6 +303,7 @@ HOOK
 
 start_stack() {
     local d; d="$(compose_dir)"
+    write_build_commit_file
     log "Building and starting the stack (first start applies EF Core migrations)..."
     (cd "$d" && docker compose up -d --build)
 }
@@ -555,6 +567,7 @@ cmd_upgrade() {
     fi
 
     confirm "Rebuild and restart the stack now (migrations apply automatically)?"
+    write_build_commit_file
     (cd "$d" && docker compose up -d --build)
     verify_stack
     write_deployed_commit_marker

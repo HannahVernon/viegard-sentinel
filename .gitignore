@@ -31,6 +31,7 @@ appsettings.*.local.json
 .env
 .env.*
 .deployed-commit
+.build-commit
 
 # Deployment runtime state (never commit data, dumps, secrets, TLS private
 # keys, or the environment-specific compose copy made from the example)

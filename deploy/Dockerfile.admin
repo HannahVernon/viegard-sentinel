@@ -2,8 +2,13 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /source
 COPY . .
-RUN dotnet publish src/Viegard.AdminApi/Viegard.AdminApi.csproj \
-    --configuration Release --output /app
+# The build context excludes .git, so SourceLink cannot read the commit SHA
+# directly.  The deploy script writes the clone HEAD to .build-commit before
+# building; pass it to publish as SourceRevisionId so the assembly's
+# informational version carries the commit.
+RUN sha="$(cat .build-commit 2>/dev/null || true)" \
+    && dotnet publish src/Viegard.AdminApi/Viegard.AdminApi.csproj \
+        --configuration Release --output /app ${sha:+-p:SourceRevisionId=$sha}
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime

@@ -1,0 +1,163 @@
+@page "/bans"
+@attribute [Authorize]
+@inject IActiveBanStore ActiveBans
+@inject IActionStore ActionStore
+@inject IAdminUserStore Users
+@inject IAdminSessionStore Sessions
+@inject IOptions<AdminAuthOptions> AuthOptions
+@inject UserDisplay Display
+@inject IHttpContextAccessor HttpContextAccessorService
+
+<PageTitle>Viegard bans</PageTitle>
+
+<main class="admin-panel wide">
+    <h1>Bans</h1>
+
+    @if (!string.IsNullOrWhiteSpace(Status))
+    {
+        <p class="message">@Status</p>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Error))
+    {
+        <p class="message error">@Error</p>
+    }
+
+    @if (!_hasFreshStepUp)
+    {
+        <div class="step-up-strip">
+            <span>Step-up verification is required before removing bans.</span>
+            <StepUpPrompt ReturnTo="/bans" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-bans" />
+        </div>
+    }
+
+    <section>
+        <h2>Active bans</h2>
+        @if (_activeBans.Count == 0)
+        {
+            <p>No active bans.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>IP</th>
+                        <th>Expires in</th>
+                        <th>Created</th>
+                        <th>Origin decision</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var ban in _activeBans)
+                    {
+                        <tr>
+                            <td><code>@ban.Ip</code></td>
+                            <td>@AdminText.Age(ban.ExpiresAt - _now)</td>
+                            <td>@Display.Format(ban.CreatedAt)</td>
+                            <td><a href="/decisions/@ban.DecisionId">@AdminText.ShortId(ban.DecisionId)</a></td>
+                            <td class="actions-cell">
+                                @if (_hasFreshStepUp)
+                                {
+                                    <form method="post" action="/bans/unban">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="ip" value="@ban.Ip" />
+                                        <button type="submit" class="secondary-button">Unban</button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <span class="small">Verify step-up first.</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section>
+        <h2>Recent ban actions</h2>
+        @if (_recentActions.Count == 0)
+        {
+            <p>No ban actions have been recorded.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Operation</th>
+                        <th>Status</th>
+                        <th>Requested</th>
+                        <th>Completed</th>
+                        <th>Router summary</th>
+                        <th>Decision</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var action in _recentActions)
+                    {
+                        <tr>
+                            <td>@action.OperationId</td>
+                            <td><span class="@ActionStatusCss(action.Status)">@action.Status</span></td>
+                            <td>@Display.Format(action.RequestedAt)</td>
+                            <td>@(action.CompletedAt is null ? "-" : Display.Format(action.CompletedAt.Value))</td>
+                            <td>@BanActionSummary.Summarize(action)</td>
+                            <td><a href="/decisions/@action.DecisionId">@AdminText.ShortId(action.DecisionId)</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+</main>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+
+    private DateTimeOffset _now;
+    private IReadOnlyList<ActiveBan> _activeBans = [];
+    private IReadOnlyList<ActionRecord> _recentActions = [];
+    private bool _hasFreshStepUp;
+    private bool _hasSecurityKeys;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _now = DateTimeOffset.UtcNow;
+        _activeBans = await ActiveBans.ListUnexpiredAsync(_now).ConfigureAwait(false);
+        _recentActions = await ActionStore.ListRecentByProviderAsync(MikroTikBanActionProvider.MikroTikProviderId, 50).ConfigureAwait(false);
+        var context = HttpContextAccessorService.HttpContext ?? throw new InvalidOperationException("HTTP context is not available.");
+        if (Guid.TryParse(context.User.FindFirstValue(AdminCookieNames.SessionIdClaim), out var sessionId))
+        {
+            var session = await Sessions.GetAsync(sessionId).ConfigureAwait(false);
+            _hasFreshStepUp = session?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
+        }
+
+        _hasSecurityKeys = await HasSecurityKeysAsync(context).ConfigureAwait(false);
+    }
+
+    private async Task<bool> HasSecurityKeysAsync(HttpContext context)
+    {
+        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(userId, out var parsed)
+            && (await Users.ListWebAuthnCredentialsAsync(parsed).ConfigureAwait(false)).Count > 0;
+    }
+
+    private static string ActionStatusCss(ActionStatus status) => status switch
+    {
+        ActionStatus.Succeeded => "badge badge-green",
+        ActionStatus.DryRun => "badge badge-blue",
+        ActionStatus.Pending => "badge badge-amber",
+        ActionStatus.Failed => "badge badge-red",
+        ActionStatus.RolledBack => "badge",
+        _ => "badge",
+    };
+}

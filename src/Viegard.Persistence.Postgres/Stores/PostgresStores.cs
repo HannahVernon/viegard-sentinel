@@ -614,6 +614,31 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
                 .ConfigureAwait(false);
     }
 
+    public async ValueTask<Decision?> TryReviewAsync(
+        Guid id,
+        DecisionReviewOutcome outcome,
+        string reviewedBy,
+        DateTimeOffset reviewedAt,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var updated = await db.Decisions
+            .Where(row => row.Id == id
+                && row.Outcome == (int)DecisionOutcome.RequireApproval
+                && row.ReviewedAt == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.ReviewedBy, reviewedBy.Trim())
+                .SetProperty(row => row.ReviewedAt, reviewedAt.ToUniversalTime())
+                .SetProperty(row => row.ReviewOutcome, (int)outcome), cancellationToken)
+            .ConfigureAwait(false);
+        if (updated != 1)
+        {
+            return null;
+        }
+
+        return await GetAsync(id, cancellationToken).ConfigureAwait(false);
+    }
+
     private static readonly Func<int, string>[] DecisionSearchClauses =
     [
         index => $"d.rationale ILIKE {{{index}}} ESCAPE '\\'",
@@ -730,6 +755,15 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
 
 public sealed class PostgresActionStore(IDbContextFactory<ViegardDbContext> factory, ReferenceResolver resolver) : IActionStore
 {
+    public async ValueTask AddAsync(ActionRecord actionRecord, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(actionRecord);
+        var providerRef = await resolver.ResolveActionProviderAsync(actionRecord.ProviderId, cancellationToken).ConfigureAwait(false);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        db.Actions.Add(actionRecord.ToRow(providerRef));
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     public async ValueTask UpsertAsync(ActionRecord actionRecord, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(actionRecord);
@@ -759,6 +793,29 @@ public sealed class PostgresActionStore(IDbContextFactory<ViegardDbContext> fact
 
         var providerKey = await resolver.GetActionProviderAsync(row.ProviderId, cancellationToken).ConfigureAwait(false);
         return row.ToDomain(providerKey);
+    }
+
+    public async ValueTask<IReadOnlyList<ActionRecord>> ListRecentByProviderAsync(
+        string providerId,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var safeLimit = Math.Clamp(limit, 1, 200);
+        var providerRef = await resolver.TryGetActionProviderIdAsync(providerId, cancellationToken).ConfigureAwait(false);
+        if (providerRef is null)
+        {
+            return [];
+        }
+
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.Actions.AsNoTracking()
+            .Where(row => row.ProviderId == providerRef.Value)
+            .OrderByDescending(row => row.RequestedAt)
+            .ThenByDescending(row => row.Id)
+            .Take(safeLimit)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return rows.Select(row => row.ToDomain(providerId)).ToList();
     }
 }
 

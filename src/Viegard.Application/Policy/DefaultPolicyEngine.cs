@@ -71,7 +71,7 @@ public sealed class DefaultPolicyEngine(
             targetIp = target.Ip;
             targetIncident = target.Incident;
 
-            if (target.Kind == TargetIpKind.NotApplicable)
+            if (target.Kind == IncidentTargetIpKind.NotApplicable)
             {
                 guardrails.Add(Pass(PolicyGuardrailNames.ProtectedAddress, target.Detail));
             }
@@ -289,32 +289,10 @@ public sealed class DefaultPolicyEngine(
         Classification classification,
         CancellationToken cancellationToken)
     {
-        if (classification.SubjectKind == ClassificationSubjectKind.MailMessage)
-        {
-            return TargetIpResult.NotApplicable("Mail-message subjects have no policy target IP; protected-address guardrail skipped.");
-        }
-
-        var incident = await incidentStore.GetAsync(classification.SubjectId, cancellationToken).ConfigureAwait(false);
-        if (incident is null)
-        {
-            return TargetIpResult.Unavailable($"Incident {classification.SubjectId} was not found.");
-        }
-
-        const string prefix = "ip=";
-        if (!incident.CorrelationKey.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return TargetIpResult.Unavailable(
-                $"Incident {incident.Id} correlation key does not start with the expected '{prefix}' prefix.");
-        }
-
-        var end = incident.CorrelationKey.IndexOf('|', prefix.Length);
-        var ip = end < 0
-            ? incident.CorrelationKey[prefix.Length..].Trim()
-            : incident.CorrelationKey[prefix.Length..end].Trim();
-
-        return string.IsNullOrWhiteSpace(ip)
-            ? TargetIpResult.Unavailable($"Incident {incident.Id} correlation key has an empty IP value.")
-            : TargetIpResult.Found(ip, incident);
+        var incident = classification.SubjectKind == ClassificationSubjectKind.Incident
+            ? await incidentStore.GetAsync(classification.SubjectId, cancellationToken).ConfigureAwait(false)
+            : null;
+        return TargetIpResult.From(IncidentTargetIp.TryDerive(classification, incident));
     }
 
     private static ThresholdDecision EvaluateThresholds(
@@ -464,23 +442,10 @@ public sealed class DefaultPolicyEngine(
     private static string FormatDuration(TimeSpan value) =>
         value.ToString(value.TotalDays >= 1 ? @"d\.hh\:mm\:ss" : @"hh\:mm\:ss");
 
-    private enum TargetIpKind
+    private sealed record TargetIpResult(IncidentTargetIpKind Kind, string? Ip, Incident? Incident, string Detail)
     {
-        Found,
-        NotApplicable,
-        Unavailable,
-    }
-
-    private sealed record TargetIpResult(TargetIpKind Kind, string? Ip, Incident? Incident, string Detail)
-    {
-        public static TargetIpResult Found(string ip, Incident incident) =>
-            new(TargetIpKind.Found, ip, incident, $"Target IP {ip} resolved from incident {incident.Id}.");
-
-        public static TargetIpResult NotApplicable(string detail) =>
-            new(TargetIpKind.NotApplicable, null, null, detail);
-
-        public static TargetIpResult Unavailable(string detail) =>
-            new(TargetIpKind.Unavailable, null, null, detail);
+        public static TargetIpResult From(IncidentTargetIpResult result) =>
+            new(result.Kind, result.Ip, result.Incident, result.Detail);
     }
 
     private sealed record ThresholdDecision(

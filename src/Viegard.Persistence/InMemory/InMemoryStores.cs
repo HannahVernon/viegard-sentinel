@@ -167,6 +167,7 @@ public sealed class InMemoryClassificationStore : IClassificationStore
 
 public sealed class InMemoryDecisionStore : IDecisionStore
 {
+    private readonly object _sync = new();
     private readonly ConcurrentDictionary<Guid, Decision> _decisions = new();
 
     public ValueTask AddAsync(Decision decision, CancellationToken cancellationToken = default)
@@ -212,11 +213,49 @@ public sealed class InMemoryDecisionStore : IDecisionStore
             pageSize,
             d => d.Id,
             InMemoryPaging.DecisionComparison(sort)));
+
+    public ValueTask<Decision?> TryReviewAsync(
+        Guid id,
+        DecisionReviewOutcome outcome,
+        string reviewedBy,
+        DateTimeOffset reviewedAt,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (!_decisions.TryGetValue(id, out var decision)
+                || decision.Outcome != DecisionOutcome.RequireApproval
+                || decision.ReviewedAt is not null)
+            {
+                return ValueTask.FromResult<Decision?>(null);
+            }
+
+            var reviewed = decision with
+            {
+                ReviewedBy = reviewedBy.Trim(),
+                ReviewedAt = reviewedAt.ToUniversalTime(),
+                ReviewOutcome = outcome,
+            };
+            _decisions[id] = reviewed;
+            return ValueTask.FromResult<Decision?>(reviewed);
+        }
+    }
 }
 
 public sealed class InMemoryActionStore : IActionStore
 {
     private readonly ConcurrentDictionary<Guid, ActionRecord> _actions = new();
+
+    public ValueTask AddAsync(ActionRecord actionRecord, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(actionRecord);
+        if (!_actions.TryAdd(actionRecord.Id, actionRecord))
+        {
+            throw new InvalidOperationException($"Action {actionRecord.Id} already exists.");
+        }
+
+        return ValueTask.CompletedTask;
+    }
 
     public ValueTask UpsertAsync(ActionRecord actionRecord, CancellationToken cancellationToken = default)
     {
@@ -227,6 +266,21 @@ public sealed class InMemoryActionStore : IActionStore
 
     public ValueTask<ActionRecord?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(_actions.GetValueOrDefault(id));
+
+    public ValueTask<IReadOnlyList<ActionRecord>> ListRecentByProviderAsync(
+        string providerId,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var safeLimit = Math.Clamp(limit, 1, 200);
+        return ValueTask.FromResult<IReadOnlyList<ActionRecord>>(
+            _actions.Values
+                .Where(action => string.Equals(action.ProviderId, providerId, StringComparison.Ordinal))
+                .OrderByDescending(action => action.RequestedAt)
+                .ThenByDescending(action => action.Id)
+                .Take(safeLimit)
+                .ToList());
+    }
 }
 
 public sealed class InMemoryCorrectionStore : ICorrectionStore

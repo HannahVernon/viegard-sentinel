@@ -2,6 +2,12 @@
 @attribute [Authorize]
 @inject IDecisionStore DecisionStore
 @inject IClassificationStore ClassificationStore
+@inject IIncidentStore IncidentStore
+@inject IAdminUserStore Users
+@inject IAdminSessionStore Sessions
+@inject IOptions<AdminAuthOptions> AuthOptions
+@inject IOptions<PolicyOptions> PolicyOptions
+@inject IHttpContextAccessor HttpContextAccessor
 @inject UserDisplay Display
 
 <PageTitle>Viegard decision</PageTitle>
@@ -16,10 +22,21 @@
     {
         <Breadcrumbs Ancestors="DecisionBreadcrumbs" Current="@AdminText.ShortId(_decision.Id)" />
         <h1>Decision @AdminText.ShortId(_decision.Id)</h1>
+        @if (!string.IsNullOrWhiteSpace(Status))
+        {
+            <p class="message">@Status</p>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <p class="message error">@Error</p>
+        }
+
         <dl class="detail-list">
             <dt>Created</dt><dd>@Display.Format(_decision.CreatedAt)</dd>
             <dt>Policy</dt><dd>@_decision.PolicyId @_decision.PolicyVersion</dd>
             <dt>Outcome</dt><dd><span class="@AdminText.OutcomeCss(_decision.Outcome)">@_decision.Outcome</span></dd>
+            <dt>Review</dt><dd>@ReviewStatus</dd>
             <dt>Classification</dt><dd>@ClassificationText</dd>
             <dt>Rationale</dt><dd>@AdminText.Limit(_decision.Rationale)</dd>
         </dl>
@@ -34,6 +51,69 @@
                     <dt>Confidence</dt><dd>@_classification.Confidence.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)</dd>
                     <dt>Subject</dt><dd>@_classification.SubjectKind <a href="/incidents/@_classification.SubjectId">@AdminText.ShortId(_classification.SubjectId)</a></dd>
                 </dl>
+            </section>
+        }
+
+        @if (_decision.Outcome == DecisionOutcome.RequireApproval)
+        {
+            <section>
+                <h2>Approval</h2>
+                @if (_decision.ReviewedAt is not null)
+                {
+                    <p>This decision was @(_decision.ReviewOutcome?.ToString().ToLowerInvariant() ?? "reviewed") by @_decision.ReviewedBy at @Display.Format(_decision.ReviewedAt.Value).</p>
+                    @if (_decision.ReviewOutcome == DecisionReviewOutcome.Approved)
+                    {
+                        <p><a href="/bans">View active bans and recent ban actions.</a></p>
+                    }
+                }
+                else if (!_stepUpFresh)
+                {
+                    <div class="step-up-strip">
+                        <span>Step-up verification is required before approving or rejecting this decision.</span>
+                        <StepUpPrompt ReturnTo="@($"/decisions/{Id:N}")" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-decision-review" />
+                    </div>
+                }
+                else if (_target?.Kind == IncidentTargetIpKind.Found && !string.IsNullOrWhiteSpace(_target.Ip))
+                {
+                    <div class="card">
+                        <p><strong>Enforcement preview:</strong> Approving bans <code>@_target.Ip</code> on all enabled routers.</p>
+                        <form method="post" action="/decisions/review" class="decision-review-form">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="id" value="@Id" />
+                            <input type="hidden" name="verdict" value="approve" />
+                            <label>
+                                Duration
+                                <select name="duration">
+                                    @foreach (var option in DecisionReviewDurations.Options)
+                                    {
+                                        <option value="@option.Value" selected="@(option.Value == DecisionReviewDurations.OneDay)">@option.Label</option>
+                                    }
+                                </select>
+                            </label>
+                            @if (PolicyOptions.Value.Posture.DryRun)
+                            {
+                                <p class="form-hint">Current posture is dry-run: approving queues the action, but execution bans nothing until dry-run is disabled.</p>
+                            }
+                            <button type="submit">Approve ban</button>
+                        </form>
+                        <form method="post" action="/decisions/review" class="decision-review-form">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="id" value="@Id" />
+                            <input type="hidden" name="verdict" value="reject" />
+                            <button type="submit" class="secondary-button">Reject</button>
+                        </form>
+                    </div>
+                }
+                else
+                {
+                    <p class="message error">Approval is unavailable for this decision: @_target?.Detail</p>
+                    <form method="post" action="/decisions/review" class="decision-review-form">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="id" value="@Id" />
+                        <input type="hidden" name="verdict" value="reject" />
+                        <button type="submit" class="secondary-button">Reject</button>
+                    </form>
+                }
             </section>
         }
 
@@ -67,13 +147,26 @@
     [Parameter]
     public Guid Id { get; set; }
 
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+
     private Decision? _decision;
     private Classification? _classification;
+    private IncidentTargetIpResult? _target;
+    private bool _stepUpFresh;
+    private bool _hasSecurityKeys;
     private static readonly BreadcrumbLink[] DecisionBreadcrumbs = [new("Decisions", "/decisions")];
 
     private string ClassificationText => _classification is null
         ? "not found"
         : $"{_classification.Category} severity {_classification.Severity}";
+
+    private string ReviewStatus => _decision?.ReviewedAt is null
+        ? _decision?.Outcome == DecisionOutcome.RequireApproval ? "Needs approval" : "Not applicable"
+        : $"{_decision.ReviewOutcome} by {_decision.ReviewedBy} at {Display.Format(_decision.ReviewedAt.Value)}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -82,6 +175,30 @@
         if (_decision is not null)
         {
             _classification = await ClassificationStore.GetAsync(_decision.ClassificationId).ConfigureAwait(false);
+            var incident = _classification?.SubjectKind == ClassificationSubjectKind.Incident
+                ? await IncidentStore.GetAsync(_classification.SubjectId).ConfigureAwait(false)
+                : null;
+            _target = _classification is null
+                ? IncidentTargetIpResult.Unavailable($"Classification {_decision.ClassificationId} was not found.")
+                : IncidentTargetIp.TryDerive(_classification, incident);
+        }
+
+        var context = HttpContextAccessor.HttpContext;
+        if (context is null)
+        {
+            return;
+        }
+
+        if (Guid.TryParse(context.User.FindFirstValue(AdminCookieNames.SessionIdClaim), out var sessionId))
+        {
+            var session = await Sessions.GetAsync(sessionId).ConfigureAwait(false);
+            _stepUpFresh = session?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
+        }
+
+        if (Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+        {
+            var credentials = await Users.ListWebAuthnCredentialsAsync(userId).ConfigureAwait(false);
+            _hasSecurityKeys = credentials.Count > 0;
         }
     }
 }

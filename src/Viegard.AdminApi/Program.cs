@@ -10,6 +10,7 @@ using Viegard.AdminApi;
 using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Components;
 using Viegard.AdminApi.Configuration;
+using Viegard.AdminApi.Decisions;
 using Viegard.AdminApi.Signatures;
 using Viegard.Application.Actions;
 using Viegard.Application.Audit;
@@ -116,6 +117,7 @@ builder.Services.AddScoped<AdminCookieAuthenticationEvents>();
 builder.Services.AddSingleton<IRouterCredentialProtector, AesGcmRouterCredentialProtector>();
 builder.Services.AddSingleton<RouterCertificateFetcher>();
 builder.Services.AddSingleton<RouterConnectivityTester>();
+builder.Services.AddSingleton<DecisionTargetResolver>();
 
 builder.Services
     .AddOptions<AdminWebAuthnOptions>()
@@ -223,12 +225,15 @@ switch (persistenceProvider)
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");
         var classificationsQueue = new ChannelWorkQueue<ClassificationWorkItem>("classifications");
+        var actionsQueue = new ChannelWorkQueue<ActionWorkItem>("actions");
         builder.Services.AddSingleton<IWorkQueue<Guid>>(eventsQueue);
         builder.Services.AddSingleton<IQueueStatsSource>(eventsQueue);
         builder.Services.AddSingleton<IWorkQueue<IncidentWorkItem>>(incidentsQueue);
         builder.Services.AddSingleton<IQueueStatsSource>(incidentsQueue);
         builder.Services.AddSingleton<IWorkQueue<ClassificationWorkItem>>(classificationsQueue);
         builder.Services.AddSingleton<IQueueStatsSource>(classificationsQueue);
+        builder.Services.AddSingleton<IWorkQueue<ActionWorkItem>>(actionsQueue);
+        builder.Services.AddSingleton<IQueueStatsSource>(actionsQueue);
         break;
 
     default:
@@ -369,6 +374,7 @@ app.MapGet("/status/upgrades", async (
 app.MapAdminAuthEndpoints();
 app.MapAdminSignatureEndpoints();
 app.MapAdminConfigurationEndpoints();
+app.MapAdminDecisionEndpoints();
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>();
 

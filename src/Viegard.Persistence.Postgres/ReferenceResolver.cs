@@ -219,6 +219,27 @@ public sealed class ReferenceResolver(IDbContextFactory<ViegardDbContext> factor
         return existing.Id;
     }
 
+    public async ValueTask<int?> TryGetActionProviderIdAsync(string providerKey, CancellationToken cancellationToken = default)
+    {
+        if (_providerIdsByKey.TryGetValue(providerKey, out var cached))
+        {
+            return cached;
+        }
+
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await db.ActionProviders.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.ProviderKey == providerKey, cancellationToken)
+            .ConfigureAwait(false);
+        if (row is null)
+        {
+            return null;
+        }
+
+        _providerIdsByKey[row.ProviderKey] = row.Id;
+        _providersById[row.Id] = row.ProviderKey;
+        return row.Id;
+    }
+
     public async ValueTask<string> GetActionProviderAsync(int id, CancellationToken cancellationToken = default)
     {
         if (_providersById.TryGetValue(id, out var cached))

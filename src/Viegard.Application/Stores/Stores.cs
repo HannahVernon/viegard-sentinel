@@ -109,14 +109,28 @@ public interface IDecisionStore
         DecisionListFilter? filter = null,
         ListSort<DecisionSortColumn>? sort = null,
         CancellationToken cancellationToken = default);
+
+    ValueTask<Decision?> TryReviewAsync(
+        Guid id,
+        DecisionReviewOutcome outcome,
+        string reviewedBy,
+        DateTimeOffset reviewedAt,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence port for action records (Roost).</summary>
 public interface IActionStore
 {
+    ValueTask AddAsync(ActionRecord actionRecord, CancellationToken cancellationToken = default);
+
     ValueTask UpsertAsync(ActionRecord actionRecord, CancellationToken cancellationToken = default);
 
     ValueTask<ActionRecord?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+
+    ValueTask<IReadOnlyList<ActionRecord>> ListRecentByProviderAsync(
+        string providerId,
+        int limit,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence port for human corrections (Roost).</summary>

@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Viegard.AdminApi\Viegard.AdminApi.csproj" />
+    <ProjectReference Include="..\..\src\Viegard.Actions.MikroTik\Viegard.Actions.MikroTik.csproj" />
   </ItemGroup>
 
 </Project>

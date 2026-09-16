@@ -160,6 +160,23 @@ public sealed class PolicyEngineTests
     }
 
     [Fact]
+    public async Task Policy_engine_extracts_target_ip_from_prefixed_correlation_key()
+    {
+        var fixture = await CreateFixtureAsync("198.51.100.10|window=60s");
+
+        var decision = await fixture.Engine.EvaluateAsync(
+            AiClassification(fixture.IncidentId, confidence: 0.95, severity: 8),
+            ActiveContext);
+
+        Assert.Equal(DecisionOutcome.Permit, decision.Outcome);
+        var protectedGuardrail = Assert.Single(
+            decision.Guardrails,
+            g => g.GuardrailName == PolicyGuardrailNames.ProtectedAddress);
+        Assert.True(protectedGuardrail.Passed);
+        Assert.Contains("198.51.100.10", protectedGuardrail.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Rate_cap_exceeded_requires_approval()
     {
         var fixture = await CreateFixtureAsync();

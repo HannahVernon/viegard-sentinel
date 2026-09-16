@@ -29,4 +29,32 @@ public sealed class ActionStoreTests
         Assert.NotNull(restored);
         Assert.Equal(action.ResultsJson, restored!.ResultsJson);
     }
+
+    [Fact]
+    public async Task In_memory_action_store_lists_recent_actions_for_provider_with_limit()
+    {
+        var store = new InMemoryActionStore();
+        var now = DateTimeOffset.UtcNow;
+        var oldMikroTik = Action("mikrotik", now.AddMinutes(-2));
+        var other = Action("other", now.AddMinutes(-1));
+        var newMikroTik = Action("mikrotik", now);
+        await store.AddAsync(oldMikroTik);
+        await store.AddAsync(other);
+        await store.AddAsync(newMikroTik);
+
+        var recent = await store.ListRecentByProviderAsync("mikrotik", limit: 1);
+
+        Assert.Equal(newMikroTik.Id, Assert.Single(recent).Id);
+    }
+
+    private static ActionRecord Action(string providerId, DateTimeOffset requestedAt) => new()
+    {
+        Id = ViegardId.New(),
+        DecisionId = ViegardId.New(),
+        ProviderId = providerId,
+        OperationId = "ban-ip",
+        ParametersJson = """{"ip":"203.0.113.10","timeout":"5m"}""",
+        Status = ActionStatus.Pending,
+        RequestedAt = requestedAt,
+    };
 }

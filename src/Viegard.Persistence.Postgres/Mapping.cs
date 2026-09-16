@@ -147,6 +147,9 @@ internal static class Mapping
         Rationale = decision.Rationale,
         GuardrailsJson = ToJson(decision.Guardrails),
         CreatedAt = Utc(decision.CreatedAt),
+        ReviewedBy = decision.ReviewedBy,
+        ReviewedAt = Utc(decision.ReviewedAt),
+        ReviewOutcome = decision.ReviewOutcome is null ? null : (int)decision.ReviewOutcome,
     };
 
     public static Decision ToDomain(this DecisionRow row, string policyKey, string policyVersion) => new()
@@ -159,6 +162,9 @@ internal static class Mapping
         Rationale = row.Rationale,
         Guardrails = FromJson<List<GuardrailEvaluation>>(row.GuardrailsJson),
         CreatedAt = row.CreatedAt,
+        ReviewedBy = row.ReviewedBy,
+        ReviewedAt = row.ReviewedAt,
+        ReviewOutcome = row.ReviewOutcome is null ? null : (DecisionReviewOutcome)row.ReviewOutcome,
     };
 
     public static ActionRecordRow ToRow(this ActionRecord action, int providerRefId) => new()

@@ -163,6 +163,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasIndex(e => e.PolicyId);
             entity.HasOne<PolicyRow>().WithMany().HasForeignKey(e => e.PolicyId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.GuardrailsJson).HasColumnType("jsonb");
+            entity.Property(e => e.ReviewedBy).HasColumnType("text");
+            entity.Property(e => e.ReviewedAt).HasColumnType("timestamp with time zone");
         });
 
         modelBuilder.Entity<ActionRecordRow>(entity =>

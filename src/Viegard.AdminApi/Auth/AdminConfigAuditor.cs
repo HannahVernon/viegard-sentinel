@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Viegard.Application.Configuration;
 using Viegard.Application.Audit;
+using Viegard.Application.Policy;
 using Viegard.Application.Retention;
 using Viegard.Domain;
 using Viegard.Domain.Audit;
@@ -129,6 +130,36 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToList();
+
+    public async ValueTask RecordPolicyThresholdSettingsWriteAsync(
+        string username,
+        PolicyThresholdSettings? before,
+        PolicyThresholdSettings? after,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config write by {username}: changed policy threshold settings.",
+                SourceId = "admin:config",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "PolicyThresholdSettingsChanged",
+                    Username = username,
+                    Before = before,
+                    After = after,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
 
     public async ValueTask RecordSatelliteRoleWriteAsync(
         string kind,

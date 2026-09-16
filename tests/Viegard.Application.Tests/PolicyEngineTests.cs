@@ -78,6 +78,55 @@ public sealed class PolicyEngineTests
     }
 
     [Fact]
+    public async Task Policy_engine_reads_current_policy_threshold_snapshot()
+    {
+        var thresholdStore = new InMemoryPolicyThresholdSettingsStore();
+        var thresholdSource = new PolicyThresholdSource(thresholdStore);
+        var now = new DateTimeOffset(2026, 9, 16, 14, 30, 0, TimeSpan.Zero);
+        var created = await thresholdStore.UpdateAsync(
+            new PolicyThresholdSettings
+            {
+                ReviewConfidence = 0.6,
+                ActionConfidence = 0.8,
+                ActionMinSeverity = 7,
+                UpdatedAt = now,
+                UpdatedBy = "test",
+            },
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: now);
+        Assert.True(created.Succeeded);
+        var createdSettings = created.Settings!;
+        await thresholdSource.RefreshAsync();
+        var fixture = await CreateFixtureAsync(thresholdSource: thresholdSource);
+
+        var first = await fixture.Engine.EvaluateAsync(
+            AiClassification(fixture.IncidentId, confidence: 0.75, severity: 7),
+            ActiveContext);
+        Assert.Equal(DecisionOutcome.RequireApproval, first.Outcome);
+
+        var updated = await thresholdStore.UpdateAsync(
+            createdSettings with
+            {
+                ReviewConfidence = 0.8,
+                ActionConfidence = 0.95,
+                ActionMinSeverity = 7,
+            },
+            expectedRowVersion: createdSettings.RowVersion,
+            updatedBy: "hannah",
+            updatedAt: now.AddMinutes(1));
+        Assert.True(updated.Succeeded);
+        await thresholdSource.RefreshAsync();
+
+        var afterRefresh = await fixture.Engine.EvaluateAsync(
+            AiClassification(fixture.IncidentId, confidence: 0.75, severity: 7),
+            ActiveContext);
+        Assert.Equal(DecisionOutcome.Deny, afterRefresh.Outcome);
+        var thresholds = Assert.Single(afterRefresh.Guardrails, guardrail => guardrail.GuardrailName == PolicyGuardrailNames.Thresholds);
+        Assert.Contains("review requires confidence >= 0.8", thresholds.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Deterministic_classification_uses_normalized_evidence_confidence_bands()
     {
         var fixture = await CreateFixtureAsync();
@@ -280,7 +329,10 @@ public sealed class PolicyEngineTests
             RecommendedAction = "move-to-spam",
         };
 
-    private static async Task<PolicyFixture> CreateFixtureAsync(string ip = "198.51.100.10", PolicyOptions? options = null)
+    private static async Task<PolicyFixture> CreateFixtureAsync(
+        string ip = "198.51.100.10",
+        PolicyOptions? options = null,
+        PolicyThresholdSource? thresholdSource = null)
     {
         options ??= new PolicyOptions();
         var incidentStore = new InMemoryIncidentStore();
@@ -292,6 +344,7 @@ public sealed class PolicyEngineTests
         return new PolicyFixture(
             new DefaultPolicyEngine(
                 Options.Create(options),
+                thresholdSource ?? new PolicyThresholdSource(),
                 new ProtectedAddressList(options.ProtectedCidrs),
                 incidentStore,
                 eventStore,

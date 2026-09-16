@@ -51,6 +51,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<RetentionSettingsRow> RetentionSettings => Set<RetentionSettingsRow>();
 
+    public DbSet<PolicyThresholdSettingsRow> PolicyThresholdSettings => Set<PolicyThresholdSettingsRow>();
+
     public DbSet<QueueMessageRow> QueueMessages => Set<QueueMessageRow>();
 
     public DbSet<QueueCounterRow> QueueCounters => Set<QueueCounterRow>();
@@ -247,6 +249,15 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Retention.RetentionSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<PolicyThresholdSettingsRow>(entity =>
+        {
+            entity.ToTable("policy_threshold_settings", table =>
+                table.HasCheckConstraint("CK_policy_threshold_settings_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Policy.PolicyThresholdSettings.MaxUpdatedByLength);
         });
 
         modelBuilder.Entity<QueueMessageRow>(entity =>

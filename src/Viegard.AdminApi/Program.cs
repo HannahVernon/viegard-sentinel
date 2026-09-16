@@ -15,6 +15,7 @@ using Viegard.Application.Audit;
 using Viegard.Application.Auth;
 using Viegard.Application.Configuration;
 using Viegard.Application.Detection;
+using Viegard.Application.Policy;
 using Viegard.Application.Queues;
 using Viegard.Application.Retention;
 using Viegard.Application.Secrets;
@@ -87,6 +88,12 @@ builder.Services
     .Validate(o => o.MaxInputCharsToScan > 0, "Detection MaxInputCharsToScan must be positive.")
     .Validate(o => o.MaxEvidencePerRule > 0, "Detection MaxEvidencePerRule must be positive.")
     .ValidateOnStart();
+
+builder.Services
+    .AddOptions<PolicyOptions>()
+    .Bind(builder.Configuration.GetSection(PolicyOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<PolicyOptions>, PolicyOptionsValidator>();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddRazorComponents();
@@ -203,6 +210,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
         builder.Services.AddSingleton<IIngestionFilterStore, InMemoryIngestionFilterStore>();
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
+        builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<ISatelliteRoleStore, InMemorySatelliteRoleStore>();
         builder.Services.AddSingleton<IHostUpgradeCommandStore, InMemoryHostUpgradeCommandStore>();
 

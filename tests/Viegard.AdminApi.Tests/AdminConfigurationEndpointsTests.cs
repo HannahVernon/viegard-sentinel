@@ -12,6 +12,7 @@ using Viegard.AdminApi.Configuration;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
 using Viegard.Application.Configuration;
+using Viegard.Application.Policy;
 using Viegard.Application.Queues;
 using Viegard.Application.Retention;
 using Viegard.Application.Stores;
@@ -193,6 +194,95 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Save_policy_thresholds_requires_step_up_before_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        await fixture.PolicyThresholds.UpdateAsync(
+            ThresholdSettings(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = ThresholdForm(rowVersion: 1, reviewConfidence: 0.6, actionConfidence: 0.9, severity: 7);
+
+        var result = await fixture.InvokeSavePolicyThresholdsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        var settings = await fixture.PolicyThresholds.GetAsync();
+        Assert.Equal(0.7, settings!.ReviewConfidence);
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Save_policy_thresholds_rejects_invalid_values_without_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.PolicyThresholds.UpdateAsync(
+            ThresholdSettings(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = ThresholdForm(rowVersion: 1, reviewConfidence: 0.95, actionConfidence: 0.9, severity: 7);
+
+        var result = await fixture.InvokeSavePolicyThresholdsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains(Uri.EscapeDataString(PolicyThresholdSettingsValidator.ConfidenceOrderError), location, StringComparison.Ordinal);
+        var settings = await fixture.PolicyThresholds.GetAsync();
+        Assert.Equal(0.7, settings!.ReviewConfidence);
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Save_policy_thresholds_returns_friendly_error_on_version_conflict()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.PolicyThresholds.UpdateAsync(
+            ThresholdSettings(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = ThresholdForm(rowVersion: 0, reviewConfidence: 0.6, actionConfidence: 0.9, severity: 7);
+
+        var result = await fixture.InvokeSavePolicyThresholdsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Policy%20threshold%20settings%20were%20changed", location, StringComparison.Ordinal);
+        var settings = await fixture.PolicyThresholds.GetAsync();
+        Assert.Equal(0.7, settings!.ReviewConfidence);
+        Assert.Equal(1, settings.RowVersion);
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Save_policy_thresholds_persists_values_and_writes_config_audit()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.PolicyThresholds.UpdateAsync(
+            ThresholdSettings(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = ThresholdForm(rowVersion: 1, reviewConfidence: 0.6, actionConfidence: 0.95, severity: 8);
+
+        var result = await fixture.InvokeSavePolicyThresholdsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Policy%20threshold%20settings%20saved", location, StringComparison.Ordinal);
+        var settings = await fixture.PolicyThresholds.GetAsync();
+        Assert.Equal(0.6, settings!.ReviewConfidence);
+        Assert.Equal(0.95, settings.ActionConfidence);
+        Assert.Equal(8, settings.ActionMinSeverity);
+        Assert.Equal(2, settings.RowVersion);
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("changed policy threshold settings", audit.Summary, StringComparison.Ordinal);
+        Assert.Contains("PolicyThresholdSettingsChanged", audit.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("\"reviewConfidence\":0.7", audit.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("\"reviewConfidence\":0.6", audit.DetailJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Request_host_upgrade_queues_command_and_writes_minimal_audit_detail()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
@@ -308,6 +398,16 @@ public sealed class AdminConfigurationEndpointsTests
         {
             ["target"] = HostUpgradeCommandPolicy.DefaultTarget,
         });
+
+    private static FormCollection ThresholdForm(int rowVersion, double reviewConfidence, double actionConfidence, int severity) => new(
+        new Dictionary<string, StringValues>(StringComparer.Ordinal)
+        {
+            ["rowVersion"] = rowVersion.ToString(CultureInfo.InvariantCulture),
+            ["reviewConfidence"] = reviewConfidence.ToString(CultureInfo.InvariantCulture),
+            ["actionConfidence"] = actionConfidence.ToString(CultureInfo.InvariantCulture),
+            ["actionMinSeverity"] = severity.ToString(CultureInfo.InvariantCulture),
+        });
+
     private static FormCollection IngestionForm(params MDaemonEventKind[] suppressed) =>
         IngestionForm(suppressed, unknown: null);
 
@@ -344,9 +444,19 @@ public sealed class AdminConfigurationEndpointsTests
         return settings;
     }
 
+    private static PolicyThresholdSettings ThresholdSettings() => new()
+    {
+        ReviewConfidence = 0.7,
+        ActionConfidence = 0.9,
+        ActionMinSeverity = 7,
+        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedBy = "test",
+    };
+
     private sealed record EndpointFixture(
         DefaultHttpContext Context,
         InMemoryRetentionSettingsStore RetentionSettings,
+        InMemoryPolicyThresholdSettingsStore PolicyThresholds,
         RecordingAuditLedger AuditLedger,
         DateTimeOffset Now,
         NoopAntiforgery Antiforgery,
@@ -405,6 +515,7 @@ public sealed class AdminConfigurationEndpointsTests
             var satelliteRoles = new InMemorySatelliteRoleStore();
             var hostUpgrades = new InMemoryHostUpgradeCommandStore();
             var ingestionFilters = new InMemoryIngestionFilterStore();
+            var policyThresholds = new InMemoryPolicyThresholdSettingsStore();
             var satelliteCredentialCookie = new SatelliteRoleCredentialCookie(new NoopDataProtectionProvider());
             var services = new ServiceCollection()
                 .AddLogging()
@@ -426,6 +537,7 @@ public sealed class AdminConfigurationEndpointsTests
             return new EndpointFixture(
                 context,
                 new InMemoryRetentionSettingsStore(),
+                policyThresholds,
                 auditLedger,
                 now,
                 new NoopAntiforgery(),
@@ -465,6 +577,16 @@ public sealed class AdminConfigurationEndpointsTests
                 Context,
                 Antiforgery,
                 HostUpgrades,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeSavePolicyThresholdsAsync() =>
+            AdminConfigurationEndpoints.SavePolicyThresholdsAsync(
+                Context,
+                Antiforgery,
+                PolicyThresholds,
                 Users,
                 Sessions,
                 AuthAuditor,

@@ -12,6 +12,7 @@ public static class PipelineWorkerRegistration
         if (configuredRoles.Contains(RoleNames.Maintenance, StringComparer.OrdinalIgnoreCase))
         {
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, IngestionFilterSeedWorker>());
+            services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PolicyThresholdSeedWorker>());
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, RetentionWorker>());
         }
 

@@ -1,7 +1,5 @@
 using System.Net.Http.Headers;
-using System.Net.Security;
 using System.Security.Authentication;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using Viegard.Application.Configuration;
@@ -31,21 +29,7 @@ public sealed class RouterConnectivityTester(IRouterCredentialProtector protecto
             return RouterConnectivityTestResult.Failure("Router certificate pin is not configured.");
         }
 
-        var pinMismatch = false;
-        using var handler = new SocketsHttpHandler();
-        if (normalized.TransportMode == MikroTikRouterTransportMode.HttpsTrustAny)
-        {
-            handler.SslOptions.RemoteCertificateValidationCallback = (_, _, _, _) => true;
-        }
-        else if (normalized.TransportMode == MikroTikRouterTransportMode.HttpsPinned)
-        {
-            handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, _, _) =>
-            {
-                var matches = CertificatePinMatches(certificate, normalized.PinnedCertificateSha256);
-                pinMismatch = !matches;
-                return matches;
-            };
-        }
+        using var handler = RouterTransportHandlerFactory.CreateHandler(normalized, out var transportState);
 
         using var client = new HttpClient(handler, disposeHandler: true)
         {
@@ -105,10 +89,10 @@ public sealed class RouterConnectivityTester(IRouterCredentialProtector protecto
         {
             return RouterConnectivityTestResult.Failure("Router test timed out after 10 seconds.");
         }
-        catch (HttpRequestException ex) when (pinMismatch || ContainsAuthenticationException(ex))
+        catch (HttpRequestException ex) when (transportState.CertificatePinMismatch || ContainsAuthenticationException(ex))
         {
             return RouterConnectivityTestResult.Failure(
-                pinMismatch ? "Router TLS certificate pin mismatch." : "Router TLS connection failed.");
+                transportState.CertificatePinMismatch ? "Router TLS certificate pin mismatch." : "Router TLS connection failed.");
         }
         catch (HttpRequestException)
         {
@@ -122,17 +106,6 @@ public sealed class RouterConnectivityTester(IRouterCredentialProtector protecto
         {
             Array.Clear(authBytes);
         }
-    }
-
-    internal static bool CertificatePinMatches(X509Certificate? certificate, string? expectedSha256)
-    {
-        if (certificate is null || string.IsNullOrWhiteSpace(expectedSha256))
-        {
-            return false;
-        }
-
-        var actual = RouterCertificateFingerprint.Sha256LowerHex(certificate);
-        return string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase);
     }
 
     private static async ValueTask<byte[]> ReadBodyPrefixAsync(

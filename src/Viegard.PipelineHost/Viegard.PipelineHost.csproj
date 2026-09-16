@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Viegard.Application\Viegard.Application.csproj" />
+    <ProjectReference Include="..\Viegard.Actions.MikroTik\Viegard.Actions.MikroTik.csproj" />
     <ProjectReference Include="..\Viegard.Persistence\Viegard.Persistence.csproj" />
     <ProjectReference Include="..\Viegard.Sources.Imap\Viegard.Sources.Imap.csproj" />
     <ProjectReference Include="..\Viegard.Sources.MDaemonLogs\Viegard.Sources.MDaemonLogs.csproj" />

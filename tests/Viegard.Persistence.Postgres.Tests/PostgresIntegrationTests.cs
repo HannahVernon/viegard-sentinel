@@ -57,7 +57,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         // Clean slate for queue tables between runs.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE queue_messages, queue_counters, retention_settings, policy_threshold_settings, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE actions, queue_messages, queue_counters, retention_settings, policy_threshold_settings, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -1221,6 +1221,33 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.True(deleted.Succeeded);
         Assert.Null(await store.GetAsync(first.Id));
         Assert.Null(await store.GetCredentialCiphertextAsync(first.Id));
+    }
+
+    [PostgresFact]
+    public async Task Action_store_round_trips_results_json()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var resolver = new ReferenceResolver(factory);
+        var store = new PostgresActionStore(factory, resolver);
+        var action = new ActionRecord
+        {
+            Id = ViegardId.New(),
+            DecisionId = ViegardId.New(),
+            ProviderId = "mikrotik",
+            OperationId = "ban-ip",
+            ParametersJson = """{"ip":"203.0.113.10","timeout":"5m"}""",
+            RollbackJson = """{"ip":"203.0.113.10"}""",
+            ResultsJson = """[{"routerId":"018f6ad8-98e8-7b71-a62c-2f41829f2e41","routerName":"router-a","attempts":1,"status":"applied","detail":"Ban applied.","lastAttemptAt":"2026-09-16T20:45:00+00:00"}]""",
+            Status = ActionStatus.Succeeded,
+            RequestedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+        };
+
+        await store.UpsertAsync(action);
+
+        var restored = await store.GetAsync(action.Id);
+        Assert.NotNull(restored);
+        Assert.Equal(action.ResultsJson, restored!.ResultsJson);
     }
 
     [PostgresFact]

@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Viegard.AdminApi/Viegard.AdminApi.csproj" />
+    <Project Path="src/Viegard.Actions.MikroTik/Viegard.Actions.MikroTik.csproj" />
     <Project Path="src/Viegard.Application/Viegard.Application.csproj" />
     <Project Path="src/Viegard.Domain/Viegard.Domain.csproj" />
     <Project Path="src/Viegard.Persistence.Postgres/Viegard.Persistence.Postgres.csproj" />

@@ -102,6 +102,10 @@ public static class ServiceCollectionExtensions
             new PostgresWorkQueue<ClassificationWorkItem>(sp.GetRequiredService<NpgsqlDataSource>(), "classifications"));
         services.AddSingleton<IQueueStatsSource>(sp =>
             (PostgresWorkQueue<ClassificationWorkItem>)sp.GetRequiredService<IWorkQueue<ClassificationWorkItem>>());
+        services.AddSingleton<IWorkQueue<ActionWorkItem>>(sp =>
+            new PostgresWorkQueue<ActionWorkItem>(sp.GetRequiredService<NpgsqlDataSource>(), "actions"));
+        services.AddSingleton<IQueueStatsSource>(sp =>
+            (PostgresWorkQueue<ActionWorkItem>)sp.GetRequiredService<IWorkQueue<ActionWorkItem>>());
         services.AddSingleton<ICommandQueue>(sp =>
             new PostgresCommandQueue(sp.GetRequiredService<NpgsqlDataSource>()));
 

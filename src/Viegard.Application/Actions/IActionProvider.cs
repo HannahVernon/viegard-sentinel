@@ -43,3 +43,13 @@ public interface IActionProvider
 
     Task<ActionRecord> ExecuteAsync(ActionRequest request, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Optional extension for providers that resume an existing action record.
+/// The base provider contract remains closed around ActionRequest; workers
+/// use this only when a provider needs persisted execution state.
+/// </summary>
+public interface IResumableActionProvider : IActionProvider
+{
+    Task<ActionRecord> ExecuteAsync(ActionRecord actionRecord, CancellationToken cancellationToken = default);
+}

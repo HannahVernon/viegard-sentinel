@@ -173,6 +173,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasOne<ActionProviderRow>().WithMany().HasForeignKey(e => e.ProviderId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.ParametersJson).HasColumnType("jsonb");
             entity.Property(e => e.RollbackJson).HasColumnType("jsonb");
+            entity.Property(e => e.ResultsJson).HasColumnType("text");
         });
 
         modelBuilder.Entity<AuditRecordRow>(entity =>

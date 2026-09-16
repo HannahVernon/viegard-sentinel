@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using Viegard.AdminApi.Configuration;
+using Viegard.Application.Configuration;
 
 namespace Viegard.AdminApi.Tests;
 
@@ -12,8 +12,8 @@ public sealed class RouterConnectivityTesterTests
         using var certificate = CreateCertificate();
         var fingerprint = RouterCertificateFingerprint.Sha256LowerHex(certificate);
 
-        Assert.True(RouterConnectivityTester.CertificatePinMatches(certificate, fingerprint));
-        Assert.True(RouterConnectivityTester.CertificatePinMatches(certificate, fingerprint.ToUpperInvariant()));
+        Assert.True(RouterTransportHandlerFactory.CertificatePinMatches(certificate, fingerprint));
+        Assert.True(RouterTransportHandlerFactory.CertificatePinMatches(certificate, fingerprint.ToUpperInvariant()));
     }
 
     [Fact]
@@ -22,9 +22,9 @@ public sealed class RouterConnectivityTesterTests
         using var certificate = CreateCertificate();
         var different = new string('a', 64);
 
-        Assert.False(RouterConnectivityTester.CertificatePinMatches(null, different));
-        Assert.False(RouterConnectivityTester.CertificatePinMatches(certificate, null));
-        Assert.False(RouterConnectivityTester.CertificatePinMatches(certificate, different));
+        Assert.False(RouterTransportHandlerFactory.CertificatePinMatches(null, different));
+        Assert.False(RouterTransportHandlerFactory.CertificatePinMatches(certificate, null));
+        Assert.False(RouterTransportHandlerFactory.CertificatePinMatches(certificate, different));
     }
 
     private static X509Certificate2 CreateCertificate()

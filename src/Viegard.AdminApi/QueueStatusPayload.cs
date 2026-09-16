@@ -31,6 +31,9 @@ public static class QueueStatusPayload
         string Light,
         string LightCss,
         string QueuesReported,
+        string Version,
+        string VersionTitle,
+        string StartedAge,
         string Reasons,
         bool Green);
 
@@ -45,14 +48,16 @@ public static class QueueStatusPayload
 
     public static Payload Build(
         IReadOnlyList<QueueTelemetrySnapshot> snapshots,
+        IReadOnlyList<InstanceRegistration> registrations,
         DateTimeOffset now,
         Func<DateTimeOffset, string> format,
         RetentionSettings? retentionSettings)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
+        ArgumentNullException.ThrowIfNull(registrations);
         ArgumentNullException.ThrowIfNull(format);
 
-        var view = QueueStatusView.Build(snapshots, now);
+        var view = QueueStatusView.Build(snapshots, registrations, now);
         var (css, label) = QueueStatusBadge.ToBadge(view.WorstLight);
         var rows = view.Queues
             .Select(row =>
@@ -79,10 +84,13 @@ public static class QueueStatusPayload
         var instances = view.Instances
             .Select(row => new InstanceRowPayload(
                 Key: row.InstanceId,
-                LastCaptured: format(row.LastCapturedAt),
-                Light: row.Light.ToString(),
-                LightCss: AdminText.LightCss(row.Light),
+                LastCaptured: row.LastCapturedAt is { } capturedAt ? format(capturedAt) : "-",
+                Light: row.Light?.ToString() ?? "-",
+                LightCss: row.Light is { } light ? AdminText.LightCss(light) : "badge",
                 QueuesReported: row.QueuesReported,
+                Version: row.VersionLabel,
+                VersionTitle: row.VersionTitle,
+                StartedAge: row.StartedAt is { } startedAt ? AdminText.Age(now - startedAt) : "-",
                 Reasons: string.Join(" ", row.Reasons),
                 Green: row.Green))
             .ToList();

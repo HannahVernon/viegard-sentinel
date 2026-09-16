@@ -78,6 +78,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAdminSessionStore, PostgresAdminSessionStore>();
         services.AddSingleton<IAuditLedger, PostgresAuditLedger>();
         services.AddSingleton<IQueueTelemetryStore, PostgresQueueTelemetryStore>();
+        services.AddSingleton<IInstanceRegistryStore, PostgresInstanceRegistryStore>();
         services.AddSingleton<ISourceOffsetStore, PostgresSourceOffsetStore>();
         services.AddSingleton<ICustomSignatureStore, PostgresCustomSignatureStore>();
         services.AddSingleton<IIngestionFilterStore, PostgresIngestionFilterStore>();

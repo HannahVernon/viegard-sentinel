@@ -193,7 +193,9 @@ resolve_deploy_script() {
 }
 
 tail_detail() {
-    local text="$1" length
+    local text="$1" cleaned length
+    cleaned="$(printf '%s' "$text" | sed "s/$(printf '\033')\[[0-9;]*[A-Za-z]//g")"
+    text="$cleaned"
     length="${#text}"
     if [ "$length" -le "$DETAIL_LIMIT" ]; then
         printf '%s' "$text"

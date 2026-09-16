@@ -251,6 +251,28 @@ internal static class Mapping
         CapturedAt = row.CapturedAt,
     };
 
+    public static InstanceRegistrationRow ToRow(this InstanceRegistration registration) => new()
+    {
+        InstanceId = registration.InstanceId,
+        Version = registration.Version,
+        CommitSha = registration.CommitSha,
+        Roles = registration.Roles,
+        HostName = registration.HostName,
+        StartedAt = Utc(registration.StartedAt),
+        ReportedAt = Utc(registration.ReportedAt),
+    };
+
+    public static InstanceRegistration ToDomain(this InstanceRegistrationRow row) => new()
+    {
+        InstanceId = row.InstanceId,
+        Version = row.Version,
+        CommitSha = row.CommitSha,
+        Roles = row.Roles,
+        HostName = row.HostName,
+        StartedAt = row.StartedAt,
+        ReportedAt = row.ReportedAt,
+    };
+
     public static AdminUserRow ToRow(this AdminUser user) => new()
     {
         Id = user.Id,

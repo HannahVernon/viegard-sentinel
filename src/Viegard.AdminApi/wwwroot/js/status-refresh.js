@@ -93,12 +93,17 @@
                     light.textContent = row.light;
                 }
 
-                ["queuesReported", "lastCaptured"].forEach(name => {
+                ["queuesReported", "lastCaptured", "version", "started"].forEach(name => {
                     const cell = tr.querySelector('[data-inst-cell="' + name + '"]');
                     if (cell && row[name] !== undefined && row[name] !== null) {
                         cell.textContent = String(row[name]);
                     }
                 });
+
+                const version = tr.querySelector('[data-inst-cell="version"]');
+                if (version && typeof row.versionTitle === "string") {
+                    version.setAttribute("title", row.versionTitle);
+                }
             }
 
             const reasonsRow = reasonsByKey.get(row.key);

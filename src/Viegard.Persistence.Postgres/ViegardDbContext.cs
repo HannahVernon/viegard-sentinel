@@ -39,6 +39,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<QueueTelemetryRow> QueueTelemetry => Set<QueueTelemetryRow>();
 
+    public DbSet<InstanceRegistrationRow> InstanceRegistry => Set<InstanceRegistrationRow>();
+
     public DbSet<SourceOffsetRow> SourceOffsets => Set<SourceOffsetRow>();
 
     public DbSet<CustomSignatureRow> CustomSignatures => Set<CustomSignatureRow>();
@@ -190,6 +192,12 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
         {
             entity.ToTable("queue_telemetry");
             entity.HasKey(e => new { e.InstanceId, e.QueueName });
+        });
+
+        modelBuilder.Entity<InstanceRegistrationRow>(entity =>
+        {
+            entity.ToTable("instance_registry");
+            entity.HasKey(e => e.InstanceId);
         });
 
         modelBuilder.Entity<SourceOffsetRow>(entity =>

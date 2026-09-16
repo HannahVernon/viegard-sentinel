@@ -1,6 +1,7 @@
 ﻿@page "/queues"
 @attribute [Authorize]
 @inject IQueueTelemetryStore QueueTelemetry
+@inject IInstanceRegistryStore InstanceRegistry
 @inject IRetentionSettingsStore RetentionSettingsStore
 @inject UserDisplay Display
 
@@ -32,14 +33,14 @@
                 <caption>Queues are shared across all instances; values come from the freshest report.</caption>
                 <thead>
                     <tr>
-                        <th>Queue</th>
-                        <th>Light</th>
-                        <th>Depth</th>
-                        <th>In-flight</th>
-                        <th>Oldest pending age</th>
-                        <th>Dead letters</th>
-                        <th>Totals</th>
-                        <th>Captured</th>
+                        <SortHeader Title="Queue" SortKey="@QueueStatusSortKeys.QueueName" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/queues" />
+                        <SortHeader Title="Light" SortKey="@QueueStatusSortKeys.QueueLight" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
+                        <SortHeader Title="Depth" SortKey="@QueueStatusSortKeys.QueueDepth" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
+                        <SortHeader Title="In-flight" SortKey="@QueueStatusSortKeys.QueueInFlight" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
+                        <SortHeader Title="Oldest pending age" SortKey="@QueueStatusSortKeys.QueueOldestAge" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
+                        <SortHeader Title="Dead letters" SortKey="@QueueStatusSortKeys.QueueDeadLetters" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
+                        <SortHeader Title="Totals" SortKey="@QueueStatusSortKeys.QueueTotals" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
+                        <SortHeader Title="Captured" SortKey="@QueueStatusSortKeys.QueueCaptured" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
                     </tr>
                 </thead>
                 <tbody>
@@ -63,17 +64,22 @@
                 </tbody>
             </table>
         </section>
+    }
 
+    @if (_view.Instances.Count > 0)
+    {
         <section class="card">
             <h2>Instances</h2>
             <table class="data-table" data-live-instances>
                 <caption>Instances report telemetry every 10 seconds; a stale row means that instance may be down.</caption>
                 <thead>
                     <tr>
-                        <th>Instance</th>
-                        <th>Queues reported</th>
-                        <th>Last captured</th>
-                        <th>Staleness light</th>
+                        <SortHeader Title="Instance" SortKey="@QueueStatusSortKeys.InstanceId" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/queues" />
+                        <SortHeader Title="Version" SortKey="@QueueStatusSortKeys.InstanceVersion" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
+                        <SortHeader Title="Started" SortKey="@QueueStatusSortKeys.InstanceStarted" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
+                        <SortHeader Title="Queues reported" SortKey="@QueueStatusSortKeys.InstanceQueues" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
+                        <SortHeader Title="Last captured" SortKey="@QueueStatusSortKeys.InstanceLastCaptured" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
+                        <SortHeader Title="Staleness light" SortKey="@QueueStatusSortKeys.InstanceLight" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
                     </tr>
                 </thead>
                 <tbody>
@@ -81,12 +87,14 @@
                     {
                         <tr data-inst="@row.InstanceId">
                             <td>@row.InstanceId</td>
+                            <td data-inst-cell="version" title="@row.VersionTitle">@row.VersionLabel</td>
+                            <td data-inst-cell="started">@StartedAge(row)</td>
                             <td data-inst-cell="queuesReported">@row.QueuesReported</td>
-                            <td data-inst-cell="lastCaptured">@Display.Format(row.LastCapturedAt)</td>
-                            <td><span data-inst-cell="light" class="@AdminText.LightCss(row.Light)">@row.Light</span></td>
+                            <td data-inst-cell="lastCaptured">@LastCaptured(row)</td>
+                            <td><span data-inst-cell="light" class="@InstanceLightCss(row)">@InstanceLightText(row)</span></td>
                         </tr>
                         <tr class="details-row" data-inst-reasons="@row.InstanceId" hidden="@row.Green">
-                            <td colspan="4">@string.Join(" ", row.Reasons)</td>
+                            <td colspan="6">@string.Join(" ", row.Reasons)</td>
                         </tr>
                     }
                 </tbody>
@@ -100,6 +108,14 @@
     private RetentionSettings? _retentionSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _retentionCounts = RetentionSettings.EmptyCounts();
     private DateTimeOffset _now;
+    private string? _sortKey;
+    private SortDirection? _sortDirection;
+
+    [SupplyParameterFromQuery(Name = "sort")]
+    public string? Sort { get; set; }
+
+    [SupplyParameterFromQuery(Name = "dir")]
+    public string? Dir { get; set; }
 
     private string RetentionState => _retentionSettings is null
         ? "Not seeded"
@@ -124,7 +140,11 @@
         _retentionSettings = await RetentionSettingsStore.GetAsync().ConfigureAwait(false);
         _retentionCounts = _retentionSettings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
         var snapshots = await QueueTelemetry.GetLatestAsync().ConfigureAwait(false);
-        _view = QueueStatusView.Build(snapshots, _now);
+        var registrations = await InstanceRegistry.ListAsync().ConfigureAwait(false);
+        var sort = QueueStatusSortKeys.Parse(Sort, Dir);
+        _sortKey = sort?.Key;
+        _sortDirection = sort?.Direction;
+        _view = QueueStatusView.Build(snapshots, registrations, _now, sort);
     }
 
     private string OldestAge(QueueTelemetrySnapshot snapshot) => snapshot.OldestPendingEnqueuedAt is null
@@ -138,4 +158,16 @@
 
     private string CapturedBy(QueueTelemetrySnapshot snapshot) =>
         $"{Display.Format(snapshot.CapturedAt)} by {snapshot.InstanceId}";
+
+    private string LastCaptured(QueueStatusView.InstanceRow row) =>
+        row.LastCapturedAt is { } capturedAt ? Display.Format(capturedAt) : "-";
+
+    private string StartedAge(QueueStatusView.InstanceRow row) =>
+        row.StartedAt is { } startedAt ? AdminText.Age(_now - startedAt) : "-";
+
+    private static string InstanceLightText(QueueStatusView.InstanceRow row) =>
+        row.Light?.ToString() ?? "-";
+
+    private static string InstanceLightCss(QueueStatusView.InstanceRow row) =>
+        row.Light is { } light ? AdminText.LightCss(light) : "badge";
 }

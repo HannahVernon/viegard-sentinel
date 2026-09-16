@@ -7,10 +7,16 @@
 
 <PageTitle>Viegard queues</PageTitle>
 
-<main class="admin-panel">
+<main class="admin-panel wide page-layout">
+    <nav class="page-index" aria-label="Dashboard sections">
+        <a class="index-default-link" href="/queues#retention">Retention</a>
+        <a href="/queues#queues">Queues</a>
+        <a href="/queues#instances">Instances</a>
+    </nav>
+    <div class="page-content">
     <h1>Dashboard/Queues</h1>
 
-    <section class="card">
+    <section id="retention" class="card indexed index-default">
         <h2>Retention</h2>
         <dl class="detail-list">
             <dt>State</dt><dd>@RetentionState</dd>
@@ -27,7 +33,7 @@
     }
     else
     {
-        <section class="card">
+        <section id="queues" class="card indexed">
             <h2>Queues</h2>
             <table class="data-table" data-live-queues>
                 <caption>Queues are shared across all instances; values come from the freshest report.</caption>
@@ -68,7 +74,7 @@
 
     @if (_view.Instances.Count > 0)
     {
-        <section class="card">
+        <section id="instances" class="card indexed">
             <h2>Instances</h2>
             <table class="data-table" data-live-instances>
                 <caption>Instances report telemetry every 10 seconds; a stale row means that instance may be down.</caption>
@@ -101,6 +107,7 @@
             </table>
         </section>
     }
+    </div>
 </main>
 
 @code {

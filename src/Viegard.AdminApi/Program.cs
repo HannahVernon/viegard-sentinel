@@ -198,6 +198,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IAdminSessionStore, InMemoryAdminSessionStore>();
         builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
+        builder.Services.AddSingleton<IInstanceRegistryStore, InMemoryInstanceRegistryStore>();
         builder.Services.AddSingleton<ISourceOffsetStore, InMemorySourceOffsetStore>();
         builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
         builder.Services.AddSingleton<IIngestionFilterStore, InMemoryIngestionFilterStore>();
@@ -220,6 +221,8 @@ switch (persistenceProvider)
         throw new InvalidOperationException(
             $"Unknown persistence provider '{persistenceProvider}'.  Supported: inmemory, postgres.");
 }
+
+builder.Services.AddHostedService<AdminInstanceRegistrationService>();
 
 var app = builder.Build();
 
@@ -325,14 +328,16 @@ app.MapGet("/healthz", () => Results.Ok(new { status = "healthy", service = "vie
     .AllowAnonymous();
 app.MapGet("/status/queues", async (
     IQueueTelemetryStore telemetry,
+    IInstanceRegistryStore registry,
     IRetentionSettingsStore retentionSettings,
     UserDisplay display,
     CancellationToken cancellationToken) =>
 {
     await display.InitializeAsync().ConfigureAwait(false);
     var snapshots = await telemetry.GetLatestAsync(cancellationToken).ConfigureAwait(false);
+    var registrations = await registry.ListAsync(cancellationToken).ConfigureAwait(false);
     var settings = await retentionSettings.GetAsync(cancellationToken).ConfigureAwait(false);
-    var payload = QueueStatusPayload.Build(snapshots, DateTimeOffset.UtcNow, display.Format, settings);
+    var payload = QueueStatusPayload.Build(snapshots, registrations, DateTimeOffset.UtcNow, display.Format, settings);
     return Results.Json(payload);
 }).RequireAuthorization();
 app.MapAdminAuthEndpoints();

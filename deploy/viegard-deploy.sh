@@ -11,8 +11,9 @@
 #              is applied AFTER it, so any setting you declare in your own
 #              file wins.  Re-running configure regenerates the whole file:
 #              pass the complete set of options you want each time.
-#   upgrade    Pull the configured branch and rebuild/restart only when new
-#              commits arrived (use --force to rebuild regardless).
+#   upgrade    Pull the configured branch and rebuild/restart when the
+#              deployed commit marker differs from the clone HEAD (use
+#              --force to rebuild regardless).
 #   install-agent
 #              Install the privileged host-side agent that polls fixed-verb
 #              upgrade requests from PostgreSQL through the db container.
@@ -100,6 +101,44 @@ usage() { awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0";
 log()   { printf '\033[1;36m[viegard]\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m[viegard]\033[0m %s\n' "$*" >&2; }
 die()   { printf '\033[1;31m[viegard]\033[0m %s\n' "$*" >&2; exit 1; }
+
+deployed_commit_file() { printf '%s/.deployed-commit' "$DIR"; }
+
+short_commit() {
+    local commit="$1"
+    if [ -z "$commit" ]; then
+        printf 'unknown'
+    else
+        printf '%.9s' "$commit"
+    fi
+}
+
+read_deployed_commit() {
+    local marker
+    marker="$(deployed_commit_file)"
+    if [ ! -f "$marker" ]; then
+        return 0
+    fi
+
+    tr -d '[:space:]' < "$marker"
+}
+
+write_deployed_commit_marker() {
+    local marker head
+    marker="$(deployed_commit_file)"
+    head="$(git -C "$DIR" rev-parse HEAD)"
+    printf '%s\n' "$head" > "$marker"
+    log "Recorded deployed commit $(short_commit "$head") in $marker."
+}
+
+deployed_commit_label() {
+    local commit="$1"
+    if [ -z "$commit" ]; then
+        printf 'unknown - predates commit tracking'
+    else
+        short_commit "$commit"
+    fi
+}
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -343,6 +382,7 @@ cmd_install() {
         generate_compose_fragment
     fi
     start_stack
+    write_deployed_commit_marker
     verify_stack || true
     post_install_checklist
     log "Install complete.  Deployment root: $DIR (branch $BRANCH)."
@@ -478,7 +518,7 @@ cmd_configure() {
 cmd_upgrade() {
     require_root
     [ -d "$DIR/.git" ] || die "$DIR is not a Viegard clone; run install first."
-    local d current before after; d="$(compose_dir)"
+    local d current before after deployed marker_matches; d="$(compose_dir)"
 
     current="$(git -C "$DIR" branch --show-current)"
     if [ "$current" != "$BRANCH" ]; then
@@ -491,9 +531,13 @@ cmd_upgrade() {
     git -C "$DIR" fetch origin
     git -C "$DIR" pull --ff-only origin "$BRANCH"
     after="$(git -C "$DIR" rev-parse HEAD)"
+    deployed="$(read_deployed_commit)"
 
-    if [ "$before" = "$after" ] && [ "$FORCE" -eq 0 ]; then
-        log "Already up to date on '$BRANCH' ($(git -C "$DIR" rev-parse --short HEAD)); nothing to do.  Use --force to rebuild anyway."
+    marker_matches=0
+    [ -n "$deployed" ] && [ "$deployed" = "$after" ] && marker_matches=1
+
+    if [ "$marker_matches" -eq 1 ] && [ "$FORCE" -eq 0 ]; then
+        log "Already up to date on '$BRANCH'; clone at $(short_commit "$after"), deployed binary at $(deployed_commit_label "$deployed"); nothing to do.  Use --force to rebuild anyway."
         return 0
     fi
 
@@ -502,9 +546,18 @@ cmd_upgrade() {
         git -C "$DIR" --no-pager log --oneline "$before..$after" | sed 's/^/    /'
     fi
 
+    if [ "$FORCE" -eq 1 ]; then
+        log "Force requested; clone at $(short_commit "$after"), deployed binary at $(deployed_commit_label "$deployed"); rebuilding."
+    elif [ -z "$deployed" ]; then
+        log "Clone at $(short_commit "$after"), deployed binary unknown - predates commit tracking; rebuilding."
+    else
+        log "Clone at $(short_commit "$after"), deployed binary at $(short_commit "$deployed"); rebuilding."
+    fi
+
     confirm "Rebuild and restart the stack now (migrations apply automatically)?"
     (cd "$d" && docker compose up -d --build)
     verify_stack
+    write_deployed_commit_marker
     log "Upgrade complete on branch '$BRANCH' at $(git -C "$DIR" rev-parse --short HEAD)."
 }
 
@@ -617,8 +670,15 @@ cmd_install_agent() {
 
 cmd_status() {
     [ -d "$DIR/.git" ] || die "$DIR is not a Viegard clone."
-    local d; d="$(compose_dir)"
+    local d clone_commit deployed_commit; d="$(compose_dir)"
     log "Branch: $(git -C "$DIR" branch --show-current) @ $(git -C "$DIR" rev-parse --short HEAD)"
+    clone_commit="$(git -C "$DIR" rev-parse HEAD)"
+    deployed_commit="$(read_deployed_commit)"
+    log "Clone commit: $(short_commit "$clone_commit")"
+    log "Deployed commit: $(deployed_commit_label "$deployed_commit")"
+    if [ -n "$deployed_commit" ] && [ "$deployed_commit" != "$clone_commit" ]; then
+        warn "Clone HEAD and deployed binary differ; run upgrade to rebuild the deployed services."
+    fi
     (cd "$d" && docker compose ps) || true
     if admin_alive; then
         log "Admin liveness: OK"

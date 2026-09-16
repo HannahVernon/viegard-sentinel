@@ -1,62 +1,48 @@
 using System.Reflection;
-using Microsoft.Extensions.Options;
 using Viegard.Application.Telemetry;
 using Viegard.Domain.Health;
-using Viegard.PipelineHost.Configuration;
 
-namespace Viegard.PipelineHost.Workers;
+namespace Viegard.AdminApi;
 
-/// <summary>
-/// Logs the host topology at startup and emits a periodic heartbeat.
-/// </summary>
-public sealed class PipelineStartupService(
-    IOptions<ViegardHostOptions> options,
+public sealed class AdminInstanceRegistrationService(
     IInstanceRegistryStore registryStore,
-    ILogger<PipelineStartupService> logger) : BackgroundService
+    ILogger<AdminInstanceRegistrationService> logger) : BackgroundService
 {
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(30);
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
     private readonly BuildVersionInfo _buildVersion =
-        BuildVersion.FromAssembly(Assembly.GetEntryAssembly() ?? typeof(PipelineStartupService).Assembly);
+        BuildVersion.FromAssembly(Assembly.GetEntryAssembly() ?? typeof(AdminInstanceRegistrationService).Assembly);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var host = options.Value;
-        logger.LogInformation(
-            "Viegard pipeline host '{InstanceId}' starting with roles: {Roles}.",
-            host.EffectiveInstanceId,
-            string.Join(", ", host.Roles));
-
-        await UpsertRegistrationAsync(host, stoppingToken).ConfigureAwait(false);
+        var instanceId = "admin-" + Environment.MachineName.ToLowerInvariant();
+        await UpsertRegistrationAsync(instanceId, stoppingToken).ConfigureAwait(false);
 
         using var timer = new PeriodicTimer(HeartbeatInterval);
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             {
-                logger.LogDebug("Heartbeat from pipeline host '{InstanceId}'.", host.EffectiveInstanceId);
-                await UpsertRegistrationAsync(host, stoppingToken).ConfigureAwait(false);
+                await UpsertRegistrationAsync(instanceId, stoppingToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
         {
             // Normal shutdown.
         }
-
-        logger.LogInformation("Viegard pipeline host '{InstanceId}' stopping.", host.EffectiveInstanceId);
     }
 
-    private async Task UpsertRegistrationAsync(ViegardHostOptions host, CancellationToken cancellationToken)
+    private async Task UpsertRegistrationAsync(string instanceId, CancellationToken cancellationToken)
     {
         try
         {
             await registryStore.UpsertAsync(
                 new InstanceRegistration
                 {
-                    InstanceId = host.EffectiveInstanceId,
+                    InstanceId = instanceId,
                     Version = _buildVersion.InformationalVersion,
                     CommitSha = _buildVersion.CommitSha,
-                    Roles = string.Join(",", host.Roles),
+                    Roles = "admin",
                     HostName = Environment.MachineName,
                     StartedAt = _startedAt,
                     ReportedAt = DateTimeOffset.UtcNow,
@@ -71,8 +57,8 @@ public sealed class PipelineStartupService(
         {
             logger.LogWarning(
                 ex,
-                "Could not register pipeline host instance '{InstanceId}'; retrying on the next heartbeat.",
-                host.EffectiveInstanceId);
+                "Could not register admin instance '{InstanceId}'; retrying on the next heartbeat.",
+                instanceId);
         }
     }
 }

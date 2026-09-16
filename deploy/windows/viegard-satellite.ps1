@@ -120,6 +120,7 @@ $script:ClientProfile = $null
 $script:ServiceName = $null
 $script:ServiceDisplayName = $null
 $script:ServiceDescription = $null
+$script:DeployedCommitFileName = ".deployed-commit"
 
 foreach ($providedName in $PSBoundParameters.Keys) {
     $script:ProvidedParameters[$providedName] = $true
@@ -1039,6 +1040,80 @@ function Get-GitOutput {
     }
 }
 
+function Get-ShortCommit {
+    param(
+        [string]$Commit
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Commit)) {
+        return "unknown"
+    }
+
+    if ($Commit.Length -le 9) {
+        return $Commit
+    }
+
+    return $Commit.Substring(0, 9)
+}
+
+function Get-DeployedCommitPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AppDirectory
+    )
+
+    $markerPath = Join-Path $AppDirectory $script:DeployedCommitFileName
+    return [System.IO.Path]::GetFullPath($markerPath)
+}
+
+function Get-DeployedCommitMarker {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AppDirectory
+    )
+
+    $markerPath = Get-DeployedCommitPath -AppDirectory $AppDirectory
+    if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        return ([System.IO.File]::ReadAllText($markerPath)).Trim()
+    }
+    catch {
+        Write-WarnLine "Could not read deployed commit marker: $markerPath"
+        return $null
+    }
+}
+
+function Get-DeployedCommitLabel {
+    param(
+        [string]$Commit
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Commit)) {
+        return "unknown - predates commit tracking"
+    }
+
+    return (Get-ShortCommit -Commit $Commit)
+}
+
+function Write-DeployedCommitMarker {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot,
+
+        [Parameter(Mandatory = $true)]
+        [string]$AppDirectory
+    )
+
+    $headCommit = (@(Get-GitOutput -RepositoryRoot $RepositoryRoot -ArgumentList @("rev-parse", "HEAD")))[0]
+    $markerPath = Get-DeployedCommitPath -AppDirectory $AppDirectory
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($markerPath, ($headCommit + [Environment]::NewLine), $encoding)
+    Write-InfoLine ("Recorded deployed commit " + (Get-ShortCommit -Commit $headCommit) + " in " + $markerPath + ".")
+}
+
 function Invoke-PipelinePublish {
     param(
         [Parameter(Mandatory = $true)]
@@ -1079,6 +1154,8 @@ function Invoke-PipelinePublish {
     if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) {
         Stop-WithMessage "Publish completed, but the service executable was not found: $exePath"
     }
+
+    Write-DeployedCommitMarker -RepositoryRoot $RepositoryRoot -AppDirectory $AppDirectory
 }
 
 function New-SatelliteConfigurationJson {
@@ -1774,8 +1851,13 @@ function Invoke-Upgrade {
     Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("pull", "--ff-only") | Out-Null
     $afterCommit = (@(Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("rev-parse", "HEAD")))[0]
 
-    if ($beforeCommit -eq $afterCommit -and (-not $Force.IsPresent)) {
-        Write-InfoLine "Already up to date at $($afterCommit.Substring(0, 7)); nothing to do.  Use -Force to republish anyway."
+    $effectiveInstallDir = Get-EffectiveInstallDir
+    $appDirectory = Join-Path $effectiveInstallDir "app"
+    $deployedCommit = Get-DeployedCommitMarker -AppDirectory $appDirectory
+    $deployedMatchesClone = (-not [string]::IsNullOrWhiteSpace($deployedCommit)) -and $deployedCommit.Equals($afterCommit, [StringComparison]::OrdinalIgnoreCase)
+
+    if ($deployedMatchesClone -and (-not $Force.IsPresent)) {
+        Write-InfoLine ("Already up to date; clone at " + (Get-ShortCommit -Commit $afterCommit) + ", deployed binary at " + (Get-DeployedCommitLabel -Commit $deployedCommit) + "; nothing to do.  Use -Force to republish anyway.")
         return
     }
 
@@ -1783,12 +1865,20 @@ function Invoke-Upgrade {
         Write-InfoLine ("Updated " + $beforeCommit.Substring(0, 7) + ".." + $afterCommit.Substring(0, 7) + ".")
     }
 
+    if ($Force.IsPresent) {
+        Write-InfoLine ("Force requested; clone at " + (Get-ShortCommit -Commit $afterCommit) + ", deployed binary at " + (Get-DeployedCommitLabel -Commit $deployedCommit) + "; republishing.")
+    }
+    elseif ([string]::IsNullOrWhiteSpace($deployedCommit)) {
+        Write-InfoLine ("Clone at " + (Get-ShortCommit -Commit $afterCommit) + ", deployed binary unknown - predates commit tracking; republishing.")
+    }
+    else {
+        Write-InfoLine ("Clone at " + (Get-ShortCommit -Commit $afterCommit) + ", deployed binary at " + (Get-ShortCommit -Commit $deployedCommit) + "; republishing.")
+    }
+
     if (-not (Read-Confirmation -Prompt "Stop, republish, and restart the $script:ServiceName service now?")) {
         Stop-WithMessage "Aborted before upgrade restart."
     }
 
-    $effectiveInstallDir = Get-EffectiveInstallDir
-    $appDirectory = Join-Path $effectiveInstallDir "app"
     if (-not (Test-Path -LiteralPath (Join-Path $appDirectory "Viegard.PipelineHost.exe") -PathType Leaf)) {
         Stop-WithMessage ("The resolved install directory does not contain an existing satellite deployment: " + $appDirectory + ".  The service image path may be misregistered.  Re-run install with -InstallDir pointing at the original install directory (for example 'C:\Program Files\Viegard Satellite\" + $script:ClientProfile.Name + "').")
     }
@@ -1833,6 +1923,10 @@ function Invoke-Upgrade {
 
 function Write-Status {
     $effectiveInstallDir = Get-EffectiveInstallDir
+    $appDirectory = Join-Path $effectiveInstallDir "app"
+    $repositoryRoot = Get-RepositoryRoot
+    $cloneCommit = (@(Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("rev-parse", "HEAD")))[0]
+    $deployedCommit = Get-DeployedCommitMarker -AppDirectory $appDirectory
     $service = Get-Service -Name $script:ServiceName -ErrorAction SilentlyContinue
     $serviceRecord = Get-ServiceRecord
 
@@ -1855,6 +1949,12 @@ function Write-Status {
     }
 
     Write-InfoLine "Install dir: $effectiveInstallDir"
+    Write-InfoLine ("Clone commit: " + (Get-ShortCommit -Commit $cloneCommit))
+    Write-InfoLine ("Deployed commit: " + (Get-DeployedCommitLabel -Commit $deployedCommit))
+    if ((-not [string]::IsNullOrWhiteSpace($deployedCommit)) -and (-not $deployedCommit.Equals($cloneCommit, [StringComparison]::OrdinalIgnoreCase))) {
+        Write-WarnLine "Clone HEAD and deployed binary differ; run upgrade to republish the service."
+    }
+
     $configuration = Read-ConfigFile -InstallRoot $effectiveInstallDir
     if ($null -eq $configuration) {
         Write-WarnLine "No readable appsettings.Production.json found under the install app directory."

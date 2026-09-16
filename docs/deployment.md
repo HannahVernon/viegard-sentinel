@@ -19,14 +19,14 @@ sudo ./viegard-deploy.sh install
 # installs the D-0034 renewal hook):
 sudo ./viegard-deploy.sh install --domain admin.example.com --email you@example.com
 
-# Upgrade an existing deployment (pulls the tracked branch, rebuilds only
-# when new commits arrived, verifies liveness after):
+# Upgrade an existing deployment (pulls the tracked branch, rebuilds when
+# the deployed commit marker differs from clone HEAD, verifies liveness after):
 sudo ./viegard-deploy.sh upgrade
 
 # Track main instead of dev (main is the future release branch):
 sudo ./viegard-deploy.sh upgrade --branch main
 
-# Health, cert expiry, and latest-backup overview:
+# Health, clone/deployed commits, cert expiry, and latest-backup overview:
 ./viegard-deploy.sh status
 
 # Write the automatable compose settings for you (direct TLS, admin
@@ -38,7 +38,7 @@ sudo ./viegard-deploy.sh configure --domain admin.example.com \
 
 The `configure` command writes `deploy/docker-compose.generated.yml` and points `COMPOSE_FILE` in `deploy/.env` at `docker-compose.generated.yml:docker-compose.yml`.  Compose applies the files left to right with later files winning per setting, so the generated file provides defaults and **your `docker-compose.yml` always has the final word**: re-declare any variable there to override the generated value.  Re-running `configure` regenerates the whole generated file from the options given, so pass the complete set you want each run.  Generated array entries (allowlists, the maintenance role) use high indices (`__9`, `__50`+) so they never collide with the `__0..N` entries your own file declares.  One caution: published port lists are appended across files, so if your `docker-compose.yml` already publishes an admin HTTPS port, keep TLS configuration there and do not pass `--domain` to `configure`.
 
-Safety properties: secrets are generated only when missing and never overwritten or printed; an existing `docker-compose.yml` is never touched; certificate issuance is skipped when the certificate already exists; re-running `install` is safe.  The script does not edit `docker-compose.yml` for you - after a fresh install it prints a checklist of the operator-specific settings (exposure mode, WebAuthn relying party, AllowedSources, retention periods, data sources).
+Safety properties: secrets are generated only when missing and never overwritten or printed; an existing `docker-compose.yml` is never touched; certificate issuance is skipped when the certificate already exists; re-running `install` is safe.  The script writes `$DIR/.deployed-commit` after a successful install or upgrade rebuild.  Upgrade compares that marker with clone HEAD after pull, so an unchanged clone is not enough to skip rebuilding if the deployed binary is older.  `status` reports both values and warns when they differ.  The script does not edit `docker-compose.yml` for you - after a fresh install it prints a checklist of the operator-specific settings (exposure mode, WebAuthn relying party, AllowedSources, retention periods, data sources).
 
 ## Remote upgrades
 
@@ -61,7 +61,7 @@ POLL_SECONDS=30
 
 Do not store database credentials in this file.  The agent runs `psql` through the `viegard-db` container with `docker compose exec`, so it uses the local database container context rather than a separate password.  If your deployment root is not `/opt/viegard-sentinel`, pass `--dir <root>` or `--agent-deploy-dir <root>/deploy` to `install-agent`.
 
-Operators request a host upgrade from **Configuration** -> **Upgrades** after step-up verification.  The page shows recent command history, status, and the captured tail of the script output.  While the upgrade runs, the admin UI may briefly disconnect because its own container is rebuilt and restarted.  If no host agent is installed or running, the command stays Pending; the UI flags Pending requests older than a few minutes so the operator can check the service.
+Operators request a host upgrade from **Configuration** -> **Upgrades** after step-up verification.  The page shows recent command history, status, and the captured tail of the script output with terminal color sequences removed.  While the upgrade runs, the admin UI may briefly disconnect because its own container is rebuilt and restarted.  If no host agent is installed or running, the command stays Pending; the UI flags Pending requests older than a few minutes so the operator can check the service.
 
 Requests are single-flight per target: a new request is rejected while an existing command for that target is Pending or Running.  After any finished command, the store enforces a 10-minute cooldown before accepting another request for the same target.  These checks are enforced in the command store, not only in the UI.
 
@@ -102,6 +102,8 @@ Every Viegard object lives in a dedicated PostgreSQL schema rather than `public`
 The schema is applied via the connection `search_path`, so the migrations and queue SQL are schema-agnostic.  Keeping application objects out of `public` means a `pg_dump --schema=viegard` captures exactly the application state, and other tooling added to the same database later cannot collide with Viegard tables.
 
 Satellite database roles created from the admin UI use the same configured schema.  Create or rotate those roles from `/configuration#satellites`; the generated password is displayed once and is not recoverable later.
+
+Each admin and pipeline instance reports its running build to the `instance_registry` table at startup and on a heartbeat.  The `/queues` Instances table shows the short commit SHA as Version, with the full informational version in the cell title, plus the instance start age.
 
 ### Data retention
 

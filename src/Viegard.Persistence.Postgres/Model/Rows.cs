@@ -237,6 +237,23 @@ public sealed class QueueTelemetryRow
     public DateTimeOffset CapturedAt { get; set; }
 }
 
+public sealed class InstanceRegistrationRow
+{
+    public string InstanceId { get; set; } = string.Empty;
+
+    public string Version { get; set; } = string.Empty;
+
+    public string? CommitSha { get; set; }
+
+    public string Roles { get; set; } = string.Empty;
+
+    public string HostName { get; set; } = string.Empty;
+
+    public DateTimeOffset StartedAt { get; set; }
+
+    public DateTimeOffset ReportedAt { get; set; }
+}
+
 public sealed class SourceOffsetRow
 {
     public string SourceId { get; set; } = string.Empty;

@@ -4,17 +4,19 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using Viegard.Application.Configuration;
 using Viegard.Application.Detection;
+using Viegard.Application.Retention;
 using Viegard.Application.Stores;
+using Viegard.Application.Telemetry;
 using Viegard.Domain;
+using Viegard.Domain.Actions;
 using Viegard.Domain.Admin;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Classifications;
 using Viegard.Domain.Configuration;
 using Viegard.Domain.Decisions;
 using Viegard.Domain.Events;
+using Viegard.Domain.Health;
 using Viegard.Domain.Incidents;
-using Viegard.Application.Retention;
-using Viegard.Domain.Actions;
 using Viegard.Persistence.Postgres.Model;
 using Viegard.Persistence.Postgres.Queues;
 using Viegard.Persistence.Postgres.Stores;
@@ -54,7 +56,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         // Clean slate for queue tables between runs.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE queue_messages, queue_counters, retention_settings, host_upgrade_commands, ingestion_filters");
+            "TRUNCATE queue_messages, queue_counters, retention_settings, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -234,6 +236,36 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var recent = await store.ListRecentAsync("vm", limit: 10);
         Assert.Equal(next.Id, recent[0].Id);
         Assert.Contains(recent, command => command.Id == requested.Id);
+    }
+
+    [PostgresFact]
+    public async Task Instance_registry_store_upserts_and_lists()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresInstanceRegistryStore(factory);
+        var now = new DateTimeOffset(2026, 9, 16, 14, 0, 0, TimeSpan.Zero);
+        var first = InstanceRegistration("pipeline-b", "1.0.0+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", now);
+        var second = InstanceRegistration("pipeline-a", "1.0.0+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", now);
+        var updatedFirst = first with
+        {
+            Version = "1.0.1+cccccccccccccccccccccccccccccccccccccccc",
+            CommitSha = "cccccccccccccccccccccccccccccccccccccccc",
+            Roles = "sources,correlation",
+            ReportedAt = now.AddMinutes(1),
+        };
+
+        await store.UpsertAsync(first);
+        await store.UpsertAsync(second);
+        await store.UpsertAsync(updatedFirst);
+
+        var registrations = await store.ListAsync();
+
+        Assert.Equal(["pipeline-a", "pipeline-b"], registrations.Select(r => r.InstanceId).ToArray());
+        var restored = registrations.Single(r => r.InstanceId == "pipeline-b");
+        Assert.Equal("1.0.1+cccccccccccccccccccccccccccccccccccccccc", restored.Version);
+        Assert.Equal("cccccccccccccccccccccccccccccccccccccccc", restored.CommitSha);
+        Assert.Equal("sources,correlation", restored.Roles);
+        Assert.Equal(now.AddMinutes(1), restored.ReportedAt);
     }
 
     [PostgresFact]
@@ -1265,6 +1297,17 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Rationale = $"{prefix} decision rationale",
         Guardrails = [],
         CreatedAt = createdAt,
+    };
+
+    private static InstanceRegistration InstanceRegistration(string instanceId, string version, DateTimeOffset now) => new()
+    {
+        InstanceId = instanceId,
+        Version = version,
+        CommitSha = BuildVersion.Parse(version).CommitSha,
+        Roles = "sources",
+        HostName = "host.example.com",
+        StartedAt = now.AddHours(-1),
+        ReportedAt = now,
     };
 
     private static AuditRecord AuditRecord(string summary, string? sourceId, DateTimeOffset timestamp) => new()

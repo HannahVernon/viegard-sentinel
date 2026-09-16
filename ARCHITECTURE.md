@@ -95,7 +95,7 @@ Deployable | Container | Responsibility
 `viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, maintenance retention, ingestion-filter seeding, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
 `viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), server-side filtered and sortable read access to incidents, classifications, decisions, and audit; step-up-gated runtime configuration editors for custom signatures, retention periods, ingestion filters, and satellite database roles with one-time password display; custom-signature previews that run the same literal matcher as the pipeline against a bounded recent-event scan without writing audit or config rows; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds no external integration credentials.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
-Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, host upgrade requests, feedback, telemetry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
+Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, host upgrade requests, feedback, telemetry, instance version registry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
 
 ### Host roles and process topology (proposal)
 
@@ -158,8 +158,9 @@ tests/
   fixtures/                    nginx log corpora, representative emails, malformed AI output
 docs/
 deploy/                        Dockerfiles, sanitized compose examples, Linux deploy
-                               script, host upgrade agent unit/script, and Windows
-                               MDaemon satellite installer
+                               script with deployed-commit tracking, host upgrade
+                               agent unit/script, and Windows MDaemon satellite
+                               installer
 ```
 
 Adapters are separate projects so integrations stay optional, independently testable, and additive: new sources/actions never modify the core.  Project count is higher, but each project is small.
@@ -187,6 +188,7 @@ Interface | Metaphor | Contract summary
 `IRetentionStore` | Roost | Batched deletes for configured data-retention targets; unset periods keep rows forever
 `IRetentionSettingsStore` | Roost | Database-owned retention periods plus last-cycle status for admin editing and worker execution
 `IIngestionFilterStore` | Roost | Database-owned source-type/event-kind suppression matrix for normalization-time event emission, with notification-backed refresh and fail-open runtime reads
+`IInstanceRegistryStore` | Roost | Latest build/version registration per running admin or pipeline instance: instance id, full informational version, commit SHA, roles, host name, start time, and report time
 `ISatelliteRoleStore` | Roost | Lists, creates, rotates, and revokes per-satellite PostgreSQL roles behind the admin UI.  Role names use the enforced `viegard_sat_` prefix; generated passwords are shown once and are never audited.
 `IHostUpgradeCommandStore` | Roost | Fixed-verb host upgrade request port with per-target single-flight, 10-minute cooldown, recent history, atomic claim, and completion status.
 `ISecretProvider` | Roost | Named secret retrieval; file-mounted (prod) and user-secrets (dev) implementations
@@ -236,11 +238,11 @@ Both hosts expose health endpoints (liveness + per-component readiness: IMAP con
 
 ### Queue health monitor (traffic-light)
 
-The admin API/GUI displays a `/queues` dashboard with shared Queues rows and per-instance heartbeat rows, so stalled or lagging global queues and stale reporters are immediately visible (D-0012).
+The admin API/GUI displays a `/queues` dashboard with shared Queues rows and per-instance heartbeat rows, so stalled or lagging global queues and stale reporters are immediately visible (D-0012).  Instance rows union queue telemetry with the instance registry (D-0037), so admin-only instances and newly started processes can show their build version and start age even when they do not publish queue statistics.
 
 - **Signals per queue:** depth (absolute and vs. capacity), age of the oldest unacknowledged message (the primary timeliness signal), consumer heartbeat/liveness, throughput trend, recent poison-message count.
 - **Status derivation (thresholds configurable):** green = consumers alive and oldest-message age below the amber threshold; amber = lag or depth above threshold, or recent poison messages; red = no live consumer heartbeat, oldest-message age above the red threshold, or circuit breaker open.
-- **Transport-independent:** pipeline instances publish per-queue telemetry and heartbeats to shared persistence on a short interval; the admin API computes status from those records and treats stale telemetry itself as red (detects a dead pipeline process even when a queue is empty).  For DB-backed queues the admin API can additionally measure depth and oldest-message age directly from the queue table, independent of the producer.
+- **Transport-independent:** pipeline instances publish per-queue telemetry and heartbeats to shared persistence on a short interval; admin and pipeline instances upsert build/version registrations at startup and on heartbeat.  The admin API computes status from those records and treats stale telemetry itself as red (detects a dead pipeline process even when a queue is empty).  For DB-backed queues the admin API can additionally measure depth and oldest-message age directly from the queue table, independent of the producer.
 
 ## Proposed initial dependencies (each requires supply-chain review before install)
 

@@ -172,7 +172,7 @@ Choice | Account | Trade-off
 - Registry environment value `DOTNET_ENVIRONMENT=Production` for the service.
 - ACLs granting the selected service account read access to the MDaemon logs and to the local secret file.  The secrets directory is restricted to SYSTEM, Administrators, and that service account.
 
-After the service starts, check the Viegard admin UI `/queues` page.  The Instances table should show the new instance ID, and the Queues table should continue to show one shared row per queue.
+After the service starts, check the Viegard admin UI `/queues` page.  The Instances table should show the new instance ID, the short build commit in the Version column, the start age, and telemetry freshness.  The Queues table should continue to show one shared row per queue.
 
 Routine MDaemon transcript chatter can be filtered centrally from **Configuration** -> **Ingestion**.  The default filter suppresses `SessionLine` and `Other` before they become normalized events, which reduces queue and correlation load on every upgraded sources-role instance.  Raw observations still record every tailed log payload on the satellite for forensic review.
 
@@ -185,7 +185,7 @@ Set-Location C:\Viegard
 .\deploy\windows\viegard-satellite.ps1 upgrade -Client MDaemon
 ```
 
-The upgrade command detects the repository root from the script path, refuses to run with local git changes, fetches origin, reports incoming commits, runs `git pull --ff-only`, stops the service, republishes the app, preserves `appsettings.Production.json` and `secrets\viegard-db-password`, restarts the service, and verifies startup.  If there are no incoming commits, it exits without republishing unless `-Force` is supplied.
+The upgrade command detects the repository root from the script path, refuses to run with local git changes, fetches origin, reports incoming commits, and runs `git pull --ff-only`.  It then compares the current clone HEAD with `app\.deployed-commit` under the resolved install directory.  It stops the service, republishes the app, preserves `appsettings.Production.json` and `secrets\viegard-db-password`, restarts the service, and verifies startup when the marker is missing, differs from clone HEAD, or `-Force` is supplied.  It exits without republishing only when the marker exists and matches clone HEAD.  Every successful publish writes the clone's full HEAD SHA to `app\.deployed-commit`.
 
 ## Scheduled auto-upgrade
 
@@ -213,7 +213,7 @@ The task action runs from the clone directory and invokes:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File <clone>\deploy\windows\viegard-satellite.ps1 upgrade -Client MDaemon -Yes
 ```
 
-The upgrade command exits quickly when the clone has no new commits, so the scheduled task is safe to leave in place.  Remove it with:
+The upgrade command exits quickly when the deployed marker matches clone HEAD, so the scheduled task is safe to leave in place.  Remove it with:
 
 ```powershell
 .\deploy\windows\viegard-satellite.ps1 unregister-autoupgrade -Client MDaemon
@@ -229,7 +229,7 @@ Status does not change the service:
 .\deploy\windows\viegard-satellite.ps1 status -Client MDaemon
 ```
 
-It reports the service state, uptime when running, install directory, configured instance ID, PostgreSQL target, TCP reachability, and recent matching Application event-log entries.
+It reports the service state, uptime when running, install directory, clone commit, deployed commit marker, configured instance ID, PostgreSQL target, TCP reachability, and recent matching Application event-log entries.  A missing deployed marker is shown as `unknown - predates commit tracking`; a mismatch between clone HEAD and the deployed marker prints an explicit warning.
 
 ## Troubleshooting: service relocated to a wrong directory
 

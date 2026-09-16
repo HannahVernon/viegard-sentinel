@@ -103,7 +103,7 @@ The schema is applied via the connection `search_path`, so the migrations and qu
 
 Satellite database roles created from the admin UI use the same configured schema.  Create or rotate those roles from `/configuration#satellites`; the generated password is displayed once and is not recoverable later.
 
-Each admin and pipeline instance reports its running build to the `instance_registry` table at startup and on a heartbeat.  The `/queues` Instances table shows the short commit SHA as Version, with the full informational version in the cell title, plus the instance start age.
+Each admin and pipeline instance reports its running build to the `instance_registry` table at startup and on a heartbeat.  The `/queues` Instances table shows the short commit SHA as Version, with the full informational version in the cell title, plus the instance start age.  Because the Docker build context excludes `.git`, the deploy script writes the clone HEAD to a `.build-commit` file before each build and the Dockerfiles pass it to the publish as `SourceRevisionId`; a build started outside the script reports an unstamped version instead of a commit.
 
 ### Data retention
 

@@ -1114,6 +1114,32 @@ function Write-DeployedCommitMarker {
     Write-InfoLine ("Recorded deployed commit " + (Get-ShortCommit -Commit $headCommit) + " in " + $markerPath + ".")
 }
 
+function Register-EventLogSource {
+    # The Windows Service host logs Warning and above to the Application
+    # event log using the application name as the source.  Without a
+    # registered source every log write throws, and that secondary failure
+    # can stop the host while hiding the original error.  Registration
+    # requires elevation; install and upgrade already run elevated.
+    $sourceName = "Viegard.PipelineHost"
+    try {
+        if ([System.Diagnostics.EventLog]::SourceExists($sourceName)) {
+            return
+        }
+    }
+    catch [System.Security.SecurityException] {
+        # SourceExists probes every log including Security.  Fall through to
+        # creation, which reports a clear error itself if something is wrong.
+    }
+
+    try {
+        New-EventLog -LogName Application -Source $sourceName -ErrorAction Stop
+        Write-InfoLine "Registered Windows event log source '$sourceName'."
+    }
+    catch {
+        Write-WarnLine ("Could not register event log source '" + $sourceName + "': " + $_.Exception.Message)
+    }
+}
+
 function Invoke-PipelinePublish {
     param(
         [Parameter(Mandatory = $true)]
@@ -1125,6 +1151,7 @@ function Invoke-PipelinePublish {
         [bool]$PreserveConfiguration = $false
     )
 
+    Register-EventLogSource
     New-Directory -Path $AppDirectory
     $configurationPath = Join-Path $AppDirectory "appsettings.Production.json"
     $savedConfiguration = $null
@@ -1204,6 +1231,10 @@ function New-SatelliteConfigurationJson {
                 Schema = $InstallerConfig.PostgresSchema
                 PasswordSecretName = $script:DatabasePasswordSecretName
                 AutoMigrate = $false
+                # Satellite database roles carry CONNECTION LIMIT 16; cap the
+                # Npgsql pool well inside it, leaving headroom for the
+                # LISTEN connection and transient opens.
+                MaxPoolSize = 8
             }
             Sources = $sourcesConfiguration
         }

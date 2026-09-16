@@ -144,6 +144,26 @@ public sealed class IngestionFilterTests
         Assert.False(source.ShouldEmit(MDaemonEvent(MDaemonEventKind.Other)));
     }
 
+    [Fact]
+    public async Task Replayed_observation_is_skipped_without_error_or_duplicate_event()
+    {
+        var filterSource = new IngestionFilterSource(new InMemoryIngestionFilterStore());
+        await filterSource.RefreshAsync();
+        var rawStore = new InMemoryRawObservationStore();
+        var eventStore = new InMemoryEventStore();
+        var queue = new ChannelWorkQueue<Guid>("events");
+        var worker = Worker(rawStore, eventStore, queue, filterSource);
+        var item = Observed(
+            MDaemonLogKind.SmtpIn,
+            "Tue 2026-08-18 00:00:48.993: 05: Accepting SMTP connection from 203.0.113.10:45584 to 192.168.0.10:25");
+
+        await worker.IngestAsync(Source, Normalizer, item, CancellationToken.None);
+        await worker.IngestAsync(Source, Normalizer, item, CancellationToken.None);
+
+        Assert.Single((await eventStore.ListPageAsync(beforeId: null, pageSize: 10)).Items);
+        Assert.Equal(1, (await queue.GetStatsAsync()).TotalEnqueued);
+    }
+
     private static readonly IDataSource Source = new StubDataSource();
     private static readonly IEventNormalizer Normalizer = new MDaemonEventNormalizer(new MDaemonSourceOptions());
 

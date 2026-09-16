@@ -54,6 +54,9 @@ public static class ServiceCollectionExtensions
                 // model and raw SQL are schema-agnostic and follow the
                 // search path.
                 SearchPath = options.Schema,
+                // The pool must fit inside the database role's CONNECTION
+                // LIMIT (satellite roles are connection-limited).
+                MaxPoolSize = options.MaxPoolSize,
             };
 
             return new NpgsqlDataSourceBuilder(builder.ConnectionString).Build();

@@ -116,7 +116,20 @@ public sealed class IngestionWorker(
         ObservedItem item,
         CancellationToken cancellationToken)
     {
-        await rawObservationStore.AddAsync(item.Observation, item.RawPayload, cancellationToken).ConfigureAwait(false);
+        var stored = await rawObservationStore.AddAsync(item.Observation, item.RawPayload, cancellationToken).ConfigureAwait(false);
+        if (!stored)
+        {
+            // Already ingested: an unclean stop between raw storage and the
+            // offset commit makes the source replay data it has already
+            // processed.  The observation, event, and downstream records
+            // exist from the first pass; skip without an error.
+            logger.LogDebug(
+                "Observation {ObservationId} from {SourceId} was already ingested; skipping replayed item.",
+                item.Observation.Id,
+                source.SourceId);
+            return;
+        }
+
         await auditLedger.AppendAsync(new AuditRecord
         {
             Id = ViegardId.New(),

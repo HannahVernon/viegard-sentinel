@@ -327,6 +327,27 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Raw_observation_store_reports_replayed_payload_references()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var resolver = new ReferenceResolver(factory);
+        var store = new PostgresRawObservationStore(factory, resolver);
+        var observation = new RawObservation
+        {
+            Id = Guid.NewGuid(),
+            SourceId = $"it:source-{ViegardId.New():N}",
+            SourceType = "syslog",
+            ObservedAt = DateTimeOffset.UtcNow,
+            PayloadReference = $"it/{Guid.NewGuid():N}",
+        };
+
+        Assert.True(await store.AddAsync(observation, "raw-payload"));
+        Assert.False(await store.AddAsync(observation with { Id = Guid.NewGuid() }, "replayed-payload"));
+
+        Assert.Equal("raw-payload", await store.GetPayloadAsync(observation.PayloadReference));
+    }
+
+    [PostgresFact]
     public async Task Event_store_round_trips_polymorphic_payloads()
     {
         var factory = new TestDbContextFactory(_dataSource!);

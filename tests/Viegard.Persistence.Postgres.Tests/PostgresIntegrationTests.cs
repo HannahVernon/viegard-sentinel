@@ -1279,6 +1279,90 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Action_store_lists_recent_by_provider_in_requested_order()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var resolver = new ReferenceResolver(factory);
+        var store = new PostgresActionStore(factory, resolver);
+        var now = DateTimeOffset.UtcNow;
+        var first = Action("mikrotik", "ban-ip", now.AddMinutes(-2));
+        var second = Action("other", "ban-ip", now.AddMinutes(-1));
+        var third = Action("mikrotik", "remove-ban", now);
+        await store.AddAsync(first);
+        await store.AddAsync(second);
+        await store.AddAsync(third);
+
+        var recent = await store.ListRecentByProviderAsync("mikrotik", limit: 1);
+
+        Assert.Equal(third.Id, Assert.Single(recent).Id);
+        Assert.Empty(await store.ListRecentByProviderAsync("missing-provider", limit: 10));
+    }
+
+    [PostgresFact]
+    public async Task Decision_store_try_review_updates_only_unreviewed_requireapproval()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var resolver = new ReferenceResolver(factory);
+        var store = new PostgresDecisionStore(factory, resolver);
+        var now = DateTimeOffset.UtcNow;
+        var permit = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-permit", DecisionOutcome.Permit, "review", now);
+        var pending = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-pending", DecisionOutcome.RequireApproval, "review", now);
+        var alreadyReviewed = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-reviewed", DecisionOutcome.RequireApproval, "review", now) with
+        {
+            ReviewedBy = "hannah",
+            ReviewedAt = now.AddMinutes(-1),
+            ReviewOutcome = DecisionReviewOutcome.Approved,
+        };
+        await store.AddAsync(permit);
+        await store.AddAsync(pending);
+        await store.AddAsync(alreadyReviewed);
+
+        Assert.Null(await store.TryReviewAsync(permit.Id, DecisionReviewOutcome.Approved, "operator", now));
+        Assert.Null(await store.TryReviewAsync(alreadyReviewed.Id, DecisionReviewOutcome.Rejected, "operator", now));
+
+        var reviewed = await store.TryReviewAsync(pending.Id, DecisionReviewOutcome.Rejected, "operator", now);
+
+        Assert.NotNull(reviewed);
+        Assert.Equal(DecisionReviewOutcome.Rejected, reviewed!.ReviewOutcome);
+        Assert.Equal("operator", reviewed.ReviewedBy);
+        Assert.NotNull(reviewed.ReviewedAt);
+        Assert.InRange(
+            (reviewed.ReviewedAt.Value - now.ToUniversalTime()).Duration(),
+            TimeSpan.Zero,
+            TimeSpan.FromMilliseconds(1));
+    }
+
+    [PostgresFact]
+    public async Task Decision_store_try_review_allows_only_one_concurrent_winner()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var resolver = new ReferenceResolver(factory);
+        var store = new PostgresDecisionStore(factory, resolver);
+        var decision = Decision(
+            ViegardId.New(),
+            $"it-review-race-{ViegardId.New():N}",
+            DecisionOutcome.RequireApproval,
+            "review race",
+            DateTimeOffset.UtcNow);
+        await store.AddAsync(decision);
+
+        var attempts = Enumerable.Range(0, 12)
+            .Select(index => Task.Run(async () =>
+                await store.TryReviewAsync(
+                    decision.Id,
+                    index % 2 == 0 ? DecisionReviewOutcome.Approved : DecisionReviewOutcome.Rejected,
+                    $"operator-{index}",
+                    DateTimeOffset.UtcNow)))
+            .ToArray();
+        var results = await Task.WhenAll(attempts);
+
+        Assert.Single(results, result => result is not null);
+        var saved = await store.GetAsync(decision.Id);
+        Assert.NotNull(saved!.ReviewedAt);
+        Assert.NotNull(saved.ReviewOutcome);
+    }
+
+    [PostgresFact]
     public async Task Retention_store_purges_only_eligible_rows()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -1688,6 +1772,17 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         ProviderId = providerId,
         OperationId = "retention-test",
         Status = (int)ActionStatus.Succeeded,
+        RequestedAt = requestedAt,
+    };
+
+    private static ActionRecord Action(string providerId, string operationId, DateTimeOffset requestedAt) => new()
+    {
+        Id = ViegardId.New(),
+        DecisionId = ViegardId.New(),
+        ProviderId = providerId,
+        OperationId = operationId,
+        ParametersJson = """{"ip":"203.0.113.10","timeout":"5m"}""",
+        Status = ActionStatus.Pending,
         RequestedAt = requestedAt,
     };
 

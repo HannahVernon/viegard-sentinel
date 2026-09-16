@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Viegard.Actions.MikroTik;
 using Viegard.Application.Configuration;
 using Viegard.Application.Audit;
 using Viegard.Application.Policy;
@@ -6,6 +7,7 @@ using Viegard.Application.Retention;
 using Viegard.Domain;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Configuration;
+using Viegard.Domain.Decisions;
 
 namespace Viegard.AdminApi.Auth;
 
@@ -280,6 +282,84 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
+
+    public async ValueTask RecordDecisionReviewAsync(
+        string username,
+        Guid decisionId,
+        DecisionReviewOutcome verdict,
+        string? ip,
+        string? duration,
+        Guid? actionId,
+        string outcome,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin decision review by {username}: {verdict} decision {decisionId:N}.",
+                SourceId = "admin:decisions",
+                DecisionId = decisionId,
+                ActionId = actionId,
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "DecisionReviewed",
+                    Username = username,
+                    DecisionId = decisionId,
+                    Verdict = verdict.ToString(),
+                    Ip = ip,
+                    Duration = duration,
+                    ActionId = actionId,
+                    Outcome = outcome,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin decision review audit record.");
+        }
+    }
+
+    public async ValueTask RecordUnbanAsync(
+        string username,
+        string ip,
+        Guid decisionId,
+        Guid actionId,
+        string outcome,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin ban action by {username}: remove-ban for {ip}.",
+                SourceId = "admin:bans",
+                DecisionId = decisionId,
+                ActionId = actionId,
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "UnbanRequested",
+                    Username = username,
+                    Ip = ip,
+                    DecisionId = decisionId,
+                    ActionId = actionId,
+                    ProviderId = MikroTikBanActionProvider.MikroTikProviderId,
+                    OperationId = MikroTikBanActionProvider.RemoveBanOperationId,
+                    Outcome = outcome,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin unban audit record.");
         }
     }
 }

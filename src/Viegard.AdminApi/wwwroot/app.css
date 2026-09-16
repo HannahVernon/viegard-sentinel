@@ -935,3 +935,25 @@ section {
     width: auto;
     margin: 0;
 }
+
+/* Decision review and bans */
+
+.decision-review-form {
+    margin-top: 1rem;
+}
+
+.decision-review-form select {
+    display: block;
+    width: min(100%, 16rem);
+    padding: 0.55rem 0.65rem;
+    margin-top: 0.3rem;
+    background: var(--bg-raised);
+    color: var(--ink);
+    border: 1px solid var(--panel-border);
+    border-radius: 0.4rem;
+    box-sizing: border-box;
+}
+
+td code {
+    color: var(--ink);
+}

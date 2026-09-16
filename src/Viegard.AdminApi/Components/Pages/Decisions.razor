@@ -48,6 +48,7 @@
                     <SortHeader Title="Created" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Created)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
                     <SortHeader Title="Policy" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Policy)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
                     <SortHeader Title="Outcome" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Outcome)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
+                    <th>Review</th>
                     <SortHeader Title="Classification" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Classification)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
                     <th>Rationale</th>
                 </tr>
@@ -59,6 +60,7 @@
                         <td><a href="/decisions/@row.Decision.Id">@Display.Format(row.Decision.CreatedAt)</a></td>
                         <td>@row.Decision.PolicyId @row.Decision.PolicyVersion</td>
                         <td><span class="@AdminText.OutcomeCss(row.Decision.Outcome)">@row.Decision.Outcome</span></td>
+                        <td><span class="@ReviewCss(row.Decision)">@ReviewLabel(row.Decision)</span></td>
                         <td>@ClassificationSummary(row.Classification)</td>
                         <td>@AdminText.OneLine(row.Decision.Rationale, 220)</td>
                     </tr>
@@ -147,6 +149,31 @@
     private static string ClassificationSummary(Classification? classification) => classification is null
         ? "not found"
         : $"{classification.Category} severity {classification.Severity}";
+
+    private static string ReviewLabel(Decision decision)
+    {
+        if (decision.Outcome != DecisionOutcome.RequireApproval)
+        {
+            return "-";
+        }
+
+        return decision.ReviewOutcome?.ToString() ?? "Needs approval";
+    }
+
+    private static string ReviewCss(Decision decision)
+    {
+        if (decision.Outcome != DecisionOutcome.RequireApproval)
+        {
+            return "small";
+        }
+
+        return decision.ReviewOutcome switch
+        {
+            DecisionReviewOutcome.Approved => "badge badge-green",
+            DecisionReviewOutcome.Rejected => "badge badge-red",
+            _ => "badge badge-amber",
+        };
+    }
 
     private async Task<Guid?> PreviousPageCursorAsync(DecisionListFilter filter, ListSort<DecisionSortColumn>? sort)
     {

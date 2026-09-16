@@ -158,6 +158,19 @@ Example operator-applied rules, with placeholder interface names:
 /ip firewall filter add chain=forward in-interface=<wan-interface> src-address-list=viegard-banned action=drop comment="Drop Viegard banned forwarded traffic"
 ```
 
+### Enabling enforcement
+
+The default posture keeps network actions in dry-run mode.  Setting `Viegard__Policy__Posture__DryRun` to `false` in `deploy/docker-compose.yml` means approved MikroTik ban and unban actions update the `active_bans` source of truth and call every enabled router instead of recording planned calls only.  The decision detail page surfaces the current dry-run posture beside the Approve button so operators can see whether a review will ban anything.
+
+Before disabling dry-run, confirm:
+
+- The router list is complete, enabled as intended, and each router passes the built-in connectivity test.
+- Protected ranges have been reviewed for the deployment.
+- Policy thresholds have been reviewed after dry-run calibration.
+- At least one dry-run approval has been exercised end to end, including the `/bans` recent-action view and unban path.
+
+`Viegard__Policy__Posture__ManualApprovalMode=true` keeps every ban behind operator approval regardless of dry-run posture.  Disabling dry-run does not enable unattended bans while manual approval remains true.
+
 ### Ingestion filters
 
 Ingestion filters suppress selected high-volume event kinds before they become normalized events.  The first maintenance-role startup seeds MDaemon `SessionLine` and `Other` as suppressed, using insert-if-missing semantics so later admin UI edits are not overwritten.  Operators can review and change the matrix at `/configuration#ingestion` after step-up verification.

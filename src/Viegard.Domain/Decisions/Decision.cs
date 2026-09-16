@@ -16,6 +16,13 @@ public enum DecisionOutcome
     DryRun,
 }
 
+/// <summary>Manual operator review outcome for an approval-required decision.</summary>
+public enum DecisionReviewOutcome
+{
+    Approved,
+    Rejected,
+}
+
 /// <summary>The result of one guardrail check during policy evaluation.</summary>
 public sealed record GuardrailEvaluation
 {
@@ -48,4 +55,10 @@ public sealed record Decision
     public required IReadOnlyList<GuardrailEvaluation> Guardrails { get; init; }
 
     public required DateTimeOffset CreatedAt { get; init; }
+
+    public string? ReviewedBy { get; init; }
+
+    public DateTimeOffset? ReviewedAt { get; init; }
+
+    public DecisionReviewOutcome? ReviewOutcome { get; init; }
 }

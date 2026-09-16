@@ -147,6 +147,12 @@ public sealed class DecisionRow
     public string GuardrailsJson { get; set; } = "[]";
 
     public DateTimeOffset CreatedAt { get; set; }
+
+    public string? ReviewedBy { get; set; }
+
+    public DateTimeOffset? ReviewedAt { get; set; }
+
+    public int? ReviewOutcome { get; set; }
 }
 
 public sealed class ActionRecordRow

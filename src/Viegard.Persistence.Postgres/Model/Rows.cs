@@ -175,6 +175,21 @@ public sealed class ActionRecordRow
     public DateTimeOffset? CompletedAt { get; set; }
 }
 
+public sealed class ActiveBanRow
+{
+    public Guid Id { get; set; }
+
+    public string Ip { get; set; } = string.Empty;
+
+    public DateTimeOffset ExpiresAt { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public Guid DecisionId { get; set; }
+
+    public Guid ActionId { get; set; }
+}
+
 public sealed class AuditRecordRow
 {
     public Guid Id { get; set; }

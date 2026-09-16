@@ -149,7 +149,7 @@ curl -u viegard http://<router>/rest/ip/firewall/address-list
 
 The response should be a JSON array.  Prove the source restriction by running the same curl command from a non-Viegard host and observing that RouterOS rejects the request.
 
-Viegard bans are timed dynamic RouterOS address-list entries in the fixed `viegard-banned` list.  RouterOS clears dynamic entries during a router reboot, so active temporary bans do not survive reboot.  Firewall rules that consume the list are a one-time operator setup and are never created or changed by Viegard.
+Viegard bans are timed dynamic RouterOS address-list entries in the fixed `viegard-banned` list.  PostgreSQL `active_bans` rows are the source of truth, and the actions role reconciles enabled routers automatically within the configured reconciliation interval (`Viegard__Actions__ReconciliationInterval`, default 5 minutes).  If a router reboot clears dynamic entries, Viegard re-applies unexpired bans with the remaining time.  The `viegard-banned` list is Viegard-owned: manual entries added to that list on a router are removed during reconciliation when no active-ban row exists.  Other address lists are not touched.  Firewall rules that consume the list are a one-time operator setup and are never created or changed by Viegard.
 
 Example operator-applied rules, with placeholder interface names:
 

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Viegard.Application.Actions;
 using Viegard.Application.Audit;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
@@ -78,6 +79,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAdminUserStore, PostgresAdminUserStore>();
         services.AddSingleton<IAdminSessionStore, PostgresAdminSessionStore>();
         services.AddSingleton<IAuditLedger, PostgresAuditLedger>();
+        services.AddSingleton<IActiveBanStore, PostgresActiveBanStore>();
         services.AddSingleton<IQueueTelemetryStore, PostgresQueueTelemetryStore>();
         services.AddSingleton<IInstanceRegistryStore, PostgresInstanceRegistryStore>();
         services.AddSingleton<ISourceOffsetStore, PostgresSourceOffsetStore>();

@@ -57,7 +57,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         // Clean slate for queue tables between runs.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE actions, queue_messages, queue_counters, retention_settings, policy_threshold_settings, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE actions, active_bans, queue_messages, queue_counters, retention_settings, policy_threshold_settings, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -1224,6 +1224,34 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Active_ban_store_replaces_removes_lists_and_cleans_up()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresActiveBanStore(factory);
+        var now = new DateTimeOffset(2026, 9, 16, 21, 30, 0, TimeSpan.Zero);
+        var first = ActiveBanRecord("2001:db8:0:0::1", now, now.AddMinutes(5));
+        var replacement = ActiveBanRecord("2001:db8::1", now.AddMinutes(1), now.AddMinutes(10));
+        var expired = ActiveBanRecord("203.0.113.10", now.AddMinutes(-10), now.AddSeconds(-1));
+        var live = ActiveBanRecord("203.0.113.11", now.AddMinutes(-1), now.AddMinutes(5));
+
+        await store.UpsertByIpAsync(first);
+        var saved = await store.UpsertByIpAsync(replacement);
+        await store.UpsertByIpAsync(expired);
+        await store.UpsertByIpAsync(live);
+
+        Assert.Equal("2001:db8::1", saved.Ip);
+        Assert.Equal(replacement.Id, (await store.GetByIpAsync("2001:db8:0:0:0:0:0:1"))!.Id);
+        Assert.Equal(
+            ["2001:db8::1", "203.0.113.11"],
+            (await store.ListUnexpiredAsync(now)).Select(ban => ban.Ip).ToArray());
+
+        Assert.Equal(1, await store.DeleteExpiredAsync(now));
+        Assert.Null(await store.GetByIpAsync("203.0.113.10"));
+        Assert.True(await store.RemoveByIpAsync("203.0.113.11"));
+        Assert.False(await store.RemoveByIpAsync("203.0.113.11"));
+    }
+
+    [PostgresFact]
     public async Task Action_store_round_trips_results_json()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -1496,6 +1524,16 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         UpdatedAt = now,
         UpdatedBy = "it",
         RowVersion = 0,
+    };
+
+    private static ActiveBan ActiveBanRecord(string ip, DateTimeOffset createdAt, DateTimeOffset expiresAt) => new()
+    {
+        Id = ViegardId.New(),
+        Ip = ip,
+        CreatedAt = createdAt,
+        ExpiresAt = expiresAt,
+        DecisionId = ViegardId.New(),
+        ActionId = ViegardId.New(),
     };
 
     private static NormalizedEvent Event(string sourceKey, DateTimeOffset occurredAt) => new()

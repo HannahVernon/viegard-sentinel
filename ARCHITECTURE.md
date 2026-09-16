@@ -89,13 +89,13 @@ Key invariants:
 
 Deployable | Container | Responsibility
 -----------|-----------|---------------
-`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, maintenance retention, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
+`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, ban reconciliation, maintenance retention, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
 `viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), server-side filtered and sortable read access to incidents, classifications, decisions, and audit; step-up-gated runtime configuration editors for custom signatures, retention periods, satellite database roles with one-time password display, MikroTik router registry entries with encrypted credentials and probes, and fixed-verb host upgrade requests; custom-signature previews that run the same literal matcher as the pipeline against a bounded recent-event scan without writing audit or config rows; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds router credentials only for step-up-gated management probes; holds no Docker socket or host execution rights.
 `viegard-host-agent` | systemd service on Docker host | Privileged host-side upgrade agent.  Polls fixed-verb `host_upgrade_commands` through the adjacent PostgreSQL container, claims commands for target `vm`, and runs only `deploy/viegard-deploy.sh upgrade --yes`.
-`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, maintenance retention, ingestion-filter seeding, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
+`viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, ban reconciliation, maintenance retention, ingestion-filter seeding, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
 `viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), server-side filtered and sortable read access to incidents, classifications, decisions, and audit; step-up-gated runtime configuration editors for custom signatures, retention periods, ingestion filters, satellite database roles with one-time password display, and MikroTik router registry entries with encrypted credentials and probes; custom-signature previews that run the same literal matcher as the pipeline against a bounded recent-event scan without writing audit or config rows; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds router credentials only for step-up-gated management probes.
 llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
-Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, audit, commands, host upgrade requests, feedback, telemetry, instance version registry, MikroTik router registry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
+Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, active bans, audit, commands, host upgrade requests, feedback, telemetry, instance version registry, MikroTik router registry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
 
 ### Host roles and process topology (proposal)
 
@@ -128,7 +128,7 @@ src/
                                router credential protection, router transport helpers, and
                                admin list filter helpers
   Viegard.Persistence/         Store implementations (in-memory/file first; DB when chosen),
-                               including router registry stores
+                               including router registry and active-ban stores
   Viegard.Sources.Imap/        IMAP data source adapter (MailKit)
   Viegard.Sources.Syslog/      Syslog UDP source adapter; nginx/SWAG access logs normalize
                                to HTTP request events, other tags remain generic syslog
@@ -142,8 +142,9 @@ src/
   Viegard.Actions.Fail2Ban/    Fail2Ban integration (mode TBD)
   Viegard.Notifications.Email/ Operator status/alert emails via SMTP (MailKit)
   Viegard.PipelineHost/        Worker service executable, including ingestion,
-                               correlation, classification, policy, actions, and
-                               maintenance retention and ingestion-filter workers
+                               correlation, classification, policy, actions,
+                               ban reconciliation, and maintenance retention and
+                               ingestion-filter workers
   Viegard.AdminApi/            Admin API executable, auth endpoints, WebAuthn adapter,
                                static SSR pages, configuration editors, router probes, display preferences,
                                keyset pagination, filter, and sort UI, first-party WebAuthn JS bridge
@@ -191,6 +192,7 @@ Interface | Metaphor | Contract summary
 `IRetentionSettingsStore` | Roost | Database-owned retention periods plus last-cycle status for admin editing and worker execution
 `IIngestionFilterStore` | Roost | Database-owned source-type/event-kind suppression matrix for normalization-time event emission, with notification-backed refresh and fail-open runtime reads
 `IInstanceRegistryStore` | Roost | Latest build/version registration per running admin or pipeline instance: instance id, full informational version, commit SHA, roles, host name, start time, and report time
+`IActiveBanStore` | Roost | PostgreSQL-owned desired state for active MikroTik bans.  One row per canonical IP records expiry, decision id, and action id; the actions-role reconciler converges routers to this table.
 `ISatelliteRoleStore` | Roost | Lists, creates, rotates, and revokes per-satellite PostgreSQL roles behind the admin UI.  Role names use the enforced `viegard_sat_` prefix; generated passwords are shown once and are never audited.
 `IMikroTikRouterStore` | Roost | Lists, creates, updates, enables, disables, and deletes UI-managed MikroTik router registry entries.  Per-router passwords are stored only as AES-256-GCM ciphertext and are never returned on router records.
 `IRouterCredentialProtector` | Roost | Encrypts and decrypts per-router credentials with AES-256-GCM using `viegard-router-credentials-key`; router id AAD prevents ciphertext transplant between rows.
@@ -225,7 +227,7 @@ Boundary | Rule
 Untrusted data | All observed content (bodies, subjects, URLs, User-Agents, filenames, log lines) is data, never instructions.  It enters prompts only inside clearly delimited untrusted-data blocks via prompt templates; it never reaches shell, SQL, RouterOS, or file paths unescaped.
 Inference | Prompt assembly separates SYSTEM / APPLICATION / UNTRUSTED-OBSERVED-DATA.  Model output is parsed against a strict schema; anything malformed, incomplete, oversized, or contradictory is discarded and recorded as an AI failure.  Local-only by default; no silent fallback to remote.
 Policy | The policy engine is the only path to actions.  Guardrails (protected addresses/networks/hosts, action rate caps, max ban duration, cooldowns, circuit breaker, emergency stop, dry-run, approval mode) are enforced here and cannot be bypassed by any classifier.
-Actions | Providers expose a closed catalog of typed operations (e.g., `AddAddressListEntry(ip, list, ttl)`), never command strings.  IP syntax, private/reserved ranges, and protected lists are validated at this layer too (defense in depth).  Destructive operations (mail delete, firewall change) ship disabled and require explicit configuration.  The MikroTik provider writes timed entries only to the fixed `viegard-banned` address list and reports per-router outcomes for retry and audit.
+Actions | Providers expose a closed catalog of typed operations (e.g., `AddAddressListEntry(ip, list, ttl)`), never command strings.  IP syntax, private/reserved ranges, and protected lists are validated at this layer too (defense in depth).  Destructive operations (mail delete, firewall change) ship disabled and require explicit configuration.  The MikroTik provider writes desired state to `active_bans`, writes timed entries only to the fixed `viegard-banned` address list, and reports per-router outcomes for retry and audit.  The actions-role reconciler fully owns that one RouterOS list and removes entries with no active-ban row; other router lists are never touched.
 Admin | Separate process; local accounts with cookie authentication backed by server-side revocable sessions, mandatory TOTP, WebAuthn security keys, recovery codes, step-up verification, rate limiting, and fail-closed AllowedSources (D-0032/D-0033).  Satellite database role management is step-up-gated, audited without passwords, and displays generated passwords once via a short-lived protected cookie.  Commands are durable, validated, and audited; the admin API cannot invoke actions directly.
 Secrets | `ISecretProvider` only.  Never in source, config in git, logs, prompts, exceptions, telemetry, audit records, or docs.
 

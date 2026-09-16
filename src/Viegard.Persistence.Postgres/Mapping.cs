@@ -191,6 +191,27 @@ internal static class Mapping
         CompletedAt = row.CompletedAt,
     };
 
+    public static ActiveBanRow ToRow(this ActiveBan activeBan) => new()
+    {
+        Id = activeBan.Id,
+        Ip = activeBan.Ip,
+        ExpiresAt = Utc(activeBan.ExpiresAt),
+        CreatedAt = Utc(activeBan.CreatedAt),
+        DecisionId = activeBan.DecisionId,
+        ActionId = activeBan.ActionId,
+    };
+
+    public static ActiveBan ToDomain(this ActiveBanRow row) =>
+        ActiveBan.NormalizeForSave(new ActiveBan
+        {
+            Id = row.Id,
+            Ip = row.Ip,
+            ExpiresAt = row.ExpiresAt,
+            CreatedAt = row.CreatedAt,
+            DecisionId = row.DecisionId,
+            ActionId = row.ActionId,
+        });
+
     public static AuditRecordRow ToRow(this AuditRecord record, int? sourceRefId) => new()
     {
         Id = record.Id,

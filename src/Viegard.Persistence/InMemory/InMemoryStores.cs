@@ -25,12 +25,16 @@ public sealed class InMemoryRawObservationStore : IRawObservationStore
     private readonly ConcurrentDictionary<Guid, RawObservation> _observations = new();
     private readonly ConcurrentDictionary<string, string> _payloads = new();
 
-    public ValueTask AddAsync(RawObservation observation, string rawPayload, CancellationToken cancellationToken = default)
+    public ValueTask<bool> AddAsync(RawObservation observation, string rawPayload, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(observation);
+        if (!_payloads.TryAdd(observation.PayloadReference, rawPayload))
+        {
+            return ValueTask.FromResult(false);
+        }
+
         _observations[observation.Id] = observation;
-        _payloads[observation.PayloadReference] = rawPayload;
-        return ValueTask.CompletedTask;
+        return ValueTask.FromResult(true);
     }
 
     public ValueTask<RawObservation?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>

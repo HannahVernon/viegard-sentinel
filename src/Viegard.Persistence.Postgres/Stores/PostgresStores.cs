@@ -24,13 +24,25 @@ namespace Viegard.Persistence.Postgres.Stores;
 /// <summary>PostgreSQL implementations of the persistence ports (D-0024).</summary>
 public sealed class PostgresRawObservationStore(IDbContextFactory<ViegardDbContext> factory, ReferenceResolver resolver) : IRawObservationStore
 {
-    public async ValueTask AddAsync(RawObservation observation, string rawPayload, CancellationToken cancellationToken = default)
+    public async ValueTask<bool> AddAsync(RawObservation observation, string rawPayload, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(observation);
         var sourceRef = await resolver.ResolveSourceAsync(observation.SourceId, observation.SourceType, cancellationToken).ConfigureAwait(false);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         db.RawObservations.Add(observation.ToRow(rawPayload, sourceRef));
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            // At-least-once redelivery: an unclean stop between storing the
+            // observation and committing the source offset makes the source
+            // re-read the same data.  The payload-reference unique index
+            // makes the replay detectable; report it instead of throwing.
+            return false;
+        }
     }
 
     public async ValueTask<RawObservation?> GetAsync(Guid id, CancellationToken cancellationToken = default)

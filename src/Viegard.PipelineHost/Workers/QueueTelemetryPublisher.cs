@@ -37,22 +37,41 @@ public sealed class QueueTelemetryPublisher(
             {
                 foreach (var queue in queues)
                 {
-                    var stats = await queue.GetStatsAsync(stoppingToken).ConfigureAwait(false);
-                    await telemetryStore.PublishAsync(
-                        new QueueTelemetrySnapshot
-                        {
-                            InstanceId = instanceId,
-                            QueueName = stats.QueueName,
-                            Depth = stats.Depth,
-                            InFlight = stats.InFlight,
-                            OldestPendingEnqueuedAt = stats.OldestPendingEnqueuedAt,
-                            TotalEnqueued = stats.TotalEnqueued,
-                            TotalCompleted = stats.TotalCompleted,
-                            TotalAbandoned = stats.TotalAbandoned,
-                            DeadLetterCount = stats.DeadLetterCount,
-                            CapturedAt = DateTimeOffset.UtcNow,
-                        },
-                        stoppingToken).ConfigureAwait(false);
+                    try
+                    {
+                        var stats = await queue.GetStatsAsync(stoppingToken).ConfigureAwait(false);
+                        await telemetryStore.PublishAsync(
+                            new QueueTelemetrySnapshot
+                            {
+                                InstanceId = instanceId,
+                                QueueName = stats.QueueName,
+                                Depth = stats.Depth,
+                                InFlight = stats.InFlight,
+                                OldestPendingEnqueuedAt = stats.OldestPendingEnqueuedAt,
+                                TotalEnqueued = stats.TotalEnqueued,
+                                TotalCompleted = stats.TotalCompleted,
+                                TotalAbandoned = stats.TotalAbandoned,
+                                DeadLetterCount = stats.DeadLetterCount,
+                                CapturedAt = DateTimeOffset.UtcNow,
+                            },
+                            stoppingToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Telemetry is diagnostics, not pipeline-critical: a
+                        // transient failure (for example a database
+                        // connection-limit rejection) must never stop the
+                        // host.  Stale snapshots already surface as a red
+                        // staleness light; the next tick retries.
+                        logger.LogWarning(
+                            ex,
+                            "Queue telemetry publish failed for queue '{QueueName}'; retrying on the next tick.",
+                            queue.QueueName);
+                    }
                 }
             }
         }

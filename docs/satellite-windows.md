@@ -81,7 +81,7 @@ CREATE ROLE "viegard_sat_mdaemon01"
     NOCREATEDB
     NOCREATEROLE
     NOINHERIT
-    CONNECTION LIMIT 8;
+    CONNECTION LIMIT 16;
 
 GRANT USAGE
     ON SCHEMA "viegard"
@@ -105,6 +105,14 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "viegard" IN SCHEMA "viegard"
     ON SEQUENCES
     TO "viegard_sat_mdaemon01";
 ```
+
+Roles created before 2026-09-16 carry `CONNECTION LIMIT 8`; raise them so the satellite's connection pool plus its LISTEN connection fit with headroom:
+
+```sql
+ALTER ROLE "viegard_sat_mdaemon01" CONNECTION LIMIT 16;
+```
+
+The installer writes `Viegard:Database:MaxPoolSize` 8 into the satellite configuration so the Npgsql pool stays well inside the role limit.  The installer also registers the `Viegard.PipelineHost` Windows event log source during install and upgrade; without it, the service cannot write crash reports to the Application log.
 
 ## Install on the MDaemon host
 

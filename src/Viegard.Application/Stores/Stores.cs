@@ -11,7 +11,12 @@ namespace Viegard.Application.Stores;
 /// <summary>Persistence port for raw observations (Roost).</summary>
 public interface IRawObservationStore
 {
-    ValueTask AddAsync(RawObservation observation, string rawPayload, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Stores the observation.  Returns false when an observation with the
+    /// same payload reference already exists (at-least-once redelivery after
+    /// an unclean stop); callers treat that as already ingested.
+    /// </summary>
+    ValueTask<bool> AddAsync(RawObservation observation, string rawPayload, CancellationToken cancellationToken = default);
 
     ValueTask<RawObservation?> GetAsync(Guid id, CancellationToken cancellationToken = default);
 

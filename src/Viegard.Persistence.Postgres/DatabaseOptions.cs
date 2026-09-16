@@ -28,6 +28,14 @@ public sealed class DatabaseOptions
 
     /// <summary>Apply pending EF Core migrations at pipeline-host startup.</summary>
     public bool AutoMigrate { get; set; } = true;
+
+    /// <summary>
+    /// Npgsql connection-pool cap.  Must fit inside the database role's
+    /// CONNECTION LIMIT with headroom for LISTEN connections; satellite
+    /// installs set a small value because satellite roles are
+    /// connection-limited.
+    /// </summary>
+    public int MaxPoolSize { get; set; } = 100;
 }
 
 public sealed partial class DatabaseOptionsValidator : IValidateOptions<DatabaseOptions>
@@ -61,6 +69,11 @@ public sealed partial class DatabaseOptionsValidator : IValidateOptions<Database
         if (string.IsNullOrWhiteSpace(options.PasswordSecretName))
         {
             failures.Add("Database: PasswordSecretName is required (the secret name, never the password).");
+        }
+
+        if (options.MaxPoolSize is < 1 or > 1024)
+        {
+            failures.Add("Database: MaxPoolSize must be within 1-1024.");
         }
 
         return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;

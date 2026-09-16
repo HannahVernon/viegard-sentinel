@@ -169,4 +169,21 @@ public sealed class DatabaseOptionsValidatorTests
         var options = new DatabaseOptions { Host = "h", PasswordSecretName = "" };
         Assert.True(_validator.Validate(null, options).Failed);
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(2000)]
+    public void Invalid_max_pool_size_fails(int maxPoolSize)
+    {
+        var options = new DatabaseOptions { Host = "h", MaxPoolSize = maxPoolSize };
+        Assert.True(_validator.Validate(null, options).Failed);
+    }
+
+    [Fact]
+    public void Small_satellite_pool_size_passes()
+    {
+        var options = new DatabaseOptions { Host = "h", MaxPoolSize = 8 };
+        Assert.True(_validator.Validate(null, options).Succeeded);
+    }
 }

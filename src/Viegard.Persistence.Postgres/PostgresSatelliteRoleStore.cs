@@ -149,7 +149,7 @@ public sealed class PostgresSatelliteRoleStore(
         _options.Schema);
 
     private string BuildGrantSummary() =>
-        $"LOGIN, connection limit 8, USAGE on schema {_options.Schema}, table SELECT/INSERT/UPDATE/DELETE, sequence USAGE/SELECT, and matching future-object default privileges for the application database user.";
+        $"LOGIN, connection limit 16, USAGE on schema {_options.Schema}, table SELECT/INSERT/UPDATE/DELETE, sequence USAGE/SELECT, and matching future-object default privileges for the application database user.";
 
     private string BuildCreateSql(string roleName, string password)
     {
@@ -167,7 +167,7 @@ public sealed class PostgresSatelliteRoleStore(
         // identifiers are always double-quoted and the password is
         // single-quoted after construction.
         return $"""
-            CREATE ROLE {quotedRole} LOGIN PASSWORD '{password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT CONNECTION LIMIT 8;
+            CREATE ROLE {quotedRole} LOGIN PASSWORD '{password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT CONNECTION LIMIT 16;
             GRANT USAGE ON SCHEMA {quotedSchema} TO {quotedRole};
             GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {quotedSchema} TO {quotedRole};
             GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {quotedSchema} TO {quotedRole};

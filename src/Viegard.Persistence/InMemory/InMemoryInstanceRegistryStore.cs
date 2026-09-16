@@ -18,4 +18,18 @@ public sealed class InMemoryInstanceRegistryStore : IInstanceRegistryStore
     public Task<IReadOnlyList<InstanceRegistration>> ListAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<InstanceRegistration>>(
             _registrations.Values.OrderBy(r => r.InstanceId, StringComparer.Ordinal).ToList());
+
+    public Task<int> DeleteStaleAsync(DateTimeOffset reportedBefore, CancellationToken cancellationToken = default)
+    {
+        var removed = 0;
+        foreach (var pair in _registrations)
+        {
+            if (pair.Value.ReportedAt < reportedBefore && _registrations.TryRemove(pair))
+            {
+                removed++;
+            }
+        }
+
+        return Task.FromResult(removed);
+    }
 }

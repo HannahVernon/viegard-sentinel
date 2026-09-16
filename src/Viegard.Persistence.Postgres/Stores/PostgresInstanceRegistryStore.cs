@@ -51,4 +51,14 @@ public sealed class PostgresInstanceRegistryStore(IDbContextFactory<ViegardDbCon
             .ConfigureAwait(false);
         return rows.Select(r => r.ToDomain()).ToList();
     }
+
+    public async Task<int> DeleteStaleAsync(DateTimeOffset reportedBefore, CancellationToken cancellationToken = default)
+    {
+        var cutoff = reportedBefore.ToUniversalTime();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await db.InstanceRegistry
+            .Where(r => r.ReportedAt < cutoff)
+            .ExecuteDeleteAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
 }

@@ -211,6 +211,9 @@ a:hover {
 .page-layout:has(#sessions:target) .page-index a[href="/account#sessions"],
 .page-layout:has(#list:target) .page-index a[href="/signatures#list"],
 .page-layout:has(#add:target) .page-index a[href="/signatures#add"],
+.page-layout:has(#retention:target) .page-index a[href="/queues#retention"],
+.page-layout:has(#queues:target) .page-index a[href="/queues#queues"],
+.page-layout:has(#instances:target) .page-index a[href="/queues#instances"],
 .page-layout:has(#retention:target) .page-index a[href="/configuration#retention"] {
     color: var(--accent-strong);
     font-weight: 700;

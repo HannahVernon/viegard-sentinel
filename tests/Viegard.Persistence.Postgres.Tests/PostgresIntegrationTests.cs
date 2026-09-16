@@ -269,6 +269,23 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Instance_registry_store_deletes_only_rows_reported_before_the_cutoff()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresInstanceRegistryStore(factory);
+        var now = new DateTimeOffset(2026, 9, 16, 14, 0, 0, TimeSpan.Zero);
+        await store.UpsertAsync(InstanceRegistration("admin-dead", "1.0.0", now) with { ReportedAt = now.AddHours(-30) });
+        await store.UpsertAsync(InstanceRegistration("admin", "1.0.0", now));
+        await store.UpsertAsync(InstanceRegistration("pipeline-1", "1.0.0", now) with { ReportedAt = now.AddMinutes(-1) });
+
+        var removed = await store.DeleteStaleAsync(now.AddHours(-24));
+
+        Assert.Equal(1, removed);
+        var remaining = await store.ListAsync();
+        Assert.Equal(["admin", "pipeline-1"], remaining.Select(r => r.InstanceId).ToArray());
+    }
+
+    [PostgresFact]
     public async Task Concurrent_host_upgrade_claims_never_claim_same_command_twice()
     {
         var store = new PostgresHostUpgradeCommandStore(_dataSource!);

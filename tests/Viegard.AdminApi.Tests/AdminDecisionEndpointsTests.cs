@@ -43,6 +43,23 @@ public sealed class AdminDecisionEndpointsTests
     }
 
     [Fact]
+    public async Task ReviewDecision_requires_step_up_before_claiming()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        var decision = await fixture.AddDecisionChainAsync("ip=198.51.100.10");
+        fixture.Context.Request.Form = ReviewForm(decision.Id, "approve", "1d");
+
+        var result = await fixture.InvokeReviewAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.Null((await fixture.Decisions.GetAsync(decision.Id))!.ReviewedAt);
+        Assert.Empty(await fixture.Actions.ListRecentByProviderAsync("mikrotik", 10));
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ReviewDecision_rejects_underivable_target_without_claiming()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
@@ -128,6 +145,31 @@ public sealed class AdminDecisionEndpointsTests
 
         Assert.Contains("Ban%20IP%20was%20not%20valid", location, StringComparison.Ordinal);
         Assert.Empty(await fixture.Actions.ListRecentByProviderAsync("mikrotik", 10));
+    }
+
+    [Fact]
+    public async Task Unban_requires_step_up_before_queueing_action()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        var originalDecisionId = ViegardId.New();
+        await fixture.ActiveBans.UpsertByIpAsync(new ActiveBan
+        {
+            Id = ViegardId.New(),
+            Ip = "203.0.113.10",
+            CreatedAt = DateTimeOffset.UtcNow.AddHours(-1),
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
+            DecisionId = originalDecisionId,
+            ActionId = ViegardId.New(),
+        });
+        fixture.Context.Request.Form = UnbanForm("203.0.113.10");
+
+        var result = await fixture.InvokeUnbanAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.Empty(await fixture.Actions.ListRecentByProviderAsync("mikrotik", 10));
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
     }
 
     [Fact]

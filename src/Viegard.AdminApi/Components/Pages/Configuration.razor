@@ -227,17 +227,14 @@
         }
 
         <h3>Recent upgrade commands</h3>
-        @if (_hostUpgradeCommands.Any(IsStalePending))
-        {
-            <p class="message error">A pending upgrade request is older than @HostUpgradeCommandPolicy.PendingStaleAfterMinutes minutes.  Confirm the host-side agent is installed and running for target <code>@HostUpgradeCommandPolicy.DefaultTarget</code>.</p>
-        }
+        <p class="message error" data-upgrades-stale hidden="@(!_hostUpgradeCommands.Any(IsStalePending))">A pending upgrade request is older than @HostUpgradeCommandPolicy.PendingStaleAfterMinutes minutes.  Confirm the host-side agent is installed and running for target <code>@HostUpgradeCommandPolicy.DefaultTarget</code>.</p>
         @if (_hostUpgradeCommands.Count == 0)
         {
             <p>No host upgrade commands have been requested.</p>
         }
         else
         {
-            <table class="data-table">
+            <table class="data-table" data-live-upgrades>
                 <thead>
                     <tr>
                         <th>Status</th>
@@ -250,27 +247,24 @@
                 <tbody>
                     @foreach (var command in _hostUpgradeCommands)
                     {
-                        <tr>
+                        <tr data-cmd="@command.Id.ToString("N")">
                             <td>
-                                <span class="@StatusCss(command.Status)">@command.Status</span>
+                                <span class="@StatusCss(command.Status)" data-cmd-cell="status">@command.Status</span>
                                 <span class="small">target <code>@command.Target</code></span>
                             </td>
                             <td>@command.RequestedBy at @Display.Format(command.RequestedAt)</td>
-                            <td>@FormatOptionalTimestamp(command.StartedAt)</td>
-                            <td>@FormatOptionalTimestamp(command.FinishedAt)</td>
-                            <td>@DetailSummary(command.Detail)</td>
+                            <td data-cmd-cell="started">@FormatOptionalTimestamp(command.StartedAt)</td>
+                            <td data-cmd-cell="finished">@FormatOptionalTimestamp(command.FinishedAt)</td>
+                            <td data-cmd-cell="detail">@DetailSummary(command.Detail)</td>
                         </tr>
-                        @if (HasLongDetail(command.Detail))
-                        {
-                            <tr class="details-row">
-                                <td colspan="5">
-                                    <details class="json-details">
-                                        <summary>Output detail</summary>
-                                        <pre class="json-block">@AdminText.Limit(command.Detail)</pre>
-                                    </details>
-                                </td>
-                            </tr>
-                        }
+                        <tr class="details-row" data-cmd-detail="@command.Id.ToString("N")" hidden="@(!HasLongDetail(command.Detail))">
+                            <td colspan="5">
+                                <details class="json-details">
+                                    <summary>Output detail</summary>
+                                    <pre class="json-block">@AdminText.Limit(command.Detail)</pre>
+                                </details>
+                            </td>
+                        </tr>
                     }
                 </tbody>
             </table>
@@ -489,18 +483,11 @@
         value is null ? "" : Display.Format(value.Value);
 
     private static string DetailSummary(string? detail) =>
-        string.IsNullOrWhiteSpace(detail) ? "" : AdminText.OneLine(detail);
+        HostUpgradeStatusPayload.DetailSummary(detail);
 
     private static bool HasLongDetail(string? detail) =>
-        !string.IsNullOrWhiteSpace(detail) && detail.Length > 160;
+        HostUpgradeStatusPayload.HasLongDetail(detail);
 
-    private static string StatusCss(HostUpgradeCommandStatus status) => status switch
-    {
-        HostUpgradeCommandStatus.Pending => "badge badge-amber",
-        HostUpgradeCommandStatus.Running => "badge badge-blue",
-        HostUpgradeCommandStatus.Succeeded => "badge badge-green",
-        HostUpgradeCommandStatus.Failed => "badge badge-red",
-        HostUpgradeCommandStatus.Superseded => "badge",
-        _ => "badge",
-    };
+    private static string StatusCss(HostUpgradeCommandStatus status) =>
+        HostUpgradeStatusPayload.StatusCss(status);
 }

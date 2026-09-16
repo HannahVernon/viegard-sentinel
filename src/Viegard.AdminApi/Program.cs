@@ -340,6 +340,18 @@ app.MapGet("/status/queues", async (
     var payload = QueueStatusPayload.Build(snapshots, registrations, DateTimeOffset.UtcNow, display.Format, settings);
     return Results.Json(payload);
 }).RequireAuthorization();
+app.MapGet("/status/upgrades", async (
+    IHostUpgradeCommandStore hostUpgrades,
+    UserDisplay display,
+    CancellationToken cancellationToken) =>
+{
+    await display.InitializeAsync().ConfigureAwait(false);
+    var commands = await hostUpgrades
+        .ListRecentAsync(HostUpgradeCommandPolicy.DefaultTarget, cancellationToken: cancellationToken)
+        .ConfigureAwait(false);
+    var payload = HostUpgradeStatusPayload.Build(commands, DateTimeOffset.UtcNow, display.Format);
+    return Results.Json(payload);
+}).RequireAuthorization();
 app.MapAdminAuthEndpoints();
 app.MapAdminSignatureEndpoints();
 app.MapAdminConfigurationEndpoints();

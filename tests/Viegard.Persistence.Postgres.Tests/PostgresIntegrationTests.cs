@@ -57,7 +57,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         // Clean slate for queue tables between runs.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE queue_messages, queue_counters, retention_settings, policy_threshold_settings, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE queue_messages, queue_counters, retention_settings, policy_threshold_settings, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -1161,6 +1161,69 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task MikroTik_router_store_crud_enforces_uniqueness_concurrency_and_credentials()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresMikroTikRouterStore(factory);
+        var now = new DateTimeOffset(2026, 9, 16, 19, 30, 0, TimeSpan.Zero);
+        var first = MikroTikRouter("router-a", now);
+        var second = MikroTikRouter("router-b", now.AddMinutes(1));
+
+        var created = await store.CreateAsync(first, "cipher-1");
+        Assert.True(created.Succeeded);
+        Assert.Equal(1, created.Router!.RowVersion);
+        Assert.Equal("cipher-1", await store.GetCredentialCiphertextAsync(first.Id));
+
+        var duplicate = await store.CreateAsync(second with { Name = "router-a" }, "cipher-dup");
+        Assert.Equal(MikroTikRouterSaveStatus.DuplicateName, duplicate.Status);
+
+        var updated = await store.UpdateAsync(
+            created.Router with
+            {
+                BaseUrl = "http://router-a.example.com:8080",
+                UpdatedAt = now.AddMinutes(2),
+                UpdatedBy = "operator",
+            },
+            expectedRowVersion: created.Router.RowVersion);
+        Assert.True(updated.Succeeded);
+        Assert.Equal(2, updated.Router!.RowVersion);
+        Assert.Equal("cipher-1", await store.GetCredentialCiphertextAsync(first.Id));
+
+        var rotated = await store.UpdateAsync(
+            updated.Router with
+            {
+                Username = "viegard2",
+                UpdatedAt = now.AddMinutes(3),
+                UpdatedBy = "operator",
+            },
+            expectedRowVersion: updated.Router.RowVersion,
+            passwordCiphertext: "cipher-2");
+        Assert.True(rotated.Succeeded);
+        Assert.Equal("cipher-2", await store.GetCredentialCiphertextAsync(first.Id));
+
+        var conflict = await store.UpdateAsync(
+            updated.Router with { Username = "stale", UpdatedAt = now.AddMinutes(4) },
+            expectedRowVersion: updated.Router.RowVersion);
+        Assert.Equal(MikroTikRouterSaveStatus.Conflict, conflict.Status);
+        Assert.Equal(3, conflict.Router!.RowVersion);
+
+        var secondCreated = await store.CreateAsync(second, "cipher-3");
+        Assert.True(secondCreated.Succeeded);
+        var nameConflict = await store.UpdateAsync(
+            secondCreated.Router! with { Name = "router-a", UpdatedAt = now.AddMinutes(5) },
+            expectedRowVersion: secondCreated.Router.RowVersion);
+        Assert.Equal(MikroTikRouterSaveStatus.DuplicateName, nameConflict.Status);
+
+        var deleteConflict = await store.DeleteAsync(first.Id, expectedRowVersion: 1);
+        Assert.Equal(MikroTikRouterDeleteStatus.Conflict, deleteConflict.Status);
+
+        var deleted = await store.DeleteAsync(first.Id, rotated.Router!.RowVersion);
+        Assert.True(deleted.Succeeded);
+        Assert.Null(await store.GetAsync(first.Id));
+        Assert.Null(await store.GetCredentialCiphertextAsync(first.Id));
+    }
+
+    [PostgresFact]
     public async Task Retention_store_purges_only_eligible_rows()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -1392,6 +1455,21 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         await using var db = factory.CreateDbContext();
         await db.PolicyThresholdSettings.ExecuteDeleteAsync();
     }
+
+    private static MikroTikRouter MikroTikRouter(string name, DateTimeOffset now) => new()
+    {
+        Id = ViegardId.New(),
+        Name = name,
+        BaseUrl = $"http://{name}.example.com",
+        TransportMode = MikroTikRouterTransportMode.PlainHttp,
+        PinnedCertificateSha256 = null,
+        Username = "viegard",
+        Enabled = true,
+        CreatedAt = now,
+        UpdatedAt = now,
+        UpdatedBy = "it",
+        RowVersion = 0,
+    };
 
     private static NormalizedEvent Event(string sourceKey, DateTimeOffset occurredAt) => new()
     {

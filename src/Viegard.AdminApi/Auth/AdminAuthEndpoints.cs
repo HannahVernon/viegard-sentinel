@@ -1137,10 +1137,14 @@ public static class AdminAuthEndpoints
 
         // The query must precede any fragment or the browser treats it as
         // part of the fragment (e.g. /account#totp -> /account?query#totp).
+        // Some configuration flows already carry non-secret query values,
+        // such as a fetched router certificate fingerprint, so append with
+        // '&' when the path already contains a query string.
         var hash = path.IndexOf('#', StringComparison.Ordinal);
-        return hash < 0
-            ? $"{path}?{query}"
-            : $"{path[..hash]}?{query}{path[hash..]}";
+        var prefix = hash < 0 ? path : path[..hash];
+        var fragment = hash < 0 ? string.Empty : path[hash..];
+        var separator = prefix.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+        return $"{prefix}{separator}{query}{fragment}";
     }
 
     private sealed record WebAuthnRegistrationCompleteRequest(string? Name, JsonElement? Response);

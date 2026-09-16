@@ -53,6 +53,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<PolicyThresholdSettingsRow> PolicyThresholdSettings => Set<PolicyThresholdSettingsRow>();
 
+    public DbSet<MikroTikRouterRow> MikroTikRouters => Set<MikroTikRouterRow>();
+
     public DbSet<QueueMessageRow> QueueMessages => Set<QueueMessageRow>();
 
     public DbSet<QueueCounterRow> QueueCounters => Set<QueueCounterRow>();
@@ -260,6 +262,21 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Policy.PolicyThresholdSettings.MaxUpdatedByLength);
         });
 
+        modelBuilder.Entity<MikroTikRouterRow>(entity =>
+        {
+            entity.ToTable("mikrotik_routers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.HasIndex(e => e.Name).IsUnique();
+            entity.Property(e => e.Name).HasColumnType("text");
+            entity.Property(e => e.BaseUrl).HasColumnType("text");
+            entity.Property(e => e.TransportMode).HasColumnType("text");
+            entity.Property(e => e.PinnedCertificateSha256).HasColumnName("pinned_cert_sha256").HasColumnType("text");
+            entity.Property(e => e.Username).HasColumnType("text");
+            entity.Property(e => e.PasswordCiphertext).HasColumnType("text");
+            entity.Property(e => e.UpdatedBy).HasColumnType("text");
+        });
+
         modelBuilder.Entity<QueueMessageRow>(entity =>
         {
             entity.ToTable("queue_messages");
@@ -336,6 +353,10 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
                 property.SetColumnName(ToSnakeCase(property.Name));
             }
         }
+
+        modelBuilder.Entity<MikroTikRouterRow>()
+            .Property(e => e.PinnedCertificateSha256)
+            .HasColumnName("pinned_cert_sha256");
     }
 
     private static string ToSnakeCase(string name) =>

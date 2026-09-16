@@ -166,6 +166,58 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Create_router_requires_step_up_before_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        fixture.Context.Request.Form = RouterCreateForm("router-a", "top-secret");
+
+        var result = await fixture.InvokeCreateRouterAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.Empty(await fixture.Routers.ListAsync());
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Create_router_persists_router_and_writes_config_audit_without_password()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        fixture.Context.Request.Form = RouterCreateForm("router-a", "top-secret");
+
+        var result = await fixture.InvokeCreateRouterAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Router%20router-a%20created", location, StringComparison.Ordinal);
+        var router = Assert.Single(await fixture.Routers.ListAsync());
+        Assert.Equal("router-a", router.Name);
+        Assert.True(router.Enabled);
+        Assert.StartsWith($"protected:{router.Id:N}:", await fixture.Routers.GetCredentialCiphertextAsync(router.Id), StringComparison.Ordinal);
+
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("RouterCreated", audit.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("router-a", audit.DetailJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("top-secret", audit.DetailJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", audit.DetailJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Update_router_with_blank_password_keeps_existing_credential()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        var created = await fixture.Routers.CreateAsync(Router("router-a"), "cipher-existing");
+        fixture.Context.Request.Form = RouterUpdateForm(created.Router!, password: "");
+
+        var result = await fixture.InvokeUpdateRouterAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Credential%20unchanged", location, StringComparison.Ordinal);
+        Assert.Equal("cipher-existing", await fixture.Routers.GetCredentialCiphertextAsync(created.Router!.Id));
+        Assert.Single(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
     public async Task Request_host_upgrade_requires_step_up_before_mutating()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
@@ -393,6 +445,59 @@ public sealed class AdminConfigurationEndpointsTests
             ["name"] = name,
         });
 
+    private static FormCollection RouterCreateForm(string name, string password) =>
+        RouterForm(name, "http://router-a.example.com", MikroTikRouterTransportMode.PlainHttp, "viegard", password, null, enabled: true);
+
+    private static FormCollection RouterUpdateForm(MikroTikRouter router, string password) =>
+        RouterForm(
+            router.Name,
+            router.BaseUrl,
+            router.TransportMode,
+            router.Username,
+            password,
+            router.PinnedCertificateSha256,
+            router.Enabled,
+            router.Id,
+            router.RowVersion);
+
+    private static FormCollection RouterForm(
+        string name,
+        string baseUrl,
+        MikroTikRouterTransportMode transportMode,
+        string username,
+        string password,
+        string? pinnedCertificateSha256,
+        bool enabled,
+        Guid? id = null,
+        int? rowVersion = null)
+    {
+        var values = new Dictionary<string, StringValues>(StringComparer.Ordinal)
+        {
+            ["name"] = name,
+            ["baseUrl"] = baseUrl,
+            ["transportMode"] = transportMode.ToString(),
+            ["username"] = username,
+            ["password"] = password,
+            ["pinnedCertificateSha256"] = pinnedCertificateSha256 ?? string.Empty,
+        };
+        if (enabled)
+        {
+            values["enabled"] = "on";
+        }
+
+        if (id is { } routerId)
+        {
+            values["id"] = routerId.ToString("N");
+        }
+
+        if (rowVersion is { } version)
+        {
+            values["rowVersion"] = version.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return new FormCollection(values);
+    }
+
     private static FormCollection HostUpgradeForm() => new(
         new Dictionary<string, StringValues>(StringComparer.Ordinal)
         {
@@ -453,6 +558,21 @@ public sealed class AdminConfigurationEndpointsTests
         UpdatedBy = "test",
     };
 
+    private static MikroTikRouter Router(string name) => new()
+    {
+        Id = ViegardId.New(),
+        Name = name,
+        BaseUrl = $"http://{name}.example.com",
+        TransportMode = MikroTikRouterTransportMode.PlainHttp,
+        PinnedCertificateSha256 = null,
+        Username = "viegard",
+        Enabled = true,
+        CreatedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedBy = "test",
+        RowVersion = 0,
+    };
+
     private sealed record EndpointFixture(
         DefaultHttpContext Context,
         InMemoryRetentionSettingsStore RetentionSettings,
@@ -465,6 +585,8 @@ public sealed class AdminConfigurationEndpointsTests
         AdminAuthAuditor AuthAuditor,
         AdminConfigAuditor ConfigAuditor,
         InMemorySatelliteRoleStore SatelliteRoles,
+        InMemoryMikroTikRouterStore Routers,
+        IRouterCredentialProtector RouterProtector,
         InMemoryHostUpgradeCommandStore HostUpgrades,
         InMemoryIngestionFilterStore IngestionFilters,
         SatelliteRoleCredentialCookie SatelliteCredentialCookie)
@@ -513,6 +635,8 @@ public sealed class AdminConfigurationEndpointsTests
                 NullLogger<AdminAuthAuditor>.Instance);
             var configAuditor = new AdminConfigAuditor(auditLedger, NullLogger<AdminConfigAuditor>.Instance);
             var satelliteRoles = new InMemorySatelliteRoleStore();
+            var routers = new InMemoryMikroTikRouterStore();
+            var routerProtector = new PlainRouterCredentialProtector();
             var hostUpgrades = new InMemoryHostUpgradeCommandStore();
             var ingestionFilters = new InMemoryIngestionFilterStore();
             var policyThresholds = new InMemoryPolicyThresholdSettingsStore();
@@ -546,6 +670,8 @@ public sealed class AdminConfigurationEndpointsTests
                 authAuditor,
                 configAuditor,
                 satelliteRoles,
+                routers,
+                routerProtector,
                 hostUpgrades,
                 ingestionFilters,
                 satelliteCredentialCookie);
@@ -571,6 +697,28 @@ public sealed class AdminConfigurationEndpointsTests
                 AuthAuditor,
                 ConfigAuditor,
                 SatelliteCredentialCookie);
+
+        public Task<IResult> InvokeCreateRouterAsync() =>
+            AdminConfigurationEndpoints.CreateRouterAsync(
+                Context,
+                Antiforgery,
+                Routers,
+                RouterProtector,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeUpdateRouterAsync() =>
+            AdminConfigurationEndpoints.UpdateRouterAsync(
+                Context,
+                Antiforgery,
+                Routers,
+                RouterProtector,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
 
         public Task<IResult> InvokeRequestHostUpgradeAsync() =>
             AdminConfigurationEndpoints.RequestHostUpgradeAsync(
@@ -652,6 +800,23 @@ public sealed class AdminConfigurationEndpointsTests
     private sealed class NoopDataProtectionProvider : IDataProtectionProvider
     {
         public IDataProtector CreateProtector(string purpose) => new NoopDataProtector();
+    }
+
+    private sealed class PlainRouterCredentialProtector : IRouterCredentialProtector
+    {
+        public string Protect(Guid routerId, string password) =>
+            $"protected:{routerId:N}:{password}";
+
+        public string Unprotect(Guid routerId, string ciphertext)
+        {
+            var prefix = $"protected:{routerId:N}:";
+            if (!ciphertext.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                throw new RouterCredentialProtectionException("Router credential ciphertext could not be authenticated for this router.");
+            }
+
+            return ciphertext[prefix.Length..];
+        }
     }
 
     private sealed class NoopDataProtector : IDataProtector

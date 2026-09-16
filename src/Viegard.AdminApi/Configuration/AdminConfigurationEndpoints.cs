@@ -15,6 +15,7 @@ public static class AdminConfigurationEndpoints
 {
     private const string RetentionConfigurationPath = "/configuration#retention";
     private const string SatellitesConfigurationPath = "/configuration#satellites";
+    private const string RoutersConfigurationPath = "/configuration#routers";
     private const string UpgradesConfigurationPath = "/configuration#upgrades";
     private const string ThresholdsConfigurationPath = "/configuration#thresholds";
     private const string IngestionConfigurationPath = "/configuration#ingestion";
@@ -31,6 +32,24 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/satellites/revoke", RevokeSatelliteAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/routers/create", CreateRouterAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/routers/update", UpdateRouterAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/routers/toggle", ToggleRouterAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/routers/delete", DeleteRouterAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/routers/test", TestRouterAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/routers/fetch-certificate", FetchRouterCertificateAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/upgrades/request", RequestHostUpgradeAsync)
@@ -220,6 +239,309 @@ public static class AdminConfigurationEndpoints
         }
     }
 
+    internal static async Task<IResult> CreateRouterAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IMikroTikRouterStore routers,
+        IRouterCredentialProtector protector,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var gate = await RequireRouterStepUpAsync(context, users, sessions, authAuditor).ConfigureAwait(false);
+        if (gate.Failure is not null)
+        {
+            return gate.Failure;
+        }
+
+        if (!TryReadRouterForm(form, null, gate.User!.Username, DateTimeOffset.UtcNow, requirePassword: true, out var router, out var password, out var error))
+        {
+            return Redirect(RoutersConfigurationPath, error: error);
+        }
+
+        string passwordCiphertext;
+        try
+        {
+            passwordCiphertext = protector.Protect(router.Id, password!);
+        }
+        catch (RouterCredentialProtectionException ex)
+        {
+            return Redirect(RoutersConfigurationPath, error: ex.Message);
+        }
+
+        var result = await routers.CreateAsync(router, passwordCiphertext, context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(RoutersConfigurationPath, error: RouterSaveError(result.Status));
+        }
+
+        await configAuditor.RecordRouterWriteAsync(
+            "RouterCreated",
+            gate.User.Username,
+            before: null,
+            after: result.Router,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(RoutersConfigurationPath, status: $"Router {result.Router!.Name} created.  Credential set.");
+    }
+
+    internal static async Task<IResult> UpdateRouterAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IMikroTikRouterStore routers,
+        IRouterCredentialProtector protector,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var gate = await RequireRouterStepUpAsync(context, users, sessions, authAuditor).ConfigureAwait(false);
+        if (gate.Failure is not null)
+        {
+            return gate.Failure;
+        }
+
+        if (!TryReadRouterIdAndVersion(form, out var id, out var expectedRowVersion, out var error))
+        {
+            return Redirect(RoutersConfigurationPath, error: error);
+        }
+
+        var before = await routers.GetAsync(id, context.RequestAborted).ConfigureAwait(false);
+        if (before is null)
+        {
+            return Redirect(RoutersConfigurationPath, error: "Router was not found.  Reload the page and try again.");
+        }
+
+        if (!TryReadRouterForm(form, before, gate.User!.Username, DateTimeOffset.UtcNow, requirePassword: false, out var router, out var password, out error))
+        {
+            return Redirect(RouterEditPath(id), error: error);
+        }
+
+        string? passwordCiphertext = null;
+        if (password is not null)
+        {
+            try
+            {
+                passwordCiphertext = protector.Protect(router.Id, password);
+            }
+            catch (RouterCredentialProtectionException ex)
+            {
+                return Redirect(RouterEditPath(id), error: ex.Message);
+            }
+        }
+
+        var result = await routers.UpdateAsync(router, expectedRowVersion, passwordCiphertext, context.RequestAborted)
+            .ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(RouterEditPath(id), error: RouterSaveError(result.Status));
+        }
+
+        await configAuditor.RecordRouterWriteAsync(
+            "RouterUpdated",
+            gate.User.Username,
+            before,
+            result.Router,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(RoutersConfigurationPath, status: $"Router {result.Router!.Name} saved.  Credential {(passwordCiphertext is null ? "unchanged" : "updated")}.");
+    }
+
+    internal static async Task<IResult> ToggleRouterAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IMikroTikRouterStore routers,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var gate = await RequireRouterStepUpAsync(context, users, sessions, authAuditor).ConfigureAwait(false);
+        if (gate.Failure is not null)
+        {
+            return gate.Failure;
+        }
+
+        if (!TryReadRouterIdAndVersion(form, out var id, out var expectedRowVersion, out var error))
+        {
+            return Redirect(RoutersConfigurationPath, error: error);
+        }
+
+        if (!bool.TryParse(form["enabled"].ToString(), out var enabled))
+        {
+            return Redirect(RoutersConfigurationPath, error: "Router enabled state was not valid.  Reload the page and try again.");
+        }
+
+        var before = await routers.GetAsync(id, context.RequestAborted).ConfigureAwait(false);
+        if (before is null)
+        {
+            return Redirect(RoutersConfigurationPath, error: "Router was not found.  Reload the page and try again.");
+        }
+
+        var candidate = before with
+        {
+            Enabled = enabled,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = gate.User!.Username,
+        };
+        var result = await routers.UpdateAsync(candidate, expectedRowVersion, passwordCiphertext: null, cancellationToken: context.RequestAborted)
+            .ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(RoutersConfigurationPath, error: RouterSaveError(result.Status));
+        }
+
+        await configAuditor.RecordRouterWriteAsync(
+            enabled ? "RouterEnabled" : "RouterDisabled",
+            gate.User.Username,
+            before,
+            result.Router,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(RoutersConfigurationPath, status: $"Router {result.Router!.Name} {(enabled ? "enabled" : "disabled")}.");
+    }
+
+    internal static async Task<IResult> DeleteRouterAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IMikroTikRouterStore routers,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var gate = await RequireRouterStepUpAsync(context, users, sessions, authAuditor).ConfigureAwait(false);
+        if (gate.Failure is not null)
+        {
+            return gate.Failure;
+        }
+
+        if (!TryReadRouterIdAndVersion(form, out var id, out var expectedRowVersion, out var error))
+        {
+            return Redirect(RoutersConfigurationPath, error: error);
+        }
+
+        var before = await routers.GetAsync(id, context.RequestAborted).ConfigureAwait(false);
+        var result = await routers.DeleteAsync(id, expectedRowVersion, context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(RoutersConfigurationPath, error: result.Status == MikroTikRouterDeleteStatus.Conflict
+                ? "Router was changed by another session.  Review the current values and try again."
+                : "Router was not found.  Reload the page and try again.");
+        }
+
+        await configAuditor.RecordRouterWriteAsync(
+            "RouterDeleted",
+            gate.User!.Username,
+            before,
+            after: null,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(RoutersConfigurationPath, status: before is null ? "Router deleted." : $"Router {before.Name} deleted.");
+    }
+
+    internal static async Task<IResult> TestRouterAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IMikroTikRouterStore routers,
+        RouterConnectivityTester tester,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var gate = await RequireRouterStepUpAsync(context, users, sessions, authAuditor).ConfigureAwait(false);
+        if (gate.Failure is not null)
+        {
+            return gate.Failure;
+        }
+
+        if (!TryReadRouterId(form, out var id, out var error))
+        {
+            return Redirect(RoutersConfigurationPath, error: error);
+        }
+
+        var router = await routers.GetAsync(id, context.RequestAborted).ConfigureAwait(false);
+        if (router is null)
+        {
+            return Redirect(RoutersConfigurationPath, error: "Router was not found.  Reload the page and try again.");
+        }
+
+        var credential = await routers.GetCredentialCiphertextAsync(id, context.RequestAborted).ConfigureAwait(false);
+        var result = await tester.TestAsync(router, credential ?? string.Empty, context.RequestAborted).ConfigureAwait(false);
+        await configAuditor.RecordRouterProbeAsync(
+            "router-probe",
+            gate.User!.Username,
+            router.Name,
+            result.Message,
+            context.RequestAborted).ConfigureAwait(false);
+
+        return Redirect(
+            RoutersConfigurationPath,
+            status: result.Succeeded ? result.Message : null,
+            error: result.Succeeded ? null : result.Message);
+    }
+
+    internal static async Task<IResult> FetchRouterCertificateAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IMikroTikRouterStore routers,
+        RouterCertificateFetcher fetcher,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var gate = await RequireRouterStepUpAsync(context, users, sessions, authAuditor).ConfigureAwait(false);
+        if (gate.Failure is not null)
+        {
+            return gate.Failure;
+        }
+
+        if (!TryReadRouterId(form, out var id, out var error))
+        {
+            return Redirect(RoutersConfigurationPath, error: error);
+        }
+
+        var router = await routers.GetAsync(id, context.RequestAborted).ConfigureAwait(false);
+        if (router is null)
+        {
+            return Redirect(RoutersConfigurationPath, error: "Router was not found.  Reload the page and try again.");
+        }
+
+        if (router.TransportMode == MikroTikRouterTransportMode.PlainHttp)
+        {
+            return Redirect(RoutersConfigurationPath, error: "Certificate fetch is available only for HTTPS routers.");
+        }
+
+        try
+        {
+            var certificate = await fetcher.FetchAsync(router.BaseUrl, context.RequestAborted).ConfigureAwait(false);
+            var message =
+                $"Certificate fetched for {router.Name}: subject {OneLine(certificate.Subject, 120)}; issuer {OneLine(certificate.Issuer, 120)}; expires {certificate.NotAfter.UtcDateTime:u}; SHA-256 {certificate.FingerprintDisplay}.  Save the router with HTTPS pinned to pin this fingerprint.";
+            await configAuditor.RecordRouterProbeAsync(
+                "router-probe",
+                gate.User!.Username,
+                router.Name,
+                $"certificate-fetch {certificate.Sha256Fingerprint}",
+                context.RequestAborted).ConfigureAwait(false);
+            return Redirect(RouterEditPath(router.Id, certificate.Sha256Fingerprint), status: message);
+        }
+        catch (RouterProbeException ex)
+        {
+            await configAuditor.RecordRouterProbeAsync(
+                "router-probe",
+                gate.User!.Username,
+                router.Name,
+                ex.Message,
+                context.RequestAborted).ConfigureAwait(false);
+            return Redirect(RoutersConfigurationPath, error: ex.Message);
+        }
+    }
+
     internal static async Task<IResult> RequestHostUpgradeAsync(
         HttpContext context,
         IAntiforgery antiforgery,
@@ -383,6 +705,126 @@ public static class AdminConfigurationEndpoints
             result.Settings,
             context.RequestAborted).ConfigureAwait(false);
         return Redirect(ThresholdsConfigurationPath, status: "Policy threshold settings saved.");
+    }
+
+    private static bool TryReadRouterForm(
+        IFormCollection form,
+        MikroTikRouter? existing,
+        string updatedBy,
+        DateTimeOffset updatedAt,
+        bool requirePassword,
+        out MikroTikRouter router,
+        out string? password,
+        out string error)
+    {
+        router = existing ?? new MikroTikRouter
+        {
+            Id = Viegard.Domain.ViegardId.New(),
+            Name = string.Empty,
+            BaseUrl = "http://localhost",
+            TransportMode = MikroTikRouterTransportMode.PlainHttp,
+            Username = string.Empty,
+            Enabled = true,
+            CreatedAt = updatedAt,
+            UpdatedAt = updatedAt,
+            UpdatedBy = updatedBy,
+            RowVersion = 0,
+        };
+        password = null;
+        error = string.Empty;
+
+        if (!MikroTikRouterValidator.TryParseTransportMode(form["transportMode"].ToString(), out var transportMode, out error)
+            || !MikroTikRouterValidator.TryNormalizeName(form["name"].ToString(), out var name, out error)
+            || !MikroTikRouterValidator.TryNormalizeBaseUrl(form["baseUrl"].ToString(), transportMode, out var baseUrl, out error)
+            || !MikroTikRouterValidator.TryNormalizePinnedCertificateSha256(form["pinnedCertificateSha256"].ToString(), transportMode, out var pinned, out error)
+            || !MikroTikRouterValidator.TryNormalizeUsername(form["username"].ToString(), out var username, out error))
+        {
+            return false;
+        }
+
+        var passwordValue = form["password"].ToString();
+        if (requirePassword && string.IsNullOrEmpty(passwordValue))
+        {
+            error = "Router password is required.";
+            return false;
+        }
+
+        if (!string.IsNullOrEmpty(passwordValue))
+        {
+            password = passwordValue;
+        }
+
+        router = router with
+        {
+            Name = name,
+            BaseUrl = baseUrl,
+            TransportMode = transportMode,
+            PinnedCertificateSha256 = pinned,
+            Username = username,
+            Enabled = form.ContainsKey("enabled"),
+            UpdatedAt = updatedAt.ToUniversalTime(),
+            UpdatedBy = MikroTikRouterValidator.NormalizeUpdatedBy(updatedBy),
+        };
+        return true;
+    }
+
+    private static bool TryReadRouterId(IFormCollection form, out Guid id, out string error)
+    {
+        error = string.Empty;
+        if (!Guid.TryParse(form["id"].ToString(), out id) || id == Guid.Empty)
+        {
+            error = "Router id was not valid.  Reload the page and try again.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryReadRouterIdAndVersion(IFormCollection form, out Guid id, out int rowVersion, out string error)
+    {
+        if (!TryReadRouterId(form, out id, out error))
+        {
+            rowVersion = 0;
+            return false;
+        }
+
+        if (!int.TryParse(form["rowVersion"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out rowVersion)
+            || rowVersion < 0)
+        {
+            error = "Router version was not valid.  Reload the page and try again.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string RouterSaveError(MikroTikRouterSaveStatus status) =>
+        status switch
+        {
+            MikroTikRouterSaveStatus.Conflict =>
+                "Router was changed by another session.  Review the current values and save again.",
+            MikroTikRouterSaveStatus.DuplicateName =>
+                "A router with that name already exists.  Router names must be unique.",
+            MikroTikRouterSaveStatus.NotFound =>
+                "Router was not found.  Reload the page and try again.",
+            _ => "Router could not be saved.",
+        };
+
+    private static string RouterEditPath(Guid id, string? pinnedCertificateSha256 = null)
+    {
+        var path = $"/configuration?editRouter={id:N}";
+        if (!string.IsNullOrWhiteSpace(pinnedCertificateSha256))
+        {
+            path += $"&routerPin={Uri.EscapeDataString(pinnedCertificateSha256)}";
+        }
+
+        return path + "#routers";
+    }
+
+    private static string OneLine(string? value, int maxChars)
+    {
+        var sanitized = (value ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ');
+        return sanitized.Length <= maxChars ? sanitized : sanitized[..maxChars];
     }
 
     private static bool TryReadSettings(
@@ -552,6 +994,34 @@ public static class AdminConfigurationEndpoints
             Redirect(SatellitesConfigurationPath, error: "Step-up verification is required before managing satellite roles."));
     }
 
+    private static async ValueTask<RouterStepUpResult> RequireRouterStepUpAsync(
+        HttpContext context,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor)
+    {
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return new RouterStepUpResult(null, Results.Redirect("/login"));
+        }
+
+        if (await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            return new RouterStepUpResult(user, null);
+        }
+
+        await authAuditor.RecordAsync(
+            AdminAuthEventKind.StepUpFailed,
+            user.Username,
+            context,
+            enqueueForCorrelation: true,
+            cancellationToken: context.RequestAborted).ConfigureAwait(false);
+        return new RouterStepUpResult(
+            user,
+            Redirect(RoutersConfigurationPath, error: "Step-up verification is required before managing routers."));
+    }
+
     private static IResult Redirect(string path, string? status = null, string? error = null) =>
         Results.Redirect(AdminAuthEndpoints.BuildRedirectPath(path, status, error));
 
@@ -566,4 +1036,6 @@ public static class AdminConfigurationEndpoints
         };
 
     private sealed record SatelliteStepUpResult(Viegard.Domain.Admin.AdminUser? User, IResult? Failure);
+
+    private sealed record RouterStepUpResult(Viegard.Domain.Admin.AdminUser? User, IResult? Failure);
 }

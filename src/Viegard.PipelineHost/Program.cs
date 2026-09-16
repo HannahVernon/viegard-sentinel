@@ -90,6 +90,7 @@ switch (secretProviderKind)
         throw new InvalidOperationException(
             $"Unknown secret provider '{secretProviderKind}'.  Supported: file, configuration.");
 }
+builder.Services.AddSingleton<IRouterCredentialProtector, AesGcmRouterCredentialProtector>();
 
 // Persistence provider (D-0024): "postgres" for durable shared persistence,
 // "inmemory" for development without a database.
@@ -119,6 +120,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IRetentionStore, InMemoryRetentionStore>();
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
+        builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");

@@ -4,6 +4,7 @@
 @inject IPolicyThresholdSettingsStore PolicyThresholdSettingsStore
 @inject IIngestionFilterStore IngestionFilters
 @inject ISatelliteRoleStore SatelliteRoles
+@inject IMikroTikRouterStore Routers
 @inject IHostUpgradeCommandStore HostUpgrades
 @inject IAdminUserStore Users
 @inject IAdminSessionStore Sessions
@@ -19,6 +20,7 @@
     <nav class="page-index" aria-label="Configuration sections">
         <a class="index-default-link" href="/configuration#retention">Retention</a>
         <a href="/configuration#satellites">Satellites</a>
+        <a href="/configuration#routers">Routers</a>
         <a href="/configuration#upgrades">Upgrades</a>
         <a href="/configuration#thresholds">Policy thresholds</a>
         <a href="/configuration#ingestion">Ingestion</a>
@@ -202,6 +204,200 @@
             <div class="step-up-strip">
                 <span>Managing satellite roles requires step-up verification.</span>
                 <StepUpPrompt ReturnTo="/configuration#satellites" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-satellites" />
+            </div>
+        }
+    </section>
+
+    <section id="routers" class="indexed">
+        <h2>Routers</h2>
+        <p class="small">Manage MikroTik border routers for the future address-list action provider.  The list carries no enforcement behavior until the MikroTik action provider ships in the next increment.</p>
+
+        <h3>Existing routers</h3>
+        @if (_routers.Count == 0)
+        {
+            <p>No routers are configured.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Base URL</th>
+                        <th>Transport</th>
+                        <th>Enabled</th>
+                        <th>Credential</th>
+                        <th>Updated</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var router in _routers)
+                    {
+                        <tr>
+                            <td><code>@router.Name</code></td>
+                            <td>@router.BaseUrl</td>
+                            <td>@TransportDisplay(router)</td>
+                            <td>@(router.Enabled ? "Yes" : "No")</td>
+                            <td>set</td>
+                            <td>@router.UpdatedBy at @Display.Format(router.UpdatedAt)</td>
+                            <td class="actions-cell">
+                                @if (_stepUpFresh)
+                                {
+                                    <form method="post" action="/configuration/routers/test">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="id" value="@router.Id.ToString("N")" />
+                                        <button type="submit">Test</button>
+                                    </form>
+                                    @if (router.TransportMode != MikroTikRouterTransportMode.PlainHttp)
+                                    {
+                                        <form method="post" action="/configuration/routers/fetch-certificate">
+                                            <AntiforgeryToken />
+                                            <input type="hidden" name="id" value="@router.Id.ToString("N")" />
+                                            <button type="submit">Fetch certificate</button>
+                                        </form>
+                                    }
+                                    <form method="post" action="/configuration/routers/toggle">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="id" value="@router.Id.ToString("N")" />
+                                        <input type="hidden" name="rowVersion" value="@router.RowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)" />
+                                        <input type="hidden" name="enabled" value="@((!router.Enabled).ToString())" />
+                                        <button type="submit">@(router.Enabled ? "Disable" : "Enable")</button>
+                                    </form>
+                                    <a class="button-link" href="@RouterEditHref(router)">Edit</a>
+                                    <a class="button-link" href="@RouterDeleteHref(router)">Delete</a>
+                                }
+                                else
+                                {
+                                    <span class="small">Step-up required</span>
+                                }
+                            </td>
+                        </tr>
+                        @if (_stepUpFresh && IsEditing(router))
+                        {
+                            <tr>
+                                <td colspan="7">
+                                    <form method="post" action="/configuration/routers/update" class="edit-form">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="id" value="@router.Id.ToString("N")" />
+                                        <input type="hidden" name="rowVersion" value="@router.RowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)" />
+                                        <label>
+                                            Router name
+                                            <input name="name" maxlength="@MikroTikRouter.MaxNameLength" required value="@router.Name" />
+                                            <span class="small">Lowercase letters, digits, and hyphens only.</span>
+                                        </label>
+                                        <label>
+                                            Base URL
+                                            <input name="baseUrl" required value="@router.BaseUrl" placeholder="http://router.example.com" />
+                                            <span class="small">Host and optional port only.  Paths, query strings, fragments, and userinfo are rejected.</span>
+                                        </label>
+                                        <label>
+                                            Transport
+                                            <select name="transportMode">
+                                                @foreach (var mode in RouterTransportModes)
+                                                {
+                                                    <option value="@mode" selected="@(mode == EditTransportMode(router))">@TransportOptionLabel(mode)</option>
+                                                }
+                                            </select>
+                                        </label>
+                                        <label>
+                                            Pinned certificate SHA-256
+                                            <input name="pinnedCertificateSha256"
+                                                   maxlength="64"
+                                                   value="@EditPinnedFingerprint(router)"
+                                                   placeholder="64 lowercase hex characters" />
+                                            <span class="small">Required only for HTTPS pinned.  Use Fetch certificate, then save to pin.</span>
+                                        </label>
+                                        <label>
+                                            Username
+                                            <input name="username" maxlength="@MikroTikRouter.MaxUsernameLength" required value="@router.Username" />
+                                        </label>
+                                        <label>
+                                            New password
+                                            <input name="password" type="password" autocomplete="new-password" />
+                                            <span class="small">Leave blank to keep the existing credential.</span>
+                                        </label>
+                                        <label>
+                                            <input name="enabled" type="checkbox" checked="@router.Enabled" />
+                                            Enabled
+                                        </label>
+                                        <button type="submit">Save router</button>
+                                        <a class="button-link" href="/configuration#routers">Cancel</a>
+                                    </form>
+                                </td>
+                            </tr>
+                        }
+                        @if (_stepUpFresh && IsConfirmingDelete(router))
+                        {
+                            <tr>
+                                <td colspan="7">
+                                    <div class="message error">
+                                        <p>Confirm deletion of router <code>@router.Name</code>.  Stored credentials for this router will be removed.</p>
+                                        <form method="post" action="/configuration/routers/delete" class="secondary-form">
+                                            <AntiforgeryToken />
+                                            <input type="hidden" name="id" value="@router.Id.ToString("N")" />
+                                            <input type="hidden" name="rowVersion" value="@router.RowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)" />
+                                            <button type="submit">Confirm delete</button>
+                                            <a class="button-link" href="/configuration#routers">Cancel</a>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        }
+
+        <h3>Add router</h3>
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/routers/create" class="edit-form">
+                <AntiforgeryToken />
+                <label>
+                    Router name
+                    <input name="name" maxlength="@MikroTikRouter.MaxNameLength" required placeholder="border-1" />
+                    <span class="small">Lowercase letters, digits, and hyphens only.  Names must be unique.</span>
+                </label>
+                <label>
+                    Base URL
+                    <input name="baseUrl" required placeholder="http://192.0.2.1" />
+                    <span class="small">Absolute http or https URL with host and optional port only.</span>
+                </label>
+                <label>
+                    Transport
+                    <select name="transportMode">
+                        @foreach (var mode in RouterTransportModes)
+                        {
+                            <option value="@mode">@TransportOptionLabel(mode)</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    Pinned certificate SHA-256
+                    <input name="pinnedCertificateSha256" maxlength="64" placeholder="64 lowercase hex characters" />
+                    <span class="small">Required only for HTTPS pinned.</span>
+                </label>
+                <label>
+                    Username
+                    <input name="username" maxlength="@MikroTikRouter.MaxUsernameLength" required placeholder="viegard" />
+                </label>
+                <label>
+                    Password
+                    <input name="password" type="password" autocomplete="new-password" required />
+                </label>
+                <label>
+                    <input name="enabled" type="checkbox" checked />
+                    Enabled
+                </label>
+                <button type="submit">Add router</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Managing routers requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#routers" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-routers" />
             </div>
         }
     </section>
@@ -453,6 +649,7 @@
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
     private IReadOnlyDictionary<string, IngestionFilter> _mdaemonFilters = new Dictionary<string, IngestionFilter>(StringComparer.Ordinal);
     private IReadOnlyList<SatelliteRoleInfo> _satelliteRoles = [];
+    private IReadOnlyList<MikroTikRouter> _routers = [];
     private IReadOnlyList<HostUpgradeCommand> _hostUpgradeCommands = [];
     private SatelliteRoleSecret? _satelliteCredential;
     private bool _stepUpFresh;
@@ -467,6 +664,15 @@
 
     [SupplyParameterFromQuery(Name = "confirmRevoke")]
     public string? ConfirmRevoke { get; set; }
+
+    [SupplyParameterFromQuery(Name = "editRouter")]
+    public Guid? EditRouter { get; set; }
+
+    [SupplyParameterFromQuery(Name = "confirmDeleteRouter")]
+    public Guid? ConfirmDeleteRouter { get; set; }
+
+    [SupplyParameterFromQuery(Name = "routerPin")]
+    public string? RouterPin { get; set; }
 
     private string SettingsState => _settings switch
     {
@@ -508,6 +714,7 @@
             .GroupBy(filter => filter.EventKind, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.OrderByDescending(filter => filter.UpdatedAt).First(), StringComparer.Ordinal);
         _satelliteRoles = await SatelliteRoles.ListAsync().ConfigureAwait(false);
+        _routers = await Routers.ListAsync().ConfigureAwait(false);
         _hostUpgradeCommands = await HostUpgrades.ListRecentAsync(HostUpgradeCommandPolicy.DefaultTarget).ConfigureAwait(false);
         _now = DateTimeOffset.UtcNow;
 
@@ -589,6 +796,51 @@
     private bool IsConfirmingRevoke(SatelliteRoleInfo role) =>
         SatelliteRoleName.TryNormalize(ConfirmRevoke, out var confirmed, out _)
         && string.Equals(confirmed.SatelliteName, role.SatelliteName, StringComparison.Ordinal);
+
+    private static IReadOnlyList<MikroTikRouterTransportMode> RouterTransportModes { get; } =
+        Enum.GetValues<MikroTikRouterTransportMode>();
+
+    private bool IsEditing(MikroTikRouter router) =>
+        EditRouter == router.Id;
+
+    private bool IsConfirmingDelete(MikroTikRouter router) =>
+        ConfirmDeleteRouter == router.Id;
+
+    private static string RouterEditHref(MikroTikRouter router) =>
+        $"/configuration?editRouter={router.Id:N}#routers";
+
+    private static string RouterDeleteHref(MikroTikRouter router) =>
+        $"/configuration?confirmDeleteRouter={router.Id:N}#routers";
+
+    private MikroTikRouterTransportMode EditTransportMode(MikroTikRouter router) =>
+        IsEditing(router) && MikroTikRouterValidator.IsLowerHexSha256(RouterPin)
+            ? MikroTikRouterTransportMode.HttpsPinned
+            : router.TransportMode;
+
+    private string EditPinnedFingerprint(MikroTikRouter router) =>
+        IsEditing(router) && MikroTikRouterValidator.IsLowerHexSha256(RouterPin)
+            ? RouterPin!
+            : router.PinnedCertificateSha256 ?? string.Empty;
+
+    private static string TransportOptionLabel(MikroTikRouterTransportMode mode) =>
+        mode switch
+        {
+            MikroTikRouterTransportMode.PlainHttp => "Plain HTTP",
+            MikroTikRouterTransportMode.HttpsTrustAny => "HTTPS, trust any certificate",
+            MikroTikRouterTransportMode.HttpsPinned => "HTTPS, pinned certificate",
+            _ => mode.ToString(),
+        };
+
+    private static string TransportDisplay(MikroTikRouter router) =>
+        router.TransportMode switch
+        {
+            MikroTikRouterTransportMode.PlainHttp => "Plain HTTP",
+            MikroTikRouterTransportMode.HttpsTrustAny => "HTTPS (trust any certificate)",
+            MikroTikRouterTransportMode.HttpsPinned when router.PinnedCertificateSha256 is { Length: >= 12 } fingerprint =>
+                $"HTTPS (pinned {fingerprint[..12]}...)",
+            MikroTikRouterTransportMode.HttpsPinned => "HTTPS (pinned)",
+            _ => router.TransportMode.ToString(),
+        };
 
     private bool IsStalePending(HostUpgradeCommand command) =>
         HostUpgradeCommandPolicy.IsPendingStale(command, _now);

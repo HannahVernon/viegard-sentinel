@@ -7,6 +7,7 @@
 # see .gitignore).  The directory is mounted read-only and the file name is
 # the secret name, e.g. ./secrets/yahoo-imap-password.  Admin bootstrap
 # uses ./secrets/viegard-admin-bootstrap-password for the first operator.
+# The router registry credential key is ./secrets/viegard-router-credentials-key.
 #
 # IMPORTANT: the viegard-pipeline and viegard-admin containers run as the
 # non-root 'app' user (UID 1654) from the .NET base images, so each secret

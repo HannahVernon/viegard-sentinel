@@ -14,6 +14,8 @@ Create a directory with one file per secret (contents are the secret values; loc
 New-Item -ItemType Directory -Path C:\temp\viegard-local-secrets -Force | Out-Null
 Set-Content -Path C:\temp\viegard-local-secrets\viegard-db-password -Value 'replace-with-local-password' -NoNewline
 Set-Content -Path C:\temp\viegard-local-secrets\viegard-admin-bootstrap-password -Value 'replace-with-a-20-character-local-password' -NoNewline
+[Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)) |
+    Set-Content -Path C:\temp\viegard-local-secrets\viegard-router-credentials-key -NoNewline
 ```
 
 ## Empty admin UI with in-memory persistence

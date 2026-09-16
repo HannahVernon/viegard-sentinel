@@ -112,6 +112,9 @@ builder.Services.AddSingleton<AdminAuthAuditor>();
 builder.Services.AddSingleton<AdminConfigAuditor>();
 builder.Services.AddSingleton<SatelliteRoleCredentialCookie>();
 builder.Services.AddScoped<AdminCookieAuthenticationEvents>();
+builder.Services.AddSingleton<IRouterCredentialProtector, AesGcmRouterCredentialProtector>();
+builder.Services.AddSingleton<RouterCertificateFetcher>();
+builder.Services.AddSingleton<RouterConnectivityTester>();
 
 builder.Services
     .AddOptions<AdminWebAuthnOptions>()
@@ -212,6 +215,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<ISatelliteRoleStore, InMemorySatelliteRoleStore>();
+        builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();
         builder.Services.AddSingleton<IHostUpgradeCommandStore, InMemoryHostUpgradeCommandStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");

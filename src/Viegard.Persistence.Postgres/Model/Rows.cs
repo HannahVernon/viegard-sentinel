@@ -168,6 +168,8 @@ public sealed class ActionRecordRow
 
     public string? RollbackJson { get; set; }
 
+    public string? ResultsJson { get; set; }
+
     public DateTimeOffset RequestedAt { get; set; }
 
     public DateTimeOffset? CompletedAt { get; set; }

@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Options;
+using Viegard.Actions.MikroTik;
+using Viegard.Application.Actions;
 using Viegard.Application.Audit;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
@@ -66,6 +68,12 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<IGuardrailStateStore, InMemoryGuardrailStateStore>();
 
 builder.Services
+    .AddOptions<ActionWorkerOptions>()
+    .Bind(builder.Configuration.GetSection(ActionWorkerOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<ActionWorkerOptions>, ActionWorkerOptionsValidator>();
+
+builder.Services
     .AddOptions<ClassifierOptions>()
     .Bind(builder.Configuration.GetSection(ClassifierOptions.SectionName))
     .ValidateOnStart();
@@ -125,12 +133,15 @@ switch (persistenceProvider)
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
         var incidentsQueue = new ChannelWorkQueue<IncidentWorkItem>("incidents");
         var classificationsQueue = new ChannelWorkQueue<ClassificationWorkItem>("classifications");
+        var actionsQueue = new ChannelWorkQueue<ActionWorkItem>("actions");
         builder.Services.AddSingleton<IWorkQueue<Guid>>(eventsQueue);
         builder.Services.AddSingleton<IQueueStatsSource>(eventsQueue);
         builder.Services.AddSingleton<IWorkQueue<IncidentWorkItem>>(incidentsQueue);
         builder.Services.AddSingleton<IQueueStatsSource>(incidentsQueue);
         builder.Services.AddSingleton<IWorkQueue<ClassificationWorkItem>>(classificationsQueue);
         builder.Services.AddSingleton<IQueueStatsSource>(classificationsQueue);
+        builder.Services.AddSingleton<IWorkQueue<ActionWorkItem>>(actionsQueue);
+        builder.Services.AddSingleton<IQueueStatsSource>(actionsQueue);
         break;
 
     default:
@@ -281,6 +292,14 @@ if (configuredRoles.Contains(RoleNames.Policy, StringComparer.OrdinalIgnoreCase)
     builder.Services.AddSingleton<IPolicyEngine, DefaultPolicyEngine>();
     builder.Services.AddHostedService<PolicyThresholdRefreshWorker>();
     builder.Services.AddHostedService<PolicyWorker>();
+}
+
+// The action worker runs only in the singleton actions role (D-0011, D-0038).
+if (configuredRoles.Contains(RoleNames.Actions, StringComparer.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IMikroTikRouterHttpClientFactory, MikroTikRouterHttpClientFactory>();
+    builder.Services.AddSingleton<IActionProvider, MikroTikBanActionProvider>();
+    builder.Services.AddHostedService<ActionWorker>();
 }
 
 builder.Services.AddMaintenanceWorkers(configuredRoles);

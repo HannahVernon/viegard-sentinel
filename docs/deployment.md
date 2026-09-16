@@ -124,7 +124,7 @@ Policy-role instances refresh threshold settings through PostgreSQL notification
 
 ### MikroTik routers
 
-The router registry is managed at `/configuration#routers`.  It lets operators add, edit, enable, disable, delete, fetch certificates for, and test MikroTik border routers before the MikroTik action provider ships.  Managing the list now has no enforcement behavior.
+The router registry is managed at `/configuration#routers`.  It lets operators add, edit, enable, disable, delete, fetch certificates for, and test MikroTik border routers.  The MikroTik action provider consumes enabled routers, but it ships dark behind dry-run posture until the approval UI slice enqueues action work.
 
 Router credentials are stored encrypted in the database with AES-256-GCM.  The encryption key comes from the mounted secret file `viegard-router-credentials-key`, whose content must be base64 for exactly 32 random bytes.  The deploy script creates it when missing during both install and upgrade.  Replacing this file is key rotation, and it invalidates stored router credentials; re-enter each router password in the UI after rotating it.
 
@@ -148,6 +148,15 @@ curl -u viegard http://<router>/rest/ip/firewall/address-list
 ```
 
 The response should be a JSON array.  Prove the source restriction by running the same curl command from a non-Viegard host and observing that RouterOS rejects the request.
+
+Viegard bans are timed dynamic RouterOS address-list entries in the fixed `viegard-banned` list.  RouterOS clears dynamic entries during a router reboot, so active temporary bans do not survive reboot.  Firewall rules that consume the list are a one-time operator setup and are never created or changed by Viegard.
+
+Example operator-applied rules, with placeholder interface names:
+
+```routeros
+/ip firewall filter add chain=input in-interface=<wan-interface> src-address-list=viegard-banned action=drop comment="Drop Viegard banned sources to router"
+/ip firewall filter add chain=forward in-interface=<wan-interface> src-address-list=viegard-banned action=drop comment="Drop Viegard banned forwarded traffic"
+```
 
 ### Ingestion filters
 

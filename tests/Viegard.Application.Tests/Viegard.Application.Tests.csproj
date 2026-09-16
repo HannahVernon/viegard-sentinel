@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Viegard.Application\Viegard.Application.csproj" />
+    <ProjectReference Include="..\..\src\Viegard.Actions.MikroTik\Viegard.Actions.MikroTik.csproj" />
     <ProjectReference Include="..\..\src\Viegard.Persistence\Viegard.Persistence.csproj" />
     <ProjectReference Include="..\..\src\Viegard.PipelineHost\Viegard.PipelineHost.csproj" />
   </ItemGroup>

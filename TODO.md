@@ -46,7 +46,7 @@ When the project owner answers a question, remove or update the item here and re
 
 ### Actions / integrations
 
-- [ ] **MikroTik RouterOS API version and authentication method**; address-list names; expiration/timeout defaults.
+- [x] **MikroTik RouterOS API version and authentication method** - DECIDED 2026-09-16 (D-0038 and D-0006 amendments): RouterOS 7.x REST, dedicated source-restricted router accounts with `read`, `write`, `api`, and `rest-api`, fixed `viegard-banned` address list, 1d default ban with 7d and 30d approval choices.
 - [ ] **Fail2Ban integration mode**: adds entries, consumes events, manages jails, or input/output only.
 - [x] **Automatic-action thresholds**, maximum ban durations, cooldowns, and escalation rules - DECIDED provisionally by D-0027, 2026-08-20: temp ban 24h, repeat offender 7d after 3 incidents in 7d, max auto ban 30d, caps 20/hour and 100/day, circuit breaker after 5 consecutive action failures or cap breach.  Calibrate after dry-run deployment.
 - [x] **Protected IP ranges** - DECIDED (D-0026, 2026-08-20): default list of all RFC 1918 + CGNAT + loopback + link-local + ULA + artifact guards (IPv4 and IPv6); operator-extensible at setup and via the admin UI.  the project owner's own public statics are deployment configuration (recorded privately, never in this repo); the admin UI protected-list editor is Phase 8 work.
@@ -85,7 +85,7 @@ When the project owner answers a question, remove or update the item here and re
 - [ ] **Phase 7: Actions** - DECIDED 2026-09-16 (D-0038): increment one is manual-approval network enforcement.  Build order:
   - [x] **Policy thresholds /configuration slice** - DONE 2026-09-16: review severity/confidence and unattended confidence seeded from env, UI-edited, LISTEN/NOTIFY to the policy engine (D-0029 slice).
   - [x] **Router registry /configuration slice** - DONE 2026-09-16: UI-managed MikroTik router list, AES-256-GCM encrypted credentials (D-0006 amendment), per-router transport mode (HTTP / HTTPS any-cert / HTTPS pinned), certificate fetch-and-pin workflow, connectivity test.
-  - [ ] **MikroTik action provider**: RouterOS REST API, `viegard-banned` address-list entries with timeouts only (never firewall rules), fan-out to all enabled routers, per-router results with automatic retry, D-0026 protected-range guard inside the provider, dry-run mode logging exact calls first.
+  - [x] **MikroTik action provider** - DONE 2026-09-16: RouterOS REST API, `viegard-banned` address-list entries with timeouts only (never firewall rules), fan-out to all enabled routers, per-router results with automatic retry, D-0026 protected-range guard inside the provider, dry-run mode logging exact calls first.
   - [ ] **Approval UI**: approve/reject on RequireApproval decisions with 1d/7d/30d duration choice, unban on action records, step-up gated, fully audited.
   - [ ] **Crawler verification**: forward-confirmed rDNS against known crawler domains; verified crawlers never proposed for bans.
   - [ ] **Rate-based burst detection (propose-only)**: proposals for calibration; action tier deliberately absent until the unattended tier is enabled.

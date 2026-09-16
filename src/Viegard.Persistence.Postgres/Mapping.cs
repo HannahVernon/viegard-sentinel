@@ -171,6 +171,7 @@ internal static class Mapping
         Status = (int)action.Status,
         Error = action.Error,
         RollbackJson = action.RollbackJson,
+        ResultsJson = action.ResultsJson,
         RequestedAt = Utc(action.RequestedAt),
         CompletedAt = Utc(action.CompletedAt),
     };
@@ -185,6 +186,7 @@ internal static class Mapping
         Status = (ActionStatus)row.Status,
         Error = row.Error,
         RollbackJson = row.RollbackJson,
+        ResultsJson = row.ResultsJson,
         RequestedAt = row.RequestedAt,
         CompletedAt = row.CompletedAt,
     };

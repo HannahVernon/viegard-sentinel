@@ -1,7 +1,6 @@
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
-using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Viegard.Application.Configuration;
 
@@ -96,12 +95,6 @@ public sealed record RouterCertificateInfo(
 {
     public string FingerprintDisplay =>
         MikroTikRouterValidator.FingerprintDisplay(Sha256Fingerprint);
-}
-
-public static class RouterCertificateFingerprint
-{
-    public static string Sha256LowerHex(X509Certificate certificate) =>
-        Convert.ToHexString(SHA256.HashData(certificate.GetRawCertData())).ToLowerInvariant();
 }
 
 public sealed class RouterProbeException : Exception

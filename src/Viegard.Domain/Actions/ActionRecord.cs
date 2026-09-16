@@ -39,6 +39,9 @@ public sealed record ActionRecord
     /// <summary>Serialized information sufficient to reverse the action, when reversible.</summary>
     public string? RollbackJson { get; init; }
 
+    /// <summary>Serialized per-target execution results.  Never contains secrets.</summary>
+    public string? ResultsJson { get; init; }
+
     public required DateTimeOffset RequestedAt { get; init; }
 
     public DateTimeOffset? CompletedAt { get; init; }

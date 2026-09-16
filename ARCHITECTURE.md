@@ -125,7 +125,8 @@ src/
   Viegard.Application/         Ports (interfaces), deterministic classification,
                                pipeline orchestration, policy engine, prompt assembly,
                                schema validation, guardrails, admin auth helpers,
-                               router credential protection, and admin list filter helpers
+                               router credential protection, router transport helpers, and
+                               admin list filter helpers
   Viegard.Persistence/         Store implementations (in-memory/file first; DB when chosen),
                                including router registry stores
   Viegard.Sources.Imap/        IMAP data source adapter (MailKit)
@@ -141,7 +142,7 @@ src/
   Viegard.Actions.Fail2Ban/    Fail2Ban integration (mode TBD)
   Viegard.Notifications.Email/ Operator status/alert emails via SMTP (MailKit)
   Viegard.PipelineHost/        Worker service executable, including ingestion,
-                               correlation, classification, policy, and
+                               correlation, classification, policy, actions, and
                                maintenance retention and ingestion-filter workers
   Viegard.AdminApi/            Admin API executable, auth endpoints, WebAuthn adapter,
                                static SSR pages, configuration editors, router probes, display preferences,
@@ -211,7 +212,7 @@ Type | Key fields
 `Incident` | id, correlation key/dimensions, time window, member event ids, evidence items with scores, state
 `Classification` | id, subject (incident or message), classifier id, model + version + prompt/template version (when AI), category, confidence, severity, reasons, recommended action, uncertainty; **schema-validated before use**
 `Decision` | id, classification id, policy id + version, outcome, rationale, guardrail evaluations (protected lists, rate caps, circuit breaker, dry-run, approval mode)
-`ActionRecord` | id, decision id, provider, operation, parameters, result, error, rollback info, timestamps
+`ActionRecord` | id, decision id, provider, operation, parameters, per-target results, error, rollback info, timestamps
 `AuditRecord` | Links the entire chain: event -> incident -> classification -> decision -> action; answers "why was this IP blocked?" / "why was this email moved?" without raw-log reconstruction
 `Correction` | Human feedback (AI said X, the operator said Y), stored separately from the original classification
 
@@ -224,7 +225,7 @@ Boundary | Rule
 Untrusted data | All observed content (bodies, subjects, URLs, User-Agents, filenames, log lines) is data, never instructions.  It enters prompts only inside clearly delimited untrusted-data blocks via prompt templates; it never reaches shell, SQL, RouterOS, or file paths unescaped.
 Inference | Prompt assembly separates SYSTEM / APPLICATION / UNTRUSTED-OBSERVED-DATA.  Model output is parsed against a strict schema; anything malformed, incomplete, oversized, or contradictory is discarded and recorded as an AI failure.  Local-only by default; no silent fallback to remote.
 Policy | The policy engine is the only path to actions.  Guardrails (protected addresses/networks/hosts, action rate caps, max ban duration, cooldowns, circuit breaker, emergency stop, dry-run, approval mode) are enforced here and cannot be bypassed by any classifier.
-Actions | Providers expose a closed catalog of typed operations (e.g., `AddAddressListEntry(ip, list, ttl)`), never command strings.  IP syntax, private/reserved ranges, and protected lists are validated at this layer too (defense in depth).  Destructive operations (mail delete, firewall change) ship disabled and require explicit configuration.
+Actions | Providers expose a closed catalog of typed operations (e.g., `AddAddressListEntry(ip, list, ttl)`), never command strings.  IP syntax, private/reserved ranges, and protected lists are validated at this layer too (defense in depth).  Destructive operations (mail delete, firewall change) ship disabled and require explicit configuration.  The MikroTik provider writes timed entries only to the fixed `viegard-banned` address list and reports per-router outcomes for retry and audit.
 Admin | Separate process; local accounts with cookie authentication backed by server-side revocable sessions, mandatory TOTP, WebAuthn security keys, recovery codes, step-up verification, rate limiting, and fail-closed AllowedSources (D-0032/D-0033).  Satellite database role management is step-up-gated, audited without passwords, and displays generated passwords once via a short-lived protected cookie.  Commands are durable, validated, and audited; the admin API cannot invoke actions directly.
 Secrets | `ISecretProvider` only.  Never in source, config in git, logs, prompts, exceptions, telemetry, audit records, or docs.
 

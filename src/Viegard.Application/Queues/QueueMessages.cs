@@ -5,3 +5,6 @@ public readonly record struct IncidentWorkItem(Guid IncidentId);
 
 /// <summary>Queue payload for policy evaluation work.</summary>
 public readonly record struct ClassificationWorkItem(Guid ClassificationId);
+
+/// <summary>Queue payload for action execution work.</summary>
+public readonly record struct ActionWorkItem(Guid ActionId);

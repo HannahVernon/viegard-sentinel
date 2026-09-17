@@ -141,6 +141,27 @@ deployed_commit_label() {
     fi
 }
 
+# The pipeline image bakes in no roles (least privilege; .NET configuration
+# arrays merge by index, so baked-in defaults leaked roles into instances
+# that tried to override them - see D-0011).  The deployed compose files
+# must therefore declare the pipeline roles explicitly.  Refuse to build a
+# stack whose compose files never mention Viegard__Host__Roles__ so an
+# upgrade cannot silently produce a role-less (or maintenance-only) pipeline.
+require_declared_roles() {
+    local d; d="$(compose_dir)"
+    if grep -q 'Viegard__Host__Roles__' "$d/docker-compose.yml" 2>/dev/null; then
+        return 0
+    fi
+
+    die "docker-compose.yml does not declare pipeline roles.  Add these lines to the viegard-pipeline service environment (the generated overlay adds maintenance at index 9):
+      Viegard__Host__Roles__0: sources
+      Viegard__Host__Roles__1: correlation
+      Viegard__Host__Roles__2: classification
+      Viegard__Host__Roles__3: policy
+      Viegard__Host__Roles__4: actions
+then run upgrade again."
+}
+
 # The Docker build context excludes .git, so SourceLink cannot stamp the
 # commit SHA inside container builds.  Write the clone HEAD to a file in the
 # build context; the Dockerfiles pass it to dotnet publish as
@@ -553,6 +574,7 @@ cmd_upgrade() {
     git -C "$DIR" pull --ff-only origin "$BRANCH"
     after="$(git -C "$DIR" rev-parse HEAD)"
     ensure_router_credentials_key_secret
+    require_declared_roles
     deployed="$(read_deployed_commit)"
 
     marker_matches=0

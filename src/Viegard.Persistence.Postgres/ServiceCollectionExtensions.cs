@@ -144,6 +144,11 @@ public static class ServiceCollectionExtensions
 
         var factory = services.GetRequiredService<IDbContextFactory<ViegardDbContext>>();
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        // Migrations can run long DDL (index builds over multi-million-row
+        // tables), far beyond the 30-second command timeout that protects
+        // normal queries.  Raise the timeout on THIS context instance only;
+        // runtime queries keep the default.
+        db.Database.SetCommandTimeout((int)TimeSpan.FromMinutes(60).TotalSeconds);
         await db.Database.MigrateAsync(cancellationToken).ConfigureAwait(false);
     }
 }

@@ -227,7 +227,7 @@ public sealed class MikroTikActionProviderTests
     {
         var fixture = new ProviderFixture();
         var router = await fixture.AddRouterAsync("router-a");
-        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1"},{".id":"*2"}]"""));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","list":"viegard-banned","address":"203.0.113.10"},{".id":"*2","list":"viegard-banned","address":"203.0.113.10"}]"""));
         fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, "{}"));
         fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.NoContent, string.Empty));
 
@@ -236,10 +236,108 @@ public sealed class MikroTikActionProviderTests
 
         Assert.Equal(ActionStatus.Succeeded, result.Status);
         Assert.Equal(["GET", "DELETE", "DELETE"], fixture.Http.Requests.Select(r => r.Method).ToArray());
-        Assert.EndsWith("/%2A1", fixture.Http.Requests[1].Url, StringComparison.Ordinal);
-        Assert.EndsWith("/%2A2", fixture.Http.Requests[2].Url, StringComparison.Ordinal);
+        // RouterOS requires the entry id verbatim in the path; a
+        // percent-encoded asterisk (%2A) is rejected with HTTP 400
+        // (live-verified on RouterOS 7.24.2, 2026-09-17).
+        Assert.EndsWith("/*1", fixture.Http.Requests[1].Url, StringComparison.Ordinal);
+        Assert.EndsWith("/*2", fixture.Http.Requests[2].Url, StringComparison.Ordinal);
         Assert.Contains("Removed 2", Assert.Single(Results(result)).Detail, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Remove_ban_fails_closed_on_an_unrecognized_entry_id()
+    {
+        var fixture = new ProviderFixture();
+        var router = await fixture.AddRouterAsync("router-a");
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"../../system/reboot","list":"viegard-banned","address":"203.0.113.10"}]"""));
+
+        var result = await fixture.Provider.ExecuteAsync(
+            Action(MikroTikBanActionProvider.RemoveBanOperationId, new { ip = "203.0.113.10" }));
+
+        Assert.Equal(ActionStatus.Pending, result.Status);
+        Assert.Equal(["GET"], fixture.Http.Requests.Select(r => r.Method).ToArray());
+        var item = Assert.Single(Results(result));
+        Assert.Equal("failed", item.Status);
+        Assert.Contains("refusing to delete", item.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Remove_ban_failure_detail_redacts_credential_material_from_the_body()
+    {
+        var fixture = new ProviderFixture();
+        var router = await fixture.AddRouterAsync("router-a", password: "super-secret-password");
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","list":"viegard-banned","address":"203.0.113.10"}]"""));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.BadRequest, "super-secret-password"));
+
+        var result = await fixture.Provider.ExecuteAsync(
+            Action(MikroTikBanActionProvider.RemoveBanOperationId, new { ip = "203.0.113.10" }));
+
+        Assert.DoesNotContain("super-secret-password", result.ResultsJson, StringComparison.Ordinal);
+        var item = Assert.Single(Results(result));
+        Assert.Contains("[redacted]", item.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Remove_ban_refuses_entries_from_other_lists()
+    {
+        var fixture = new ProviderFixture();
+        var router = await fixture.AddRouterAsync("router-a");
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","list":"corp-allowlist","address":"203.0.113.10"}]"""));
+
+        var result = await fixture.Provider.ExecuteAsync(
+            Action(MikroTikBanActionProvider.RemoveBanOperationId, new { ip = "203.0.113.10" }));
+
+        Assert.Equal(["GET"], fixture.Http.Requests.Select(r => r.Method).ToArray());
+        var item = Assert.Single(Results(result));
+        Assert.Equal("failed", item.Status);
+        Assert.Contains("refusing to delete", item.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Remove_ban_refuses_entries_for_other_addresses()
+    {
+        var fixture = new ProviderFixture();
+        var router = await fixture.AddRouterAsync("router-a");
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","list":"viegard-banned","address":"198.51.100.99"}]"""));
+
+        var result = await fixture.Provider.ExecuteAsync(
+            Action(MikroTikBanActionProvider.RemoveBanOperationId, new { ip = "203.0.113.10" }));
+
+        Assert.Equal(["GET"], fixture.Http.Requests.Select(r => r.Method).ToArray());
+        var item = Assert.Single(Results(result));
+        Assert.Equal("failed", item.Status);
+        Assert.Contains("refusing to delete", item.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Remove_ban_failure_detail_includes_the_router_response_body()
+    {
+        var fixture = new ProviderFixture();
+        var router = await fixture.AddRouterAsync("router-a");
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","list":"viegard-banned","address":"203.0.113.10"}]"""));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.BadRequest, "{\"detail\":\"no such item\"}"));
+
+        var result = await fixture.Provider.ExecuteAsync(
+            Action(MikroTikBanActionProvider.RemoveBanOperationId, new { ip = "203.0.113.10" }));
+
+        var item = Assert.Single(Results(result));
+        Assert.Equal("failed", item.Status);
+        Assert.Contains("HTTP 400", item.Detail, StringComparison.Ordinal);
+        Assert.Contains("no such item", item.Detail, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("*1", true)]
+    [InlineData("*4A", true)]
+    [InlineData("*bad", true)]
+    [InlineData("*", false)]
+    [InlineData("4A", false)]
+    [InlineData("*4G", false)]
+    [InlineData("*4A/extra", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void Entry_id_validation_accepts_only_asterisk_hex(string? id, bool expected) =>
+        Assert.Equal(expected, MikroTikBanActionProvider.IsValidEntryId(id));
 
     [Fact]
     public async Task Remove_ban_removes_active_ban_before_router_fanout()

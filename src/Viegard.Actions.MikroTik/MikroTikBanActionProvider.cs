@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Authentication;
@@ -332,10 +333,11 @@ public sealed class MikroTikBanActionProvider(
         {
             var password = credentialProtector.Unprotect(savedRouter.Id, ciphertext);
             authBytes = Encoding.UTF8.GetBytes($"{savedRouter.Username}:{password}");
+            string[] sensitiveValues = [savedRouter.Username, password];
 
             var result = normalized.OperationId == BanIpOperationId
-                ? await ExecuteBanAsync(client, savedRouter, normalized, authBytes, cancellationToken).ConfigureAwait(false)
-                : await ExecuteRemoveAsync(client, savedRouter, normalized, authBytes, cancellationToken).ConfigureAwait(false);
+                ? await ExecuteBanAsync(client, savedRouter, normalized, authBytes, sensitiveValues, cancellationToken).ConfigureAwait(false)
+                : await ExecuteRemoveAsync(client, savedRouter, normalized, authBytes, sensitiveValues, cancellationToken).ConfigureAwait(false);
             return result with
             {
                 RouterId = savedRouter.Id,
@@ -379,6 +381,7 @@ public sealed class MikroTikBanActionProvider(
         MikroTikRouter router,
         NormalizedAction normalized,
         byte[] authBytes,
+        IReadOnlyList<string> sensitiveValues,
         CancellationToken cancellationToken)
     {
         var body = BanBody(normalized);
@@ -398,7 +401,10 @@ public sealed class MikroTikBanActionProvider(
             return AppliedResult("Router reported an existing duplicate entry; treated as applied.");
         }
 
-        return FailedResult($"Router returned HTTP {(int)response.StatusCode} {OneLine(response.ReasonPhrase, 80)}.".Trim());
+        return FailedResult(WithBodyDetail(
+            $"Router returned HTTP {(int)response.StatusCode} {OneLine(response.ReasonPhrase, 80)}.".Trim(),
+            responseBody,
+            sensitiveValues));
     }
 
     private static async Task<MikroTikRouterActionResult> ExecuteRemoveAsync(
@@ -406,6 +412,7 @@ public sealed class MikroTikBanActionProvider(
         MikroTikRouter router,
         NormalizedAction normalized,
         byte[] authBytes,
+        IReadOnlyList<string> sensitiveValues,
         CancellationToken cancellationToken)
     {
         using var get = AuthorizedRequest(HttpMethod.Get, AddressListQueryUrl(router, normalized.Ip), authBytes);
@@ -414,22 +421,35 @@ public sealed class MikroTikBanActionProvider(
         var getBody = await ReadBodyPrefixTextAsync(getResponse.Content, cancellationToken).ConfigureAwait(false);
         if (!getResponse.IsSuccessStatusCode)
         {
-            return FailedResult($"Router lookup returned HTTP {(int)getResponse.StatusCode} {OneLine(getResponse.ReasonPhrase, 80)}.".Trim());
+            return FailedResult(WithBodyDetail(
+                $"Router lookup returned HTTP {(int)getResponse.StatusCode} {OneLine(getResponse.ReasonPhrase, 80)}.".Trim(),
+                getBody,
+                sensitiveValues));
         }
 
         List<string> ids;
+        int returnedEntries;
         try
         {
-            ids = ExtractEntryIds(getBody);
+            (ids, returnedEntries) = ExtractRemovableEntryIds(getBody, normalized.Ip);
         }
         catch (JsonException)
         {
             return FailedResult("Router lookup response was not valid JSON.");
         }
 
-        if (ids.Count == 0)
+        if (returnedEntries == 0)
         {
             return AppliedResult("No matching ban entries found; treated as applied.");
+        }
+
+        if (ids.Count == 0)
+        {
+            // Entries came back, but none was verifiably ours.  A failed
+            // server-side filter must never widen the deletion scope, so
+            // refuse instead of deleting.
+            return FailedResult(
+                $"Router lookup returned {returnedEntries.ToString(CultureInfo.InvariantCulture)} entries, but none matched list '{AddressListName}' and address {normalized.Ip} with a recognized id; refusing to delete.");
         }
 
         var removed = 0;
@@ -438,11 +458,13 @@ public sealed class MikroTikBanActionProvider(
             using var delete = AuthorizedRequest(HttpMethod.Delete, AddressListEntryUrl(router, id), authBytes);
             using var deleteResponse = await client.SendAsync(delete, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
-            _ = await ReadBodyPrefixTextAsync(deleteResponse.Content, cancellationToken).ConfigureAwait(false);
+            var deleteBody = await ReadBodyPrefixTextAsync(deleteResponse.Content, cancellationToken).ConfigureAwait(false);
             if (!deleteResponse.IsSuccessStatusCode)
             {
-                return FailedResult(
-                    $"Router delete returned HTTP {(int)deleteResponse.StatusCode} {OneLine(deleteResponse.ReasonPhrase, 80)}.".Trim());
+                return FailedResult(WithBodyDetail(
+                    $"Router delete returned HTTP {(int)deleteResponse.StatusCode} {OneLine(deleteResponse.ReasonPhrase, 80)}.".Trim(),
+                    deleteBody,
+                    sensitiveValues));
             }
 
             removed++;
@@ -761,9 +783,32 @@ public sealed class MikroTikBanActionProvider(
         $"{AddressListUrl(router)}?list={Uri.EscapeDataString(AddressListName)}&address={Uri.EscapeDataString(ip)}";
 
     private static string AddressListEntryUrl(MikroTikRouter router, string id) =>
-        $"{AddressListUrl(router)}/{Uri.EscapeDataString(id)}";
+        // RouterOS entry ids ('*' + hex) must appear verbatim in the path:
+        // the router does not decode a percent-encoded asterisk (%2A) when
+        // matching ids and answers 400.  Ids are validated by
+        // IsValidEntryId before they reach this URL.
+        $"{AddressListUrl(router)}/{id}";
 
-    private static List<string> ExtractEntryIds(string json)
+    /// <summary>RouterOS .id values are an asterisk followed by hex digits.</summary>
+    public static bool IsValidEntryId([NotNullWhen(true)] string? id)
+    {
+        if (string.IsNullOrEmpty(id) || id[0] != '*' || id.Length < 2)
+        {
+            return false;
+        }
+
+        for (var index = 1; index < id.Length; index++)
+        {
+            if (!Uri.IsHexDigit(id[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static (List<string> Ids, int ReturnedEntries) ExtractRemovableEntryIds(string json, string targetIp)
     {
         using var document = JsonDocument.Parse(json);
         if (document.RootElement.ValueKind != JsonValueKind.Array)
@@ -771,20 +816,49 @@ public sealed class MikroTikBanActionProvider(
             throw new JsonException("Router lookup response was not a JSON array.");
         }
 
+        // Trust nothing about server-side filtering: an entry is removable
+        // only when it verifiably belongs to the Viegard-owned list, names
+        // the requested address, and carries a well-formed id.  Anything
+        // else is excluded so a broken filter can never widen the deletion
+        // scope to entries Viegard does not own.
         var ids = new List<string>();
+        var returnedEntries = 0;
         foreach (var entry in document.RootElement.EnumerateArray())
         {
-            if (entry.ValueKind == JsonValueKind.Object
-                && entry.TryGetProperty(".id", out var idProperty)
-                && idProperty.ValueKind == JsonValueKind.String
-                && !string.IsNullOrWhiteSpace(idProperty.GetString()))
+            returnedEntries++;
+            if (entry.ValueKind != JsonValueKind.Object
+                || !entry.TryGetProperty(".id", out var idProperty)
+                || idProperty.ValueKind != JsonValueKind.String
+                || !IsValidEntryId(idProperty.GetString()))
             {
-                ids.Add(idProperty.GetString()!);
+                continue;
             }
+
+            if (!entry.TryGetProperty("list", out var listProperty)
+                || listProperty.ValueKind != JsonValueKind.String
+                || !string.Equals(listProperty.GetString(), AddressListName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!entry.TryGetProperty("address", out var addressProperty)
+                || addressProperty.ValueKind != JsonValueKind.String
+                || !AddressMatches(addressProperty.GetString(), targetIp))
+            {
+                continue;
+            }
+
+            ids.Add(idProperty.GetString()!);
         }
 
-        return ids;
+        return (ids, returnedEntries);
     }
+
+    private static bool AddressMatches(string? entryAddress, string targetIp) =>
+        !string.IsNullOrWhiteSpace(entryAddress)
+        && IPAddress.TryParse(entryAddress.Trim(), out var entryParsed)
+        && IPAddress.TryParse(targetIp, out var targetParsed)
+        && entryParsed.Equals(targetParsed);
 
     private static async ValueTask<string> ReadBodyPrefixTextAsync(
         HttpContent content,
@@ -830,6 +904,31 @@ public sealed class MikroTikBanActionProvider(
     {
         var sanitized = (value ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ');
         return sanitized.Length <= maxChars ? sanitized : sanitized[..maxChars];
+    }
+
+    private static string WithBodyDetail(string detail, string responseBody, IReadOnlyList<string> sensitiveValues)
+    {
+        // The response body carries the router's actual objection (for
+        // example which id it rejected); without it a bare status code has
+        // already cost a full diagnosis round-trip.  Bodies can echo
+        // credential material, so known sensitive values are redacted
+        // before anything is recorded.
+        var snippet = OneLine(RedactSensitiveValues(responseBody, sensitiveValues), 160).Trim();
+        return snippet.Length == 0 ? detail : $"{detail}  Router response: {snippet}";
+    }
+
+    public static string RedactSensitiveValues(string text, IReadOnlyList<string> sensitiveValues)
+    {
+        var result = text;
+        foreach (var value in sensitiveValues)
+        {
+            if (!string.IsNullOrEmpty(value))
+            {
+                result = result.Replace(value, "[redacted]", StringComparison.Ordinal);
+            }
+        }
+
+        return result;
     }
 
     private static string BoundDetail(string value) => OneLine(value, MaxDetailChars);

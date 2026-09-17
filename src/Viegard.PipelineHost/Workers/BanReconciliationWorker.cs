@@ -180,6 +180,7 @@ public sealed class BanReconciliationWorker(
         {
             var password = credentialProtector.Unprotect(savedRouter.Id, ciphertext);
             authBytes = Encoding.UTF8.GetBytes($"{savedRouter.Username}:{password}");
+            string[] sensitiveValues = [savedRouter.Username, password];
 
             var read = await ReadAddressListAsync(client, savedRouter, authBytes, cancellationToken).ConfigureAwait(false);
             if (read.Truncated)
@@ -190,7 +191,23 @@ public sealed class BanReconciliationWorker(
                     $"Viegard-owned address-list response exceeded {MaxListBodyBytes.ToString(CultureInfo.InvariantCulture)} bytes.");
             }
 
-            var actual = ParseAddressListEntries(read.Body);
+            var parsed = ParseAddressListEntries(read.Body);
+            // Trust nothing about server-side filtering: only entries whose
+            // own list property names the Viegard-owned list participate in
+            // reconciliation.  Foreign entries are reported and left alone,
+            // so a broken query filter can never widen removal scope to
+            // address lists Viegard does not own.
+            var actual = parsed.Where(entry => entry.InOwnedList).ToList();
+            var foreignCount = parsed.Count - actual.Count;
+            if (foreignCount > 0)
+            {
+                logger.LogWarning(
+                    "Ban reconciliation on {RouterName} received {ForeignCount} entries outside address list '{ListName}' despite the filtered query; they were excluded from reconciliation.",
+                    savedRouter.Name,
+                    foreignCount,
+                    MikroTikBanActionProvider.AddressListName);
+            }
+
             var actualIps = actual
                 .Where(entry => entry.CanonicalIp is not null)
                 .Select(entry => entry.CanonicalIp!)
@@ -252,17 +269,17 @@ public sealed class BanReconciliationWorker(
 
             foreach (var entry in extraneous)
             {
-                if (string.IsNullOrWhiteSpace(entry.Id))
+                if (!MikroTikBanActionProvider.IsValidEntryId(entry.Id))
                 {
                     logger.LogWarning(
-                        "Ban reconciliation could not remove an extraneous router entry on {RouterName} because the entry id was missing.",
+                        "Ban reconciliation could not remove an extraneous router entry on {RouterName} because the entry id was missing or unrecognized.",
                         savedRouter.Name);
                     continue;
                 }
 
                 try
                 {
-                    if (await RemoveExtraneousAsync(client, savedRouter, entry.Id, authBytes, cancellationToken).ConfigureAwait(false))
+                    if (await RemoveExtraneousAsync(client, savedRouter, entry.Id, authBytes, sensitiveValues, cancellationToken).ConfigureAwait(false))
                     {
                         removed.Add(RemovalDisplay(entry));
                     }
@@ -382,19 +399,23 @@ public sealed class BanReconciliationWorker(
         MikroTikRouter router,
         string entryId,
         byte[] authBytes,
+        IReadOnlyList<string> sensitiveValues,
         CancellationToken cancellationToken)
     {
         using var request = AuthorizedRequest(HttpMethod.Delete, AddressListEntryUrl(router, entryId), authBytes);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
-        _ = await ReadBodyPrefixTextAsync(response.Content, MaxErrorBodyBytes, cancellationToken).ConfigureAwait(false);
+        var responseBody = await ReadBodyPrefixTextAsync(response.Content, MaxErrorBodyBytes, cancellationToken).ConfigureAwait(false);
         if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound)
         {
             return true;
         }
 
+        var detail = $"Router delete returned HTTP {(int)response.StatusCode} {OneLine(response.ReasonPhrase, 80)}.".Trim();
+        var snippet = OneLine(
+            MikroTikBanActionProvider.RedactSensitiveValues(responseBody.Text, sensitiveValues), 160).Trim();
         throw new InvalidOperationException(
-            $"Router delete returned HTTP {(int)response.StatusCode} {OneLine(response.ReasonPhrase, 80)}.".Trim());
+            snippet.Length == 0 ? detail : $"{detail}  Router response: {snippet}");
     }
 
     private static IReadOnlyDictionary<string, DesiredBan> BuildDesiredMap(
@@ -425,16 +446,18 @@ public sealed class BanReconciliationWorker(
         {
             if (element.ValueKind != JsonValueKind.Object)
             {
-                entries.Add(new RouterAddressListEntry(null, string.Empty, null));
+                entries.Add(new RouterAddressListEntry(null, string.Empty, null, false));
                 continue;
             }
 
             var id = GetString(element, ".id");
             var address = GetString(element, "address") ?? string.Empty;
+            var list = GetString(element, "list");
             entries.Add(new RouterAddressListEntry(
                 id,
                 address,
-                TryCanonicalizeIp(address, out var ip) ? ip : null));
+                TryCanonicalizeIp(address, out var ip) ? ip : null,
+                string.Equals(list, MikroTikBanActionProvider.AddressListName, StringComparison.Ordinal)));
         }
 
         return entries;
@@ -507,7 +530,10 @@ public sealed class BanReconciliationWorker(
         $"{AddressListUrl(router)}?list={Uri.EscapeDataString(MikroTikBanActionProvider.AddressListName)}";
 
     private static string AddressListEntryUrl(MikroTikRouter router, string id) =>
-        $"{AddressListUrl(router)}/{Uri.EscapeDataString(id)}";
+        // RouterOS entry ids ('*' + hex) must appear verbatim: the router
+        // does not decode a percent-encoded asterisk when matching ids and
+        // answers 400.  Ids are validated before they reach this URL.
+        $"{AddressListUrl(router)}/{id}";
 
     private static string DetailJson(BanReconciliationCycleResult cycle) =>
         JsonSerializer.Serialize(new
@@ -562,7 +588,7 @@ public sealed class BanReconciliationWorker(
 
     private sealed record DesiredBan(ActiveBan Ban, TimeSpan Remaining);
 
-    private sealed record RouterAddressListEntry(string? Id, string Address, string? CanonicalIp);
+    private sealed record RouterAddressListEntry(string? Id, string Address, string? CanonicalIp, bool InOwnedList);
 
     private sealed record AddressListReadResult(string Body, bool Truncated);
 

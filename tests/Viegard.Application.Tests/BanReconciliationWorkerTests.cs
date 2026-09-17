@@ -44,19 +44,40 @@ public sealed class BanReconciliationWorkerTests
     }
 
     [Fact]
+    public async Task Reconciler_leaves_foreign_list_entries_alone_and_still_adds_missing()
+    {
+        var fixture = new ProviderFixture();
+        var audit = new InMemoryAuditLedger();
+        var router = await fixture.AddRouterAsync("router-a");
+        await fixture.ActiveBanRows.UpsertByIpAsync(CreateActiveBan(fixture, "203.0.113.10", TimeSpan.FromMinutes(5)));
+        // The same IP already exists in a DIFFERENT address list: it must
+        // neither satisfy the desired ban nor be deleted, even though the
+        // router returned it despite the filtered query.
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*7","list":"corp-allowlist","address":"203.0.113.10"}]"""));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.Created, "{}"));
+
+        var result = await Worker(fixture, audit).RunCycleAsync();
+
+        Assert.Equal(["GET", "PUT"], fixture.Http.Requests.Select(request => request.Method).ToArray());
+        var routerResult = Assert.Single(result.Routers);
+        Assert.Equal("203.0.113.10", Assert.Single(routerResult.Added));
+        Assert.Empty(routerResult.Removed);
+    }
+
+    [Fact]
     public async Task Reconciler_removes_extraneous_entries()
     {
         var fixture = new ProviderFixture();
         var audit = new InMemoryAuditLedger();
         var router = await fixture.AddRouterAsync("router-a");
-        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","address":"198.51.100.7"}]"""));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","list":"viegard-banned","address":"198.51.100.7"}]"""));
         fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.NoContent, string.Empty));
 
         var result = await Worker(fixture, audit).RunCycleAsync();
 
         Assert.True(result.Changed);
         Assert.Equal(["GET", "DELETE"], fixture.Http.Requests.Select(request => request.Method).ToArray());
-        Assert.EndsWith("/%2A1", fixture.Http.Requests[1].Url, StringComparison.Ordinal);
+        Assert.EndsWith("/*1", fixture.Http.Requests[1].Url, StringComparison.Ordinal);
         Assert.Equal("198.51.100.7", Assert.Single(Assert.Single(result.Routers).Removed));
         Assert.Single(audit.Snapshot());
     }
@@ -67,14 +88,28 @@ public sealed class BanReconciliationWorkerTests
         var fixture = new ProviderFixture();
         var audit = new InMemoryAuditLedger();
         var router = await fixture.AddRouterAsync("router-a");
-        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*bad","address":"manual-entry"}]"""));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*bad","list":"viegard-banned","address":"manual-entry"}]"""));
         fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, "{}"));
 
         var result = await Worker(fixture, audit).RunCycleAsync();
 
         Assert.Equal(["GET", "DELETE"], fixture.Http.Requests.Select(request => request.Method).ToArray());
-        Assert.EndsWith("/%2Abad", fixture.Http.Requests[1].Url, StringComparison.Ordinal);
+        Assert.EndsWith("/*bad", fixture.Http.Requests[1].Url, StringComparison.Ordinal);
         Assert.Equal("manual-entry", Assert.Single(Assert.Single(result.Routers).Removed));
+    }
+
+    [Fact]
+    public async Task Reconciler_skips_extraneous_entries_with_unrecognized_ids()
+    {
+        var fixture = new ProviderFixture();
+        var audit = new InMemoryAuditLedger();
+        var router = await fixture.AddRouterAsync("router-a");
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"../../system/reboot","list":"viegard-banned","address":"198.51.100.7"}]"""));
+
+        var result = await Worker(fixture, audit).RunCycleAsync();
+
+        Assert.Equal(["GET"], fixture.Http.Requests.Select(request => request.Method).ToArray());
+        Assert.Empty(Assert.Single(result.Routers).Removed);
     }
 
     [Fact]
@@ -104,7 +139,7 @@ public sealed class BanReconciliationWorkerTests
         var router = await fixture.AddRouterAsync("router-a");
         await fixture.ActiveBanRows.UpsertByIpAsync(CreateActiveBan(fixture, "203.0.113.10", TimeSpan.FromMinutes(5)));
         await fixture.ActiveBanRows.UpsertByIpAsync(CreateActiveBan(fixture, "203.0.113.99", -TimeSpan.FromMinutes(1)));
-        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","address":"198.51.100.7"}]"""));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","list":"viegard-banned","address":"198.51.100.7"}]"""));
 
         var result = await Worker(fixture, audit, dryRun: true).RunCycleAsync();
 
@@ -140,7 +175,7 @@ public sealed class BanReconciliationWorkerTests
         var audit = new InMemoryAuditLedger();
         var router = await fixture.AddRouterAsync("router-a");
         await fixture.ActiveBanRows.UpsertByIpAsync(CreateActiveBan(fixture, "203.0.113.10", TimeSpan.FromMinutes(5)));
-        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","address":"203.0.113.10"}]"""));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","list":"viegard-banned","address":"203.0.113.10"}]"""));
 
         var result = await Worker(fixture, audit).RunCycleAsync();
 

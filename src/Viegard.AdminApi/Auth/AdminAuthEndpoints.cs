@@ -1104,22 +1104,8 @@ public static class AdminAuthEndpoints
     private static bool TryGetCurrentSessionId(ClaimsPrincipal principal, out Guid sessionId) =>
         Guid.TryParse(principal.FindFirstValue(AdminCookieNames.SessionIdClaim), out sessionId);
 
-    private static async ValueTask<bool> HasRecentStepUpAsync(HttpContext context, IAdminSessionStore sessions)
-    {
-        if (!TryGetCurrentSessionId(context.User, out var sessionId))
-        {
-            return false;
-        }
-
-        var session = await sessions.GetAsync(sessionId, context.RequestAborted).ConfigureAwait(false);
-        if (session?.StepUpAt is null)
-        {
-            return false;
-        }
-
-        var options = context.RequestServices.GetRequiredService<IOptions<AdminAuthOptions>>().Value;
-        return session.StepUpAt.Value.Add(options.StepUpValidity) >= DateTimeOffset.UtcNow;
-    }
+    private static ValueTask<bool> HasRecentStepUpAsync(HttpContext context, IAdminSessionStore sessions) =>
+        AdminStepUpGate.HasRecentStepUpAsync(context, sessions);
 
     private static IResult Redirect(string path, string? status = null, string? error = null) =>
         Results.Redirect(path).WithFlash(status: status, error: error);

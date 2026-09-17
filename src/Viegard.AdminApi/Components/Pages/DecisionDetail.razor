@@ -7,6 +7,7 @@
 @inject IAdminSessionStore Sessions
 @inject IOptions<AdminAuthOptions> AuthOptions
 @inject IOptions<PolicyOptions> PolicyOptions
+@inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
 @inject IHttpContextAccessor HttpContextAccessor
 @inject UserDisplay Display
 
@@ -82,7 +83,7 @@
                                     }
                                 </select>
                             </label>
-                            @if (PolicyOptions.Value.Posture.DryRun)
+                            @if (_dryRunPosture)
                             {
                                 <p class="form-hint">Current posture is dry-run: approving queues the action, but execution bans nothing until dry-run is disabled.</p>
                             }
@@ -144,6 +145,7 @@
     private IncidentTargetIpResult? _target;
     private bool _stepUpFresh;
     private bool _hasSecurityKeys;
+    private bool _dryRunPosture;
     private static readonly BreadcrumbLink[] DecisionBreadcrumbs = [new("Decisions", "/decisions")];
 
     private string ClassificationText => _classification is null
@@ -157,6 +159,8 @@
     protected override async Task OnInitializedAsync()
     {
         await Display.InitializeAsync().ConfigureAwait(false);
+        _dryRunPosture = (await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false))?.DryRun
+            ?? PolicyOptions.Value.Posture.DryRun;
         _decision = await DecisionStore.GetAsync(Id).ConfigureAwait(false);
         if (_decision is not null)
         {

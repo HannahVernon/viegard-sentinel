@@ -22,6 +22,7 @@ public sealed class BanReconciliationWorker(
     IMikroTikRouterStore routerStore,
     IRouterCredentialProtector credentialProtector,
     IOptions<PolicyOptions> policyOptions,
+    PolicyPostureSource postureSource,
     IOptions<ActionWorkerOptions> options,
     IMikroTikRouterHttpClientFactory httpClientFactory,
     IAuditLedger auditLedger,
@@ -58,7 +59,7 @@ public sealed class BanReconciliationWorker(
 
     internal async Task<BanReconciliationCycleResult> RunCycleAsync(CancellationToken cancellationToken = default)
     {
-        var posture = policyOptions.Value.Posture;
+        var posture = postureSource.CurrentValues(policyOptions.Value);
         var now = timeProvider.GetUtcNow();
         if (posture.EmergencyStop)
         {

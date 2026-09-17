@@ -91,6 +91,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRetentionStore, PostgresRetentionStore>();
         services.AddSingleton<IRetentionSettingsStore, PostgresRetentionSettingsStore>();
         services.AddSingleton<IPolicyThresholdSettingsStore, PostgresPolicyThresholdSettingsStore>();
+        services.AddSingleton<IPolicyPostureSettingsStore, PostgresPolicyPostureSettingsStore>();
         services.AddSingleton<ISatelliteRoleStore, PostgresSatelliteRoleStore>();
         services.AddSingleton<IMikroTikRouterStore, PostgresMikroTikRouterStore>();
         services.AddSingleton<IHostUpgradeCommandStore, PostgresHostUpgradeCommandStore>();

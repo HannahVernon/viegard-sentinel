@@ -383,6 +383,7 @@ internal sealed class ProviderFixture
             Credentials,
             new ProtectedAddressList(protectedCidrs ?? []),
             Options.Create(new PolicyOptions { Posture = posture }),
+            new PolicyPostureSource(),
             Http,
             Time);
     }

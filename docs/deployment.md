@@ -178,7 +178,7 @@ Example operator-applied rules, with placeholder interface names:
 
 ### Enabling enforcement
 
-The default posture keeps network actions in dry-run mode.  Setting `Viegard__Policy__Posture__DryRun` to `false` in `deploy/docker-compose.yml` means approved MikroTik ban and unban actions update the `active_bans` source of truth and call every enabled router instead of recording planned calls only.  The decision detail page surfaces the current dry-run posture beside the Approve button so operators can see whether a review will ban anything.
+The default posture keeps network actions in dry-run mode.  The posture flags (dry-run, manual approval mode, emergency stop) are managed on `/configuration#posture`: the first maintenance-role startup seeds a settings row from the `Viegard__Policy__Posture__*` environment values, and the row is database-owned from then on, so the environment values act only as seeds for new deployments.  Disabling dry-run means approved MikroTik ban and unban actions update the `active_bans` source of truth and call every enabled router instead of recording planned calls only; the save requires step-up verification plus typing `ENFORCE` into the confirmation box, because it is the switch that makes bans real.  The decision detail page surfaces the current dry-run posture beside the Approve button so operators can see whether a review will ban anything.
 
 Before disabling dry-run, confirm:
 
@@ -187,7 +187,7 @@ Before disabling dry-run, confirm:
 - Policy thresholds have been reviewed after dry-run calibration.
 - At least one dry-run approval has been exercised end to end, including the `/bans` recent-action view and unban path.
 
-`Viegard__Policy__Posture__ManualApprovalMode=true` keeps every ban behind operator approval regardless of dry-run posture.  Disabling dry-run does not enable unattended bans while manual approval remains true.
+Manual approval mode keeps every ban behind operator approval regardless of dry-run posture, and wins over dry-run in the decision overlay so approvals can be exercised before enforcement is enabled.  Disabling dry-run does not enable unattended bans while manual approval remains on.  Emergency stop refuses all action execution and ban reconciliation until lifted.  Posture changes reach the policy engine, action dispatch, and reconciliation within moments through database notifications with a polling fallback; instances running older builds keep using their environment posture until upgraded.
 
 ### Ingestion filters
 

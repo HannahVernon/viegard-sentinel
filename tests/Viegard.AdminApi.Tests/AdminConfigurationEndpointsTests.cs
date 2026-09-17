@@ -245,6 +245,149 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Save_policy_posture_requires_step_up_before_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        await fixture.PolicyPosture.UpdateAsync(
+            PostureSettings(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = PostureForm(rowVersion: 1, dryRun: true, manualApprovalMode: false, emergencyStop: false);
+
+        var result = await fixture.InvokeSavePolicyPostureAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        var settings = await fixture.PolicyPosture.GetAsync();
+        Assert.True(settings!.ManualApprovalMode);
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Save_policy_posture_requires_typed_confirmation_to_disable_dry_run()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.PolicyPosture.UpdateAsync(
+            PostureSettings(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = PostureForm(rowVersion: 1, dryRun: false, manualApprovalMode: true, emergencyStop: false);
+
+        var result = await fixture.InvokeSavePolicyPostureAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Type%20ENFORCE", location, StringComparison.Ordinal);
+        var settings = await fixture.PolicyPosture.GetAsync();
+        Assert.True(settings!.DryRun);
+        Assert.Equal(1, settings.RowVersion);
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Save_policy_posture_rejects_a_wrong_confirmation_word()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.PolicyPosture.UpdateAsync(
+            PostureSettings(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = PostureForm(rowVersion: 1, dryRun: false, manualApprovalMode: true, emergencyStop: false, confirmEnforce: "enforce");
+
+        var result = await fixture.InvokeSavePolicyPostureAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Type%20ENFORCE", location, StringComparison.Ordinal);
+        var settings = await fixture.PolicyPosture.GetAsync();
+        Assert.True(settings!.DryRun);
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Save_policy_posture_disables_dry_run_with_typed_confirmation()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.PolicyPosture.UpdateAsync(
+            PostureSettings(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = PostureForm(rowVersion: 1, dryRun: false, manualApprovalMode: true, emergencyStop: false, confirmEnforce: "ENFORCE");
+
+        var result = await fixture.InvokeSavePolicyPostureAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Real%20enforcement%20is%20now%20active", location, StringComparison.Ordinal);
+        var settings = await fixture.PolicyPosture.GetAsync();
+        Assert.False(settings!.DryRun);
+        Assert.True(settings.ManualApprovalMode);
+        Assert.Equal(2, settings.RowVersion);
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("changed policy posture settings", audit.Summary, StringComparison.Ordinal);
+        Assert.Contains("PolicyPostureSettingsChanged", audit.DetailJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Save_policy_posture_persists_flags_without_confirmation_when_dry_run_stays_on()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.PolicyPosture.UpdateAsync(
+            PostureSettings(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = PostureForm(rowVersion: 1, dryRun: true, manualApprovalMode: false, emergencyStop: true);
+
+        var result = await fixture.InvokeSavePolicyPostureAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Emergency%20stop%20is%20active", location, StringComparison.Ordinal);
+        var settings = await fixture.PolicyPosture.GetAsync();
+        Assert.True(settings!.DryRun);
+        Assert.False(settings.ManualApprovalMode);
+        Assert.True(settings.EmergencyStop);
+        Assert.Single(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Save_policy_posture_uses_environment_fallback_for_the_enforcement_check_when_unseeded()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        fixture.Context.Request.Form = PostureForm(rowVersion: 0, dryRun: false, manualApprovalMode: true, emergencyStop: false);
+
+        var result = await fixture.InvokeSavePolicyPostureAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Type%20ENFORCE", location, StringComparison.Ordinal);
+        Assert.Null(await fixture.PolicyPosture.GetAsync());
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Save_policy_posture_returns_friendly_error_on_version_conflict()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.PolicyPosture.UpdateAsync(
+            PostureSettings(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = PostureForm(rowVersion: 0, dryRun: true, manualApprovalMode: false, emergencyStop: false);
+
+        var result = await fixture.InvokeSavePolicyPostureAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Policy%20posture%20settings%20were%20changed", location, StringComparison.Ordinal);
+        var settings = await fixture.PolicyPosture.GetAsync();
+        Assert.True(settings!.ManualApprovalMode);
+        Assert.Equal(1, settings.RowVersion);
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
     public async Task Save_ingestion_filters_requires_step_up_before_mutating()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
@@ -643,6 +786,49 @@ public sealed class AdminConfigurationEndpointsTests
         UpdatedBy = "test",
     };
 
+    private static PolicyPostureSettings PostureSettings(bool dryRun = true, bool manualApprovalMode = true, bool emergencyStop = false) => new()
+    {
+        DryRun = dryRun,
+        ManualApprovalMode = manualApprovalMode,
+        EmergencyStop = emergencyStop,
+        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedBy = "test",
+    };
+
+    private static FormCollection PostureForm(
+        int rowVersion,
+        bool dryRun,
+        bool manualApprovalMode,
+        bool emergencyStop,
+        string? confirmEnforce = null)
+    {
+        var values = new Dictionary<string, StringValues>(StringComparer.Ordinal)
+        {
+            ["rowVersion"] = rowVersion.ToString(CultureInfo.InvariantCulture),
+        };
+        if (dryRun)
+        {
+            values["dryRun"] = "on";
+        }
+
+        if (manualApprovalMode)
+        {
+            values["manualApprovalMode"] = "on";
+        }
+
+        if (emergencyStop)
+        {
+            values["emergencyStop"] = "on";
+        }
+
+        if (confirmEnforce is not null)
+        {
+            values["confirmEnforce"] = confirmEnforce;
+        }
+
+        return new FormCollection(values);
+    }
+
     private static MikroTikRouter Router(string name) => new()
     {
         Id = ViegardId.New(),
@@ -662,6 +848,7 @@ public sealed class AdminConfigurationEndpointsTests
         DefaultHttpContext Context,
         InMemoryRetentionSettingsStore RetentionSettings,
         InMemoryPolicyThresholdSettingsStore PolicyThresholds,
+        InMemoryPolicyPostureSettingsStore PolicyPosture,
         RecordingAuditLedger AuditLedger,
         DateTimeOffset Now,
         NoopAntiforgery Antiforgery,
@@ -725,6 +912,7 @@ public sealed class AdminConfigurationEndpointsTests
             var hostUpgrades = new InMemoryHostUpgradeCommandStore();
             var ingestionFilters = new InMemoryIngestionFilterStore();
             var policyThresholds = new InMemoryPolicyThresholdSettingsStore();
+            var policyPosture = new InMemoryPolicyPostureSettingsStore();
             var satelliteCredentialCookie = new SatelliteRoleCredentialCookie(new NoopDataProtectionProvider());
             var services = new ServiceCollection()
                 .AddLogging()
@@ -748,6 +936,7 @@ public sealed class AdminConfigurationEndpointsTests
                 context,
                 new InMemoryRetentionSettingsStore(),
                 policyThresholds,
+                policyPosture,
                 auditLedger,
                 now,
                 new NoopAntiforgery(),
@@ -821,6 +1010,17 @@ public sealed class AdminConfigurationEndpointsTests
                 Context,
                 Antiforgery,
                 PolicyThresholds,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeSavePolicyPostureAsync() =>
+            AdminConfigurationEndpoints.SavePolicyPostureAsync(
+                Context,
+                Antiforgery,
+                PolicyPosture,
+                Options.Create(new PolicyOptions()),
                 Users,
                 Sessions,
                 AuthAuditor,

@@ -13,14 +13,14 @@ COPY src/Viegard.Sources.MDaemonLogs/Viegard.Sources.MDaemonLogs.csproj src/Vieg
 COPY src/Viegard.Actions.MikroTik/Viegard.Actions.MikroTik.csproj src/Viegard.Actions.MikroTik/
 COPY src/Viegard.PipelineHost/Viegard.PipelineHost.csproj src/Viegard.PipelineHost/
 COPY src/Viegard.AdminApi/Viegard.AdminApi.csproj src/Viegard.AdminApi/
-RUN --mount=type=cache,target=/root/.nuget/packages \
+RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
     dotnet restore src/Viegard.AdminApi/Viegard.AdminApi.csproj
 COPY . .
 # The build context excludes .git, so SourceLink cannot read the commit SHA
 # directly.  The deploy script writes the clone HEAD to .build-commit before
 # building; pass it to publish as SourceRevisionId so the assembly's
 # informational version carries the commit.
-RUN --mount=type=cache,target=/root/.nuget/packages \
+RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
     sha="$(cat .build-commit 2>/dev/null || true)" \
     && dotnet publish src/Viegard.AdminApi/Viegard.AdminApi.csproj \
         --configuration Release --no-restore --output /app ${sha:+-p:SourceRevisionId=$sha}

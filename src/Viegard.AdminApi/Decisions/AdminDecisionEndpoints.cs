@@ -77,7 +77,7 @@ public static class AdminDecisionEndpoints
 
         if (decision.Outcome != DecisionOutcome.RequireApproval)
         {
-            return Redirect(path, error: "Only RequireApproval decisions can be reviewed.");
+            return Redirect(path, error: "Only require approval decisions can be reviewed.");
         }
 
         if (decision.ReviewedAt is not null)

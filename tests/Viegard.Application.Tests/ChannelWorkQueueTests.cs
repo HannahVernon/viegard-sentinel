@@ -58,6 +58,44 @@ public sealed class ChannelWorkQueueTests
     }
 
     [Fact]
+    public async Task Abandon_without_charging_redelivers_with_same_delivery_count()
+    {
+        var queue = new ChannelWorkQueue<string>("test", maxDeliveryCount: 2);
+        await queue.EnqueueAsync("restart-me");
+
+        var lease = await queue.LeaseAsync();
+        await lease.AbandonAsync(chargeAttempt: false);
+
+        var stats = queue.GetStatsCore();
+        Assert.Equal(1, stats.Depth);
+        Assert.Equal(0, stats.InFlight);
+        Assert.Equal(0, stats.TotalAbandoned);
+        Assert.Equal(0, stats.DeadLetterCount);
+
+        var redelivery = await queue.LeaseAsync();
+        Assert.Equal("restart-me", redelivery.Message);
+        Assert.Equal(1, redelivery.DeliveryCount);
+    }
+
+    [Fact]
+    public async Task Repeated_uncharged_abandons_never_dead_letter()
+    {
+        var queue = new ChannelWorkQueue<string>("test", maxDeliveryCount: 2);
+        await queue.EnqueueAsync("restart-me");
+
+        for (var i = 0; i < 5; i++)
+        {
+            var lease = await queue.LeaseAsync();
+            await lease.AbandonAsync(chargeAttempt: false);
+        }
+
+        var redelivery = await queue.LeaseAsync();
+        Assert.Equal("restart-me", redelivery.Message);
+        Assert.Equal(1, redelivery.DeliveryCount);
+        Assert.Equal(0, queue.GetStatsCore().DeadLetterCount);
+    }
+
+    [Fact]
     public async Task Message_exceeding_max_deliveries_is_dead_lettered()
     {
         var queue = new ChannelWorkQueue<string>("test", maxDeliveryCount: 2);

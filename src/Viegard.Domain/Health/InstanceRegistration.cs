@@ -10,6 +10,8 @@ public sealed record InstanceRegistration
 
     public required string Roles { get; init; }
 
+    public string? UpgradeTarget { get; init; }
+
     public required string HostName { get; init; }
 
     public required DateTimeOffset StartedAt { get; init; }

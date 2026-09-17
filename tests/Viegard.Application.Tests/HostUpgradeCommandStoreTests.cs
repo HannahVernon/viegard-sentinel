@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Time.Testing;
 using Viegard.Application.Configuration;
+using Viegard.Domain.Health;
 using Viegard.Persistence.InMemory;
 
 namespace Viegard.Application.Tests;
@@ -70,6 +71,23 @@ public sealed class HostUpgradeCommandStoreTests
     }
 
     [Fact]
+    public void Known_target_list_unions_registry_history_and_default()
+    {
+        var registrations = new[]
+        {
+            Registration("pipeline-1", upgradeTarget: null),
+            Registration("satellite-a", upgradeTarget: "sat-a"),
+            Registration("satellite-b", upgradeTarget: "sat-b"),
+        };
+
+        var targets = HostUpgradeTargetList.BuildKnownTargets(
+            ["vm", "sat-b", "sat-c"],
+            registrations);
+
+        Assert.Equal(["vm", "sat-a", "sat-b", "sat-c"], targets);
+    }
+
+    [Fact]
     public void Pending_stale_helper_flags_only_old_pending_commands()
     {
         var requestedAt = new DateTimeOffset(2026, 9, 15, 17, 0, 0, TimeSpan.Zero);
@@ -82,4 +100,16 @@ public sealed class HostUpgradeCommandStoreTests
         Assert.False(HostUpgradeCommandPolicy.IsPendingStale(recent, now));
         Assert.False(HostUpgradeCommandPolicy.IsPendingStale(running, now));
     }
+
+    private static InstanceRegistration Registration(string instanceId, string? upgradeTarget) => new()
+    {
+        InstanceId = instanceId,
+        Version = "1.0.0",
+        CommitSha = null,
+        Roles = "sources",
+        UpgradeTarget = upgradeTarget,
+        HostName = "host.example.com",
+        StartedAt = DateTimeOffset.UtcNow.AddHours(-1),
+        ReportedAt = DateTimeOffset.UtcNow,
+    };
 }

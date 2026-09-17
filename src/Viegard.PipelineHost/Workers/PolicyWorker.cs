@@ -73,7 +73,7 @@ public sealed class PolicyWorker(
                     Id = ViegardId.New(),
                     Timestamp = DateTimeOffset.UtcNow,
                     Stage = PipelineStage.Policy,
-                    Summary = $"Policy produced {decision.Outcome} for classification {classification.Id}.",
+                    Summary = $"Policy produced {OutcomeLabel(decision.Outcome)} for classification {classification.Id}.",
                     IncidentId = classification.SubjectKind == ClassificationSubjectKind.Incident
                         ? classification.SubjectId
                         : null,
@@ -86,6 +86,11 @@ public sealed class PolicyWorker(
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
+                if (lease is not null)
+                {
+                    await AbandonLeaseAsync(lease, chargeAttempt: false).ConfigureAwait(false);
+                }
+
                 break;
             }
             catch (Exception ex)
@@ -93,19 +98,28 @@ public sealed class PolicyWorker(
                 logger.LogError(ex, "Policy worker failed while processing a classification lease.");
                 if (lease is not null)
                 {
-                    try
-                    {
-                        await lease.AbandonAsync(CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch (Exception abandonEx)
-                    {
-                        logger.LogError(abandonEx, "Policy worker failed to abandon a classification lease.");
-                    }
+                    await AbandonLeaseAsync(lease, chargeAttempt: true).ConfigureAwait(false);
                 }
             }
         }
 
         logger.LogInformation("Policy worker stopping.");
+    }
+
+    private async Task AbandonLeaseAsync(IWorkLease<ClassificationWorkItem> lease, bool chargeAttempt)
+    {
+        try
+        {
+            await lease.AbandonAsync(chargeAttempt, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception abandonEx)
+        {
+            logger.LogError(
+                abandonEx,
+                chargeAttempt
+                    ? "Policy worker failed to abandon a classification lease."
+                    : "Policy worker failed to release a classification lease during shutdown.");
+        }
     }
 
     private async Task MarkIncidentDecidedAsync(
@@ -136,11 +150,20 @@ public sealed class PolicyWorker(
         {
             decision.PolicyId,
             decision.PolicyVersion,
-            decision.Outcome,
+            Outcome = OutcomeLabel(decision.Outcome),
             GuardrailCount = decision.Guardrails.Count,
             FailedGuardrails = decision.Guardrails
                 .Where(g => !g.Passed)
                 .Select(g => g.GuardrailName)
                 .ToList(),
         });
+
+    private static string OutcomeLabel(Viegard.Domain.Decisions.DecisionOutcome outcome) => outcome switch
+    {
+        Viegard.Domain.Decisions.DecisionOutcome.ActionAuthorized => "Action authorized",
+        Viegard.Domain.Decisions.DecisionOutcome.RecordOnly => "Record only",
+        Viegard.Domain.Decisions.DecisionOutcome.RequireApproval => "Require approval",
+        Viegard.Domain.Decisions.DecisionOutcome.DryRun => "Dry run",
+        _ => outcome.ToString(),
+    };
 }

@@ -3,17 +3,17 @@ namespace Viegard.Domain.Decisions;
 /// <summary>Outcome of policy evaluation (Judgment).</summary>
 public enum DecisionOutcome
 {
-    /// <summary>The recommended action is permitted and may be executed.</summary>
-    Permit,
+    /// <summary>The policy engine authorized an action to be executed.</summary>
+    ActionAuthorized = 0,
 
-    /// <summary>No action is permitted.</summary>
-    Deny,
+    /// <summary>The policy engine recorded the decision without authorizing an action.</summary>
+    RecordOnly = 1,
 
     /// <summary>The action requires manual operator approval before execution.</summary>
-    RequireApproval,
+    RequireApproval = 2,
 
     /// <summary>Dry-run: the action is recorded as "would execute" but not performed.</summary>
-    DryRun,
+    DryRun = 3,
 }
 
 /// <summary>Manual operator review outcome for an approval-required decision.</summary>

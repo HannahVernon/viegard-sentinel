@@ -27,6 +27,7 @@ public sealed class MDaemonLogSource(
     private int _trackedFiles;
     private DateTimeOffset? _lastScan;
     private string? _lastError;
+    private readonly string _instanceKey = MDaemonSourceOptions.RequireValidInstanceKey(options.InstanceKey);
 
     public string SourceId => "mdaemon:logs";
 
@@ -162,7 +163,14 @@ public sealed class MDaemonLogSource(
         CancellationToken cancellationToken)
     {
         var fileName = Path.GetFileName(path);
-        var offsetKey = "offset:" + fileName;
+        // Per-instance keys avoid collisions when multiple Windows
+        // satellites ingest MDaemon-generated files with the same names into
+        // one database.  Older offset rows used only the file name; after
+        // this cut-over the new key is missing, so the existing
+        // IngestExistingOnFirstRun=false default baselines at EOF and avoids
+        // a replay storm.  Old offsets and payload references remain inert
+        // history.
+        var offsetKey = $"offset:{_instanceKey}:{fileName}";
         var stored = await offsetStore.GetAsync(SourceId, offsetKey, cancellationToken).ConfigureAwait(false);
 
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -279,7 +287,7 @@ public sealed class MDaemonLogSource(
                     SourceId = SourceId,
                     SourceType = MDaemonSourceType,
                     ObservedAt = capturedAt,
-                    PayloadReference = $"mdaemon/{fileName}/{endOffset}/{i}",
+                    PayloadReference = $"mdaemon/{_instanceKey}/{fileName}/{endOffset}/{i}",
                     IngestOffset = endOffset.ToString(),
                 },
                 RawPayload = JsonSerializer.Serialize(dto, MDaemonJson.SerializerOptions),

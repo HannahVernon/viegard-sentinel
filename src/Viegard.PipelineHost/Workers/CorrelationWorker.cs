@@ -58,6 +58,11 @@ public sealed class CorrelationWorker(
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
+                if (lease is not null)
+                {
+                    await AbandonLeaseAsync(lease, chargeAttempt: false).ConfigureAwait(false);
+                }
+
                 break;
             }
             catch (Exception ex)
@@ -65,19 +70,28 @@ public sealed class CorrelationWorker(
                 logger.LogError(ex, "Correlation worker failed while processing an event lease.");
                 if (lease is not null)
                 {
-                    try
-                    {
-                        await lease.AbandonAsync(CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch (Exception abandonEx)
-                    {
-                        logger.LogError(abandonEx, "Correlation worker failed to abandon an event lease.");
-                    }
+                    await AbandonLeaseAsync(lease, chargeAttempt: true).ConfigureAwait(false);
                 }
             }
         }
 
         logger.LogInformation("Correlation worker stopping.");
+    }
+
+    private async Task AbandonLeaseAsync(IWorkLease<Guid> lease, bool chargeAttempt)
+    {
+        try
+        {
+            await lease.AbandonAsync(chargeAttempt, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception abandonEx)
+        {
+            logger.LogError(
+                abandonEx,
+                chargeAttempt
+                    ? "Correlation worker failed to abandon an event lease."
+                    : "Correlation worker failed to release an event lease during shutdown.");
+        }
     }
 
     private static string CorrelationDetailJson(IReadOnlyList<Viegard.Domain.Incidents.EvidenceItem> evidence, Guid eventId)

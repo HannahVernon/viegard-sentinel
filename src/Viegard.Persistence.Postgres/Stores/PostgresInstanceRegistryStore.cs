@@ -19,6 +19,7 @@ public sealed class PostgresInstanceRegistryStore(IDbContextFactory<ViegardDbCon
                 version,
                 commit_sha,
                 roles,
+                upgrade_target,
                 host_name,
                 started_at,
                 reported_at
@@ -28,6 +29,7 @@ public sealed class PostgresInstanceRegistryStore(IDbContextFactory<ViegardDbCon
                 {row.Version},
                 {row.CommitSha},
                 {row.Roles},
+                {row.UpgradeTarget},
                 {row.HostName},
                 {row.StartedAt},
                 {row.ReportedAt}
@@ -36,6 +38,7 @@ public sealed class PostgresInstanceRegistryStore(IDbContextFactory<ViegardDbCon
                 version = EXCLUDED.version,
                 commit_sha = EXCLUDED.commit_sha,
                 roles = EXCLUDED.roles,
+                upgrade_target = EXCLUDED.upgrade_target,
                 host_name = EXCLUDED.host_name,
                 started_at = EXCLUDED.started_at,
                 reported_at = EXCLUDED.reported_at;

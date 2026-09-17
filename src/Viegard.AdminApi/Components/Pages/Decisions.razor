@@ -20,7 +20,7 @@
                 <option value="" selected="@(_outcome is null)">All outcomes</option>
                 @foreach (var outcome in Enum.GetValues<DecisionOutcome>())
                 {
-                    <option value="@outcome" selected="@(_outcome == outcome)">@outcome</option>
+                    <option value="@outcome" selected="@(_outcome == outcome)">@AdminText.DecisionOutcomeLabel(outcome)</option>
                 }
             </select>
         </label>
@@ -59,7 +59,7 @@
                     <tr>
                         <td><a href="/decisions/@row.Decision.Id">@Display.Format(row.Decision.CreatedAt)</a></td>
                         <td>@row.Decision.PolicyId @row.Decision.PolicyVersion</td>
-                        <td><span class="@AdminText.OutcomeCss(row.Decision.Outcome)">@row.Decision.Outcome</span></td>
+                        <td><span class="@AdminText.OutcomeCss(row.Decision.Outcome)">@AdminText.DecisionOutcomeLabel(row.Decision.Outcome)</span></td>
                         <td><span class="@ReviewCss(row.Decision)">@ReviewLabel(row.Decision)</span></td>
                         <td>@ClassificationSummary(row.Classification)</td>
                         <td>@AdminText.OneLine(row.Decision.Rationale, 220)</td>

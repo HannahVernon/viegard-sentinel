@@ -25,7 +25,7 @@ public sealed class PolicyEngineTests
             AiClassification(fixture.IncidentId, confidence: 1.0, severity: 10),
             ActiveContext with { EmergencyStop = true });
 
-        Assert.Equal(DecisionOutcome.Deny, decision.Outcome);
+        Assert.Equal(DecisionOutcome.RecordOnly, decision.Outcome);
         Assert.Contains("Emergency stop", decision.Rationale, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -42,7 +42,7 @@ public sealed class PolicyEngineTests
             ActiveContext with { DryRun = true });
 
         Assert.Equal(DecisionOutcome.DryRun, wouldAct.Outcome);
-        Assert.Equal(DecisionOutcome.Deny, recordOnly.Outcome);
+        Assert.Equal(DecisionOutcome.RecordOnly, recordOnly.Outcome);
     }
 
     [Fact]
@@ -72,9 +72,9 @@ public sealed class PolicyEngineTests
             AiClassification(fixture.IncidentId, confidence: 0.5, severity: 8),
             ActiveContext);
 
-        Assert.Equal(DecisionOutcome.Permit, action.Outcome);
+        Assert.Equal(DecisionOutcome.ActionAuthorized, action.Outcome);
         Assert.Equal(DecisionOutcome.RequireApproval, review.Outcome);
-        Assert.Equal(DecisionOutcome.Deny, recordOnly.Outcome);
+        Assert.Equal(DecisionOutcome.RecordOnly, recordOnly.Outcome);
     }
 
     [Fact]
@@ -121,7 +121,7 @@ public sealed class PolicyEngineTests
         var afterRefresh = await fixture.Engine.EvaluateAsync(
             AiClassification(fixture.IncidentId, confidence: 0.75, severity: 7),
             ActiveContext);
-        Assert.Equal(DecisionOutcome.Deny, afterRefresh.Outcome);
+        Assert.Equal(DecisionOutcome.RecordOnly, afterRefresh.Outcome);
         var thresholds = Assert.Single(afterRefresh.Guardrails, guardrail => guardrail.GuardrailName == PolicyGuardrailNames.Thresholds);
         Assert.Contains("review requires confidence >= 0.8", thresholds.Detail, StringComparison.Ordinal);
     }
@@ -138,7 +138,7 @@ public sealed class PolicyEngineTests
             DeterministicClassification(fixture.IncidentId, confidence: 0.8, severity: 2),
             ActiveContext);
 
-        Assert.Equal(DecisionOutcome.Permit, action.Outcome);
+        Assert.Equal(DecisionOutcome.ActionAuthorized, action.Outcome);
         Assert.Equal(DecisionOutcome.RequireApproval, review.Outcome);
         Assert.Contains("Raw evidence threshold", action.Rationale, StringComparison.OrdinalIgnoreCase);
     }
@@ -152,7 +152,7 @@ public sealed class PolicyEngineTests
             AiClassification(fixture.IncidentId, confidence: 1.0, severity: 10),
             ActiveContext);
 
-        Assert.Equal(DecisionOutcome.Deny, decision.Outcome);
+        Assert.Equal(DecisionOutcome.RecordOnly, decision.Outcome);
         var protectedGuardrail = Assert.Single(
             decision.Guardrails,
             g => g.GuardrailName == PolicyGuardrailNames.ProtectedAddress);
@@ -168,7 +168,7 @@ public sealed class PolicyEngineTests
             AiClassification(fixture.IncidentId, confidence: 0.95, severity: 8),
             ActiveContext);
 
-        Assert.Equal(DecisionOutcome.Permit, decision.Outcome);
+        Assert.Equal(DecisionOutcome.ActionAuthorized, decision.Outcome);
         var protectedGuardrail = Assert.Single(
             decision.Guardrails,
             g => g.GuardrailName == PolicyGuardrailNames.ProtectedAddress);
@@ -256,7 +256,7 @@ public sealed class PolicyEngineTests
             MailClassification(mailEventId, confidence: 0.95, severity: 8),
             ActiveContext);
 
-        Assert.Equal(DecisionOutcome.Deny, decision.Outcome);
+        Assert.Equal(DecisionOutcome.RecordOnly, decision.Outcome);
         var allowlist = Assert.Single(decision.Guardrails, g => g.GuardrailName == PolicyGuardrailNames.Allowlist);
         Assert.False(allowlist.Passed);
     }
@@ -281,7 +281,7 @@ public sealed class PolicyEngineTests
 
         var allowlist = Assert.Single(decision.Guardrails, g => g.GuardrailName == PolicyGuardrailNames.Allowlist);
         Assert.True(allowlist.Passed);
-        Assert.NotEqual(DecisionOutcome.Deny, decision.Outcome);
+        Assert.NotEqual(DecisionOutcome.RecordOnly, decision.Outcome);
     }
 
     [Fact]
@@ -312,7 +312,7 @@ public sealed class PolicyEngineTests
             MailClassification(mailEventId, confidence: 0.95, severity: 8),
             ActiveContext);
 
-        Assert.Equal(DecisionOutcome.Deny, decision.Outcome);
+        Assert.Equal(DecisionOutcome.RecordOnly, decision.Outcome);
     }
 
     private static async Task<Guid> AddMailEventAsync(InMemoryEventStore eventStore, string fromAddress)

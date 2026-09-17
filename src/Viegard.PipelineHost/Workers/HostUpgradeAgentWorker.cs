@@ -24,11 +24,13 @@ internal sealed partial class HostUpgradeAgentWorker(
     private readonly HostUpgradeAgentOptions _options = options.Value;
     private bool _nonWindowsLogged;
 
-    private string StateDirectory => Path.GetFullPath(launcher.AppBaseDirectory);
+    private string StateDirectory => _options.GetStateDirectory();
 
     private string StateFilePath => Path.Combine(StateDirectory, StateFileName);
 
     private string TranscriptPath => Path.Combine(StateDirectory, TranscriptFileName);
+
+    private string DeployedCommitPath => Path.Combine(Path.GetFullPath(launcher.AppBaseDirectory), ".deployed-commit");
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -465,16 +467,15 @@ internal sealed partial class HostUpgradeAgentWorker(
 
     private string? TryReadDeployedCommitMarker()
     {
-        var markerPath = Path.Combine(StateDirectory, ".deployed-commit");
         try
         {
-            return File.Exists(markerPath)
-                ? File.ReadAllText(markerPath).Trim()
+            return File.Exists(DeployedCommitPath)
+                ? File.ReadAllText(DeployedCommitPath).Trim()
                 : null;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Could not read deployed commit marker {MarkerPath}.", LogSanitizer.Sanitize(markerPath));
+            logger.LogWarning(ex, "Could not read deployed commit marker {MarkerPath}.", LogSanitizer.Sanitize(DeployedCommitPath));
             return null;
         }
     }

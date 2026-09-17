@@ -45,7 +45,7 @@
                         <SortHeader Title="In-flight" SortKey="@QueueStatusSortKeys.QueueInFlight" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
                         <SortHeader Title="Oldest pending age" SortKey="@QueueStatusSortKeys.QueueOldestAge" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
                         <SortHeader Title="Dead letters" SortKey="@QueueStatusSortKeys.QueueDeadLetters" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
-                        <SortHeader Title="Totals" SortKey="@QueueStatusSortKeys.QueueTotals" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
+                        <SortHeader Title="Totals *" SortKey="@QueueStatusSortKeys.QueueTotals" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
                         <SortHeader Title="Captured" SortKey="@QueueStatusSortKeys.QueueCaptured" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/queues" />
                     </tr>
                 </thead>
@@ -69,6 +69,7 @@
                     }
                 </tbody>
             </table>
+            <p class="small">* Totals are lifetime counters: enqueued / completed / abandoned.  An abandon is a charged delivery attempt that ended without completion and returned the message for redelivery; a message can be abandoned several times and still complete.  Graceful shutdown releases are excluded.</p>
         </section>
     }
 

@@ -16,6 +16,7 @@ public sealed class InstanceRegistryStoreTests
         {
             Version = "1.0.1+cccccccccccccccccccccccccccccccccccccccc",
             CommitSha = "cccccccccccccccccccccccccccccccccccccccc",
+            UpgradeTarget = "satellite-b",
             ReportedAt = now.AddMinutes(1),
         };
 
@@ -28,6 +29,7 @@ public sealed class InstanceRegistryStoreTests
         Assert.Equal(["pipeline-a", "pipeline-b"], registrations.Select(r => r.InstanceId).ToArray());
         var restored = registrations.Single(r => r.InstanceId == "pipeline-b");
         Assert.Equal("1.0.1+cccccccccccccccccccccccccccccccccccccccc", restored.Version);
+        Assert.Equal("satellite-b", restored.UpgradeTarget);
         Assert.Equal(now.AddMinutes(1), restored.ReportedAt);
     }
 
@@ -53,6 +55,7 @@ public sealed class InstanceRegistryStoreTests
         Version = version,
         CommitSha = BuildVersion.Parse(version).CommitSha,
         Roles = "sources",
+        UpgradeTarget = "satellite-a",
         HostName = "mail.example.com",
         StartedAt = now.AddHours(-1),
         ReportedAt = now,

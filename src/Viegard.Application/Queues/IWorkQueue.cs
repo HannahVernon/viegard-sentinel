@@ -42,6 +42,12 @@ public interface IWorkLease<out T>
     /// maximum delivery count are moved to the dead-letter collection instead.
     /// </summary>
     ValueTask AbandonAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Return the message for redelivery, optionally refunding the delivery
+    /// attempt for graceful shutdown paths that did not process the message.
+    /// </summary>
+    ValueTask AbandonAsync(bool chargeAttempt, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

@@ -215,6 +215,13 @@ if (syslogOptions?.Enabled == true)
 builder.Services
     .AddOptions<MDaemonSourceOptions>()
     .Bind(builder.Configuration.GetSection(MDaemonSourceOptions.SectionName))
+    .Configure<IOptions<ViegardHostOptions>>((options, hostOptions) =>
+    {
+        if (string.IsNullOrWhiteSpace(options.InstanceKey))
+        {
+            options.InstanceKey = MDaemonSourceOptions.NormalizeInstanceKey(hostOptions.Value.EffectiveInstanceId);
+        }
+    })
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<MDaemonSourceOptions>, MDaemonSourceOptionsValidator>();
 

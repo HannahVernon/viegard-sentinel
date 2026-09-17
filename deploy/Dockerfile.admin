@@ -1,14 +1,29 @@
+# syntax=docker/dockerfile:1
 # Build stage
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /source
+COPY Directory.Build.props nuget.config ./
+COPY src/Viegard.Domain/Viegard.Domain.csproj src/Viegard.Domain/
+COPY src/Viegard.Application/Viegard.Application.csproj src/Viegard.Application/
+COPY src/Viegard.Persistence/Viegard.Persistence.csproj src/Viegard.Persistence/
+COPY src/Viegard.Persistence.Postgres/Viegard.Persistence.Postgres.csproj src/Viegard.Persistence.Postgres/
+COPY src/Viegard.Sources.Imap/Viegard.Sources.Imap.csproj src/Viegard.Sources.Imap/
+COPY src/Viegard.Sources.Syslog/Viegard.Sources.Syslog.csproj src/Viegard.Sources.Syslog/
+COPY src/Viegard.Sources.MDaemonLogs/Viegard.Sources.MDaemonLogs.csproj src/Viegard.Sources.MDaemonLogs/
+COPY src/Viegard.Actions.MikroTik/Viegard.Actions.MikroTik.csproj src/Viegard.Actions.MikroTik/
+COPY src/Viegard.PipelineHost/Viegard.PipelineHost.csproj src/Viegard.PipelineHost/
+COPY src/Viegard.AdminApi/Viegard.AdminApi.csproj src/Viegard.AdminApi/
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    dotnet restore src/Viegard.AdminApi/Viegard.AdminApi.csproj
 COPY . .
 # The build context excludes .git, so SourceLink cannot read the commit SHA
 # directly.  The deploy script writes the clone HEAD to .build-commit before
 # building; pass it to publish as SourceRevisionId so the assembly's
 # informational version carries the commit.
-RUN sha="$(cat .build-commit 2>/dev/null || true)" \
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    sha="$(cat .build-commit 2>/dev/null || true)" \
     && dotnet publish src/Viegard.AdminApi/Viegard.AdminApi.csproj \
-        --configuration Release --output /app ${sha:+-p:SourceRevisionId=$sha}
+        --configuration Release --no-restore --output /app ${sha:+-p:SourceRevisionId=$sha}
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime

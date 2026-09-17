@@ -27,10 +27,51 @@ public sealed class MDaemonSourceOptionsValidatorTests
         {
             Enabled = true,
             LogDirectory = "C:\\Logs\\MDaemon",
+            InstanceKey = "mdaemon-mail01",
         };
         options.Files.Add(new MDaemonLogFileOptions { Pattern = "DynScrn-*.log", LogKind = "DynamicScreening" });
 
         Assert.True(_validator.Validate(null, options).Succeeded);
+    }
+
+    [Fact]
+    public void Enabled_requires_instance_key()
+    {
+        var options = new MDaemonSourceOptions
+        {
+            Enabled = true,
+            LogDirectory = "C:\\Logs\\MDaemon",
+        };
+        options.Files.Add(new MDaemonLogFileOptions { Pattern = "DynScrn-*.log", LogKind = "DynamicScreening" });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("InstanceKey", result.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Instance_key_normalizer_lowercases_and_sanitizes_host_instance_id()
+    {
+        Assert.Equal("mdaemon-mail01", MDaemonSourceOptions.NormalizeInstanceKey("MDaemon-MAIL01"));
+        Assert.Equal("host_name_01", MDaemonSourceOptions.NormalizeInstanceKey("HOST.Name 01"));
+    }
+
+    [Fact]
+    public void Enabled_rejects_unsafe_instance_key()
+    {
+        var options = new MDaemonSourceOptions
+        {
+            Enabled = true,
+            LogDirectory = "C:\\Logs\\MDaemon",
+            InstanceKey = "MDaemon-MAIL01",
+        };
+        options.Files.Add(new MDaemonLogFileOptions { Pattern = "DynScrn-*.log", LogKind = "DynamicScreening" });
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("InstanceKey", result.FailureMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -52,6 +93,7 @@ public sealed class MDaemonSourceOptionsValidatorTests
         {
             Enabled = true,
             LogDirectory = "C:\\Logs\\MDaemon",
+            InstanceKey = "mdaemon-mail01",
             PollInterval = TimeSpan.Zero,
         };
         options.Files.Add(new MDaemonLogFileOptions { Pattern = "DynScrn-*.log", LogKind = "DynamicScreening" });
@@ -66,6 +108,7 @@ public sealed class MDaemonSourceOptionsValidatorTests
         {
             Enabled = true,
             LogDirectory = "C:\\Logs\\MDaemon",
+            InstanceKey = "mdaemon-mail01",
             MaxScanBytes = 4095,
         };
         options.Files.Add(new MDaemonLogFileOptions { Pattern = "DynScrn-*.log", LogKind = "DynamicScreening" });

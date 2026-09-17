@@ -71,6 +71,15 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     private PostgresWorkQueue<Guid> CreateQueue(string name, int maxDeliveries = 5, TimeSpan? lease = null) =>
         new(_dataSource!, name, maxDeliveries, lease);
 
+    private async Task<int> QueueDeliveryCountAsync(string queueName)
+    {
+        await using var command = _dataSource!.CreateCommand(
+            "SELECT COALESCE(MAX(delivery_count), 0) FROM queue_messages WHERE queue_name = @queue");
+        command.Parameters.AddWithValue("queue", queueName);
+        var result = await command.ExecuteScalarAsync();
+        return Convert.ToInt32(result, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     [PostgresFact]
     public async Task Satellite_role_lifecycle_manages_role_password_and_grants()
     {
@@ -141,6 +150,50 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var second = await queue.LeaseAsync(CancellationToken.None);
         Assert.Equal(2, second.DeliveryCount);
         await second.CompleteAsync();
+    }
+
+    [PostgresFact]
+    public async Task Abandon_without_charging_refunds_delivery_count()
+    {
+        const string queueName = "it-abandon-uncharged";
+        var queue = CreateQueue(queueName, maxDeliveries: 2);
+        await queue.EnqueueAsync(Guid.NewGuid());
+        Assert.Equal(0, await QueueDeliveryCountAsync(queueName));
+
+        var first = await queue.LeaseAsync(CancellationToken.None);
+        Assert.Equal(1, first.DeliveryCount);
+        Assert.Equal(1, await QueueDeliveryCountAsync(queueName));
+
+        await first.AbandonAsync(chargeAttempt: false);
+
+        Assert.Equal(0, await QueueDeliveryCountAsync(queueName));
+        var second = await queue.LeaseAsync(CancellationToken.None);
+        Assert.Equal(1, second.DeliveryCount);
+        var stats = await queue.GetStatsAsync();
+        Assert.Equal(0, stats.TotalAbandoned);
+        Assert.Equal(0, stats.DeadLetterCount);
+        await second.CompleteAsync();
+    }
+
+    [PostgresFact]
+    public async Task Repeated_uncharged_abandons_never_dead_letter()
+    {
+        const string queueName = "it-abandon-repeat-uncharged";
+        var queue = CreateQueue(queueName, maxDeliveries: 2);
+        await queue.EnqueueAsync(Guid.NewGuid());
+
+        for (var i = 0; i < 5; i++)
+        {
+            var lease = await queue.LeaseAsync(CancellationToken.None);
+            await lease.AbandonAsync(chargeAttempt: false);
+        }
+
+        var redelivery = await queue.LeaseAsync(CancellationToken.None);
+        Assert.Equal(1, redelivery.DeliveryCount);
+        var stats = await queue.GetStatsAsync();
+        Assert.Equal(0, stats.TotalAbandoned);
+        Assert.Equal(0, stats.DeadLetterCount);
+        await redelivery.CompleteAsync();
     }
 
     [PostgresFact]
@@ -263,6 +316,29 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Host_upgrade_known_targets_include_instance_registry_targets()
+    {
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 9, 16, 22, 0, 0, TimeSpan.Zero));
+        var commandStore = new PostgresHostUpgradeCommandStore(_dataSource!, time);
+        var factory = new TestDbContextFactory(_dataSource!);
+        var registry = new PostgresInstanceRegistryStore(factory);
+
+        await registry.UpsertAsync(InstanceRegistration("pipeline-1", "1.0.0", time.GetUtcNow()) with { UpgradeTarget = null });
+        await registry.UpsertAsync(InstanceRegistration("satellite-b", "1.0.0", time.GetUtcNow()) with { UpgradeTarget = "sat-b" });
+        await registry.UpsertAsync(InstanceRegistration("satellite-a", "1.0.0", time.GetUtcNow()) with { UpgradeTarget = "sat-a" });
+
+        var requested = await commandStore.RequestAsync("sat-c", "hannah");
+        Assert.NotNull(await commandStore.ClaimNextPendingAsync("sat-c"));
+        await commandStore.CompleteAsync(requested.Id, succeeded: true, detail: "ok");
+
+        var targets = HostUpgradeTargetList.BuildKnownTargets(
+            await commandStore.ListTargetsAsync(),
+            await registry.ListAsync());
+
+        Assert.Equal(["vm", "sat-a", "sat-b", "sat-c"], targets);
+    }
+
+    [PostgresFact]
     public async Task Instance_registry_store_upserts_and_lists()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -275,6 +351,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             Version = "1.0.1+cccccccccccccccccccccccccccccccccccccccc",
             CommitSha = "cccccccccccccccccccccccccccccccccccccccc",
             Roles = "sources,correlation",
+            UpgradeTarget = "satellite-b",
             ReportedAt = now.AddMinutes(1),
         };
 
@@ -289,6 +366,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal("1.0.1+cccccccccccccccccccccccccccccccccccccccc", restored.Version);
         Assert.Equal("cccccccccccccccccccccccccccccccccccccccc", restored.CommitSha);
         Assert.Equal("sources,correlation", restored.Roles);
+        Assert.Equal("satellite-b", restored.UpgradeTarget);
         Assert.Equal(now.AddMinutes(1), restored.ReportedAt);
     }
 
@@ -504,7 +582,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         var decisionB = Decision(classificationB.Id, $"{prefix}-policy-b", DecisionOutcome.RequireApproval, prefix, now.AddMinutes(2));
         var decisionA = Decision(classificationA.Id, $"{prefix}-policy-a", DecisionOutcome.DryRun, prefix, now.AddMinutes(1));
-        var decisionC = Decision(classificationC.Id, $"{prefix}-policy-c", DecisionOutcome.Permit, prefix, now.AddMinutes(3));
+        var decisionC = Decision(classificationC.Id, $"{prefix}-policy-c", DecisionOutcome.ActionAuthorized, prefix, now.AddMinutes(3));
         foreach (var item in new[] { decisionB, decisionA, decisionC })
         {
             await decisionStore.AddAsync(item);
@@ -629,9 +707,9 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             await classificationStore.AddAsync(item);
         }
 
-        var decisionAlpha = Decision(classificationAlpha.Id, $"{prefix}-policy-alpha", DecisionOutcome.Permit, $"{prefix} alpha approved", now.AddMinutes(1));
-        var decisionBeta = Decision(classificationBeta.Id, $"{prefix}-policy-beta", DecisionOutcome.Permit, $"{prefix} beta approved", now.AddMinutes(2));
-        var decisionBlocked = Decision(classificationBlocked.Id, $"{prefix}-policy-blocked", DecisionOutcome.Permit, $"{prefix} beta blocked", now.AddMinutes(3));
+        var decisionAlpha = Decision(classificationAlpha.Id, $"{prefix}-policy-alpha", DecisionOutcome.ActionAuthorized, $"{prefix} alpha approved", now.AddMinutes(1));
+        var decisionBeta = Decision(classificationBeta.Id, $"{prefix}-policy-beta", DecisionOutcome.ActionAuthorized, $"{prefix} beta approved", now.AddMinutes(2));
+        var decisionBlocked = Decision(classificationBlocked.Id, $"{prefix}-policy-blocked", DecisionOutcome.ActionAuthorized, $"{prefix} beta blocked", now.AddMinutes(3));
         var decisionDryRun = Decision(classificationDryRun.Id, $"{prefix}-policy-dry-run", DecisionOutcome.DryRun, $"{prefix} alpha dry-run", now.AddMinutes(4));
         foreach (var item in new[] { decisionDryRun, decisionBlocked, decisionBeta, decisionAlpha })
         {
@@ -641,7 +719,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var decisionMatches = await decisionStore.ListPageAsync(
             beforeId: null,
             pageSize: 10,
-            filter: new DecisionListFilter(filterText, DecisionOutcome.Permit),
+            filter: new DecisionListFilter(filterText, DecisionOutcome.ActionAuthorized),
             sort: new ListSort<DecisionSortColumn>(DecisionSortColumn.Created, SortDirection.Asc));
         Assert.Equal([decisionAlpha.Id, decisionBeta.Id], decisionMatches.Items.Select(d => d.Id));
 
@@ -1349,7 +1427,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var resolver = new ReferenceResolver(factory);
         var store = new PostgresDecisionStore(factory, resolver);
         var now = DateTimeOffset.UtcNow;
-        var permit = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-permit", DecisionOutcome.Permit, "review", now);
+        var permit = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-permit", DecisionOutcome.ActionAuthorized, "review", now);
         var pending = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-pending", DecisionOutcome.RequireApproval, "review", now);
         var alreadyReviewed = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-reviewed", DecisionOutcome.RequireApproval, "review", now) with
         {
@@ -1740,6 +1818,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Version = version,
         CommitSha = BuildVersion.Parse(version).CommitSha,
         Roles = "sources",
+        UpgradeTarget = "satellite-a",
         HostName = "host.example.com",
         StartedAt = now.AddHours(-1),
         ReportedAt = now,

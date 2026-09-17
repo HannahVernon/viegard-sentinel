@@ -67,6 +67,10 @@
     }
 
     async function refresh() {
+        const rf = window.viegardRefresh || { begin() { }, done() { } };
+        const caption = document.querySelector('[data-refresh-host="upgrades"]');
+        rf.begin();
+        let ok = false;
         try {
             const response = await fetch("/status/upgrades", { headers: { "Accept": "application/json" } });
             if (response.status === 401 || response.redirected) {
@@ -93,9 +97,18 @@
             if (staleBanner) {
                 staleBanner.hidden = data.stalePending !== true;
             }
+
+            ok = true;
         } catch {
             // Network hiccup (including the admin container restarting
             // mid-upgrade); leave the last known state visible.
+        } finally {
+            if (caption) {
+                rf.done(ok, caption);
+            }
+            else {
+                rf.done(ok);
+            }
         }
     }
 

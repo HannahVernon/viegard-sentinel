@@ -132,6 +132,13 @@
     }
 
     async function refresh() {
+        const rf = window.viegardRefresh || { begin() { }, done() { } };
+        const captions = [
+            document.querySelector('[data-refresh-host="queues"]'),
+            document.querySelector('[data-refresh-host="instances"]'),
+        ].filter(Boolean);
+        rf.begin();
+        let ok = false;
         try {
             const response = await fetch("/status/queues", { headers: { "Accept": "application/json" } });
             if (response.status === 401 || response.redirected) {
@@ -160,8 +167,11 @@
             updateQueueRows(data.rows);
             updateInstanceRows(data.instances);
             updateRetention(data.retention);
+            ok = true;
         } catch {
             // Network hiccup; leave the last known state visible.
+        } finally {
+            rf.done(ok, ...captions);
         }
     }
 

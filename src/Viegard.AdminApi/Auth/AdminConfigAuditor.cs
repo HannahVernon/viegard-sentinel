@@ -355,6 +355,34 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
         }
     }
 
+    public async ValueTask RecordAdminErrorsClearedAsync(
+        string username,
+        long removedCount,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config write by {username}: cleared {removedCount} captured admin errors.",
+                SourceId = "admin:config",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "AdminErrorsCleared",
+                    Username = username,
+                    RemovedCount = removedCount,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
+
     public async ValueTask RecordUnbanAsync(
         string username,
         string ip,

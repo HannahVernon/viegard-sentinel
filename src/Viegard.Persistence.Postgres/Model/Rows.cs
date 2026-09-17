@@ -420,6 +420,27 @@ public sealed class PolicyPostureSettingsRow
     public string UpdatedBy { get; set; } = string.Empty;
 }
 
+public sealed class AdminErrorRow
+{
+    public Guid Id { get; set; }
+
+    public DateTimeOffset OccurredAt { get; set; }
+
+    public string RequestId { get; set; } = string.Empty;
+
+    public string Path { get; set; } = string.Empty;
+
+    public string Method { get; set; } = string.Empty;
+
+    public string? Username { get; set; }
+
+    public string ExceptionType { get; set; } = string.Empty;
+
+    public string Message { get; set; } = string.Empty;
+
+    public string StackTrace { get; set; } = string.Empty;
+}
+
 public sealed class MikroTikRouterRow
 {
     public Guid Id { get; set; }

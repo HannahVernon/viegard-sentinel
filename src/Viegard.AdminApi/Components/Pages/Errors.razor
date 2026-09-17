@@ -1,0 +1,106 @@
+@page "/errors"
+@attribute [Authorize]
+@using Viegard.AdminApi.Errors
+@inject IAdminErrorStore AdminErrors
+@inject IAdminUserStore Users
+@inject IAdminSessionStore Sessions
+@inject IOptions<AdminAuthOptions> AuthOptions
+@inject IHttpContextAccessor HttpContextAccessorService
+@inject UserDisplay Display
+
+<PageTitle>Viegard captured errors</PageTitle>
+
+<main class="admin-panel wide">
+    <h1>Captured errors</h1>
+
+    <FlashBanner />
+
+    <p class="small">Unhandled admin-request exceptions are recorded here (newest first, most recent @AdminError.KeepNewest kept).  Messages and stack traces can contain sensitive request data, so viewing requires step-up verification.</p>
+
+    @if (!_stepUpFresh)
+    {
+        <div class="step-up-strip">
+            <span>Viewing captured errors requires step-up verification.</span>
+            <StepUpPrompt ReturnTo="/errors" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-errors" />
+        </div>
+    }
+    else if (_errors.Count == 0)
+    {
+        <p>No captured errors.</p>
+    }
+    else
+    {
+        <form method="post" action="/errors/clear" class="logout-form">
+            <AntiforgeryToken />
+            <button type="submit" class="secondary-button">Clear all</button>
+        </form>
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Occurred</th>
+                    <th>Request</th>
+                    <th>User</th>
+                    <th>Exception</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var error in _errors)
+                {
+                    <tr>
+                        <td>@Display.Format(error.OccurredAt)</td>
+                        <td><code>@error.Method</code> @error.Path</td>
+                        <td>@(error.Username ?? "-")</td>
+                        <td>
+                            <code>@error.ExceptionType</code>
+                            <div class="small">@error.Message</div>
+                        </td>
+                    </tr>
+                    <tr class="details-row">
+                        <td colspan="4">
+                            <details class="json-details">
+                                <summary>Stack trace (request @error.RequestId)</summary>
+                                <pre class="json-block">@error.StackTrace</pre>
+                            </details>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</main>
+
+@code {
+    private const int PageSize = 100;
+
+    private IReadOnlyList<AdminError> _errors = [];
+    private bool _stepUpFresh;
+    private bool _hasSecurityKeys;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Display.InitializeAsync().ConfigureAwait(false);
+        var context = HttpContextAccessorService.HttpContext;
+        if (context is null)
+        {
+            return;
+        }
+
+        if (Guid.TryParse(context.User.FindFirstValue(AdminCookieNames.SessionIdClaim), out var sessionId))
+        {
+            var session = await Sessions.GetAsync(sessionId).ConfigureAwait(false);
+            _stepUpFresh = session?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
+        }
+
+        if (Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+        {
+            _hasSecurityKeys = (await Users.ListWebAuthnCredentialsAsync(userId).ConfigureAwait(false)).Count > 0;
+        }
+
+        // Error contents load only after the step-up check passes.
+        if (_stepUpFresh)
+        {
+            _errors = await AdminErrors.ListRecentAsync(PageSize).ConfigureAwait(false);
+        }
+    }
+}

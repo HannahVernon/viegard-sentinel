@@ -388,6 +388,50 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Clear_admin_errors_requires_step_up_before_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        await fixture.AdminErrors.AddAsync(CapturedError());
+        fixture.Context.Request.Form = new FormCollection(new Dictionary<string, StringValues>(StringComparer.Ordinal));
+
+        var result = await fixture.InvokeClearErrorsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.Single(await fixture.AdminErrors.ListRecentAsync(10));
+    }
+
+    [Fact]
+    public async Task Clear_admin_errors_clears_and_writes_config_audit()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.AdminErrors.AddAsync(CapturedError());
+        await fixture.AdminErrors.AddAsync(CapturedError());
+        fixture.Context.Request.Form = new FormCollection(new Dictionary<string, StringValues>(StringComparer.Ordinal));
+
+        var result = await fixture.InvokeClearErrorsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Cleared%202%20captured%20errors", location, StringComparison.Ordinal);
+        Assert.Empty(await fixture.AdminErrors.ListRecentAsync(10));
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("cleared 2 captured admin errors", audit.Summary, StringComparison.Ordinal);
+    }
+
+    private static Viegard.Domain.Admin.AdminError CapturedError() => new()
+    {
+        Id = ViegardId.New(),
+        OccurredAt = DateTimeOffset.UtcNow,
+        RequestId = "00-test",
+        Path = "/events",
+        Method = "GET",
+        Username = "hannah",
+        ExceptionType = "System.TimeoutException",
+        Message = "Timeout during reading attempt",
+        StackTrace = "at Somewhere",
+    };
+
+    [Fact]
     public async Task Save_ingestion_filters_requires_step_up_before_mutating()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
@@ -861,6 +905,7 @@ public sealed class AdminConfigurationEndpointsTests
         IRouterCredentialProtector RouterProtector,
         InMemoryHostUpgradeCommandStore HostUpgrades,
         InMemoryIngestionFilterStore IngestionFilters,
+        InMemoryAdminErrorStore AdminErrors,
         SatelliteRoleCredentialCookie SatelliteCredentialCookie)
     {
         public static async Task<EndpointFixture> CreateAsync(bool freshStepUp)
@@ -949,6 +994,7 @@ public sealed class AdminConfigurationEndpointsTests
                 routerProtector,
                 hostUpgrades,
                 ingestionFilters,
+                new InMemoryAdminErrorStore(),
                 satelliteCredentialCookie);
         }
 
@@ -1031,6 +1077,16 @@ public sealed class AdminConfigurationEndpointsTests
                 Context,
                 Antiforgery,
                 IngestionFilters,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeClearErrorsAsync() =>
+            Viegard.AdminApi.Errors.AdminErrorEndpoints.ClearAsync(
+                Context,
+                Antiforgery,
+                AdminErrors,
                 Users,
                 Sessions,
                 AuthAuditor,

@@ -57,7 +57,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         // Clean slate for queue tables between runs.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE actions, active_bans, queue_messages, queue_counters, retention_settings, policy_threshold_settings, policy_posture_settings, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE actions, active_bans, queue_messages, queue_counters, retention_settings, policy_threshold_settings, policy_posture_settings, admin_errors, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -1364,6 +1364,37 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.NotNull(raced2);
         Assert.Equal(1, raced2!.RowVersion);
     }
+
+    [PostgresFact]
+    public async Task Admin_error_store_adds_lists_newest_first_and_clears()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresAdminErrorStore(factory);
+        var now = new DateTimeOffset(2026, 9, 17, 20, 0, 0, TimeSpan.Zero);
+        var older = AdminErrorAt(now.AddMinutes(-5));
+        var newer = AdminErrorAt(now);
+        await store.AddAsync(older);
+        await store.AddAsync(newer);
+
+        var listed = await store.ListRecentAsync(10);
+        Assert.Equal([newer.Id, older.Id], listed.Select(e => e.Id).ToArray());
+
+        Assert.Equal(2, await store.ClearAsync());
+        Assert.Empty(await store.ListRecentAsync(10));
+    }
+
+    private static Viegard.Domain.Admin.AdminError AdminErrorAt(DateTimeOffset occurredAt) => new()
+    {
+        Id = ViegardId.New(),
+        OccurredAt = occurredAt,
+        RequestId = "00-test",
+        Path = "/events",
+        Method = "GET",
+        Username = "hannah",
+        ExceptionType = "System.TimeoutException",
+        Message = "Timeout during reading attempt",
+        StackTrace = "at Somewhere",
+    };
 
     [PostgresFact]
     public async Task MikroTik_router_store_crud_enforces_uniqueness_concurrency_and_credentials()

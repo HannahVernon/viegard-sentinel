@@ -135,6 +135,7 @@
                 </select>
             </label>
             <p class="form-hint">Patterns are literal, case-insensitive substrings scanned linearly.  They are not regular expressions; characters such as .* or [] are matched as typed.</p>
+            <p class="form-hint">The EventKind target matches the namespaced kind name of any event, for example <code>mdaemon/ScreeningBlocked</code>, <code>mdaemon/IpBlocked</code>, <code>admin/LoginFailed</code>, or <code>http/request</code>.  A Prefix match on <code>mdaemon/</code> selects the whole source family.  The Http* targets read fields of HTTP events only.</p>
             <label>
                 Pattern (required term 1)
                 <input name="pattern" maxlength="@CustomSignature.MaxPatternLength" required value="@PatternValue" />
@@ -158,7 +159,8 @@
             </label>
             <label>
                 Evidence weight
-                <input name="evidenceWeight" type="number" min="0" max="1" step="0.01" required value="@EvidenceWeightValue" />
+                <input name="evidenceWeight" type="number" min="0" max="@CustomSignature.MaxEvidenceWeight" step="0.01" required value="@EvidenceWeightValue" />
+                <span class="small">Incident evidence sums across matches and rules; confidence is the sum divided by 5.  A weight of 3.0 or more lets a single matched event reach the 0.7 review gate on its own.</span>
             </label>
             <label class="inline-checkbox">
                 <input name="enabled" type="checkbox" value="true" checked="@EnabledValue" />

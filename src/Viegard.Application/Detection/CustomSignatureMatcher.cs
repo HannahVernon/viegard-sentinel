@@ -30,7 +30,9 @@ public static class CustomSignatureMatcher
     }
 
     public static string GetTargetValue(NormalizedEvent e, CustomSignatureTarget target) =>
-        e.Payload is HttpRequestEvent http ? GetTargetValue(http, target) : string.Empty;
+        target == CustomSignatureTarget.EventKind
+            ? EventKindName.Of(e.Payload)
+            : e.Payload is HttpRequestEvent http ? GetTargetValue(http, target) : string.Empty;
 
     private static string GetTargetValue(HttpRequestEvent http, CustomSignatureTarget target) => target switch
     {

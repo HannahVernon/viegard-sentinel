@@ -23,7 +23,7 @@ public sealed class CustomSignatureTests
             Pattern = new string('b', CustomSignature.MaxPatternLength + 1),
             Category = "",
             Severity = 11,
-            EvidenceWeight = 1.01,
+            EvidenceWeight = CustomSignature.MaxEvidenceWeight + 0.01,
             Target = (CustomSignatureTarget)(-1),
             MatchType = (CustomSignatureMatchType)(-1),
         };
@@ -202,6 +202,64 @@ public sealed class CustomSignatureTests
     }
 
     [Fact]
+    public void Event_kind_target_matches_mdaemon_kinds_by_namespaced_name()
+    {
+        var signature = Signature(
+            target: CustomSignatureTarget.EventKind,
+            matchType: CustomSignatureMatchType.Contains,
+            pattern: "mdaemon/ScreeningBlocked");
+        var options = new DetectionOptions();
+
+        Assert.True(CustomSignatureMatcher.Matches(
+            MDaemonEvent(MDaemonEventKind.ScreeningBlocked),
+            signature,
+            options));
+        Assert.False(CustomSignatureMatcher.Matches(
+            MDaemonEvent(MDaemonEventKind.AuthenticationFailed),
+            signature,
+            options));
+        Assert.False(CustomSignatureMatcher.Matches(
+            HttpEvent("/anything?screeningblocked=1"),
+            signature,
+            options));
+    }
+
+    [Fact]
+    public void Event_kind_target_prefix_selects_a_whole_source_family()
+    {
+        var signature = Signature(
+            target: CustomSignatureTarget.EventKind,
+            matchType: CustomSignatureMatchType.Prefix,
+            pattern: "mdaemon/");
+        var options = new DetectionOptions();
+
+        Assert.True(CustomSignatureMatcher.Matches(MDaemonEvent(MDaemonEventKind.ScreeningBlocked), signature, options));
+        Assert.True(CustomSignatureMatcher.Matches(MDaemonEvent(MDaemonEventKind.IpBlocked), signature, options));
+        Assert.False(CustomSignatureMatcher.Matches(HttpEvent("/mdaemon/looks-like-it"), signature, options));
+    }
+
+    [Fact]
+    public void Event_kind_target_matches_http_events_generically()
+    {
+        var signature = Signature(
+            target: CustomSignatureTarget.EventKind,
+            matchType: CustomSignatureMatchType.Contains,
+            pattern: "http/request");
+
+        Assert.True(CustomSignatureMatcher.Matches(HttpEvent("/any"), signature, new DetectionOptions()));
+    }
+
+    [Fact]
+    public void High_weight_event_kind_signature_is_valid_up_to_the_cap()
+    {
+        var signature = Signature(target: CustomSignatureTarget.EventKind, pattern: "mdaemon/ScreeningBlocked")
+            with
+        { EvidenceWeight = CustomSignature.MaxEvidenceWeight };
+
+        Assert.True(CustomSignatureValidator.Validate(signature).IsValid);
+    }
+
+    [Fact]
     public async Task Rule_source_and_shared_matcher_return_same_verdict()
     {
         var signature = Signature(
@@ -338,6 +396,23 @@ public sealed class CustomSignatureTests
             StatusCode = 200,
             UserAgent = userAgent,
             Host = "www.example.com",
+        },
+        RawObservationId = ViegardId.New(),
+    };
+
+    private static NormalizedEvent MDaemonEvent(MDaemonEventKind kind) => new()
+    {
+        Id = ViegardId.New(),
+        SourceId = "mdaemon-test",
+        SourceType = "mdaemon",
+        OccurredAt = DateTimeOffset.UtcNow,
+        Entities = [new EntityRef(EntityKind.IpAddress, "203.0.113.10")],
+        Payload = new MDaemonLogEvent
+        {
+            LogKind = MDaemonLogKind.Screening,
+            EventKind = kind,
+            RemoteIp = "203.0.113.10",
+            Message = "test line",
         },
         RawObservationId = ViegardId.New(),
     };

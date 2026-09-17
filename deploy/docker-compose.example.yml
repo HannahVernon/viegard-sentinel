@@ -82,7 +82,17 @@ services:
       Logging__LogLevel__Microsoft.EntityFrameworkCore: Warning
       Viegard__Secrets__Provider: file
       Viegard__Secrets__Directory: /run/viegard/secrets
-      # Roles this instance runs (D-0011); all roles by default.
+      # Roles this instance runs (D-0011).  Roles are declared explicitly;
+      # the image bakes in none (least privilege - a host with no declared
+      # roles fails startup validation rather than guessing).  The
+      # correlation, policy, actions, and maintenance roles are singletons:
+      # exactly one instance in the deployment may carry each.
+      Viegard__Host__Roles__0: sources
+      Viegard__Host__Roles__1: correlation
+      Viegard__Host__Roles__2: classification
+      Viegard__Host__Roles__3: policy
+      Viegard__Host__Roles__4: actions
+      Viegard__Host__Roles__5: maintenance
       Viegard__Host__InstanceId: pipeline-1
       # Connection string components; the password is read via the secret
       # file viegard-db-password, never placed here.

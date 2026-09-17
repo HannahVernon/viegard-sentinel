@@ -38,6 +38,20 @@ sudo ./viegard-deploy.sh configure --domain admin.example.com \
 
 The `configure` command writes `deploy/docker-compose.generated.yml` and points `COMPOSE_FILE` in `deploy/.env` at `docker-compose.generated.yml:docker-compose.yml`.  Compose applies the files left to right with later files winning per setting, so the generated file provides defaults and **your `docker-compose.yml` always has the final word**: re-declare any variable there to override the generated value.  Re-running `configure` regenerates the whole generated file from the options given, so pass the complete set you want each run.  Generated array entries (allowlists, the maintenance role) use high indices (`__9`, `__50`+) so they never collide with the `__0..N` entries your own file declares.  One caution: published port lists are appended across files, so if your `docker-compose.yml` already publishes an admin HTTPS port, keep TLS configuration there and do not pass `--domain` to `configure`.
 
+### Pipeline roles are declared explicitly
+
+The pipeline image bakes in no roles.  Every deployment declares the roles each instance runs, because .NET configuration arrays merge by index: a baked-in default list cannot be safely overridden by a shorter list (an instance declaring only `sources` would silently inherit the remaining defaults - this happened in production and is recorded in D-0011).  The pipeline service in `docker-compose.yml` declares:
+
+```yaml
+Viegard__Host__Roles__0: sources
+Viegard__Host__Roles__1: correlation
+Viegard__Host__Roles__2: classification
+Viegard__Host__Roles__3: policy
+Viegard__Host__Roles__4: actions
+```
+
+The generated overlay adds `maintenance` at index 9.  The correlation, policy, actions, and maintenance roles are singletons: exactly one instance in the whole deployment may carry each.  A host with no declared roles fails startup validation, and `upgrade` refuses to rebuild a stack whose compose files never mention `Viegard__Host__Roles__`, so a deployment created before this change cannot silently degrade; add the lines above to the pipeline service once and re-run the upgrade.
+
 Safety properties: secrets are generated only when missing and never overwritten or printed; an existing `docker-compose.yml` is never touched; certificate issuance is skipped when the certificate already exists; re-running `install` is safe.  The script writes `$DIR/.deployed-commit` after a successful install or upgrade rebuild.  Upgrade compares that marker with clone HEAD after pull, so an unchanged clone is not enough to skip rebuilding if the deployed binary is older.  `status` reports both values and warns when they differ.  The script does not edit `docker-compose.yml` for you - after a fresh install it prints a checklist of the operator-specific settings (exposure mode, WebAuthn relying party, AllowedSources, retention periods, data sources).
 
 ## Remote upgrades
@@ -180,7 +194,7 @@ Suppression only affects normalized event emission, queueing, and correlation in
 Example policy values from D-0035:
 
 ```bash
-Viegard__Host__Roles__4=maintenance
+Viegard__Host__Roles__9=maintenance
 Viegard__Retention__RawObservationsDays=30
 Viegard__Retention__EventsDays=90
 Viegard__Retention__IncidentsDays=180

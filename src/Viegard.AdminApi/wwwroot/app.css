@@ -259,25 +259,25 @@ a:hover {
     display: none;
 }
 
-/* Highlight the index entry for the visible section */
+/* Highlight the index entry for the visible section.  The active link is
+   stamped with aria-current="location" by page-index.js (fragments never
+   reach the server, so static SSR cannot render this state).  A chevron
+   renders in space reserved by the link padding so entries do not shift. */
 
-.page-layout:not(:has(section.indexed:target)) .page-index a.index-default-link,
-.page-layout:has(#overview:target) .page-index a[href="/account#overview"],
-.page-layout:has(#password:target) .page-index a[href="/account#password"],
-.page-layout:has(#step-up:target) .page-index a[href="/account#step-up"],
-.page-layout:has(#totp:target) .page-index a[href="/account#totp"],
-.page-layout:has(#security-keys:target) .page-index a[href="/account#security-keys"],
-.page-layout:has(#recovery-codes:target) .page-index a[href="/account#recovery-codes"],
-.page-layout:has(#preferences:target) .page-index a[href="/account#preferences"],
-.page-layout:has(#sessions:target) .page-index a[href="/account#sessions"],
-.page-layout:has(#list:target) .page-index a[href="/signatures#list"],
-.page-layout:has(#add:target) .page-index a[href="/signatures#add"],
-.page-layout:has(#retention:target) .page-index a[href="/queues#retention"],
-.page-layout:has(#queues:target) .page-index a[href="/queues#queues"],
-.page-layout:has(#instances:target) .page-index a[href="/queues#instances"],
-.page-layout:has(#retention:target) .page-index a[href="/configuration#retention"] {
+.page-index a {
+    position: relative;
+    padding-left: 1rem;
+}
+
+.page-index a[aria-current="location"] {
     color: var(--accent-strong);
     font-weight: 700;
+}
+
+.page-index a[aria-current="location"]::before {
+    content: ">";
+    position: absolute;
+    left: 0.15rem;
 }
 
 @media (max-width: 56rem) {

@@ -13,6 +13,7 @@ public static class PipelineWorkerRegistration
         {
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, IngestionFilterSeedWorker>());
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PolicyThresholdSeedWorker>());
+            services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PolicyPostureSeedWorker>());
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, RetentionWorker>());
         }
 

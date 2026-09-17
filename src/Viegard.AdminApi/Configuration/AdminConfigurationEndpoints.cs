@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 using Viegard.AdminApi.Auth;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
@@ -18,6 +19,8 @@ public static class AdminConfigurationEndpoints
     private const string RoutersConfigurationPath = "/configuration#routers";
     private const string UpgradesConfigurationPath = "/configuration#upgrades";
     private const string ThresholdsConfigurationPath = "/configuration#thresholds";
+    private const string PostureConfigurationPath = "/configuration#posture";
+    internal const string EnforceConfirmationWord = "ENFORCE";
     private const string IngestionConfigurationPath = "/configuration#ingestion";
 
     public static void MapAdminConfigurationEndpoints(this WebApplication app)
@@ -56,6 +59,9 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/thresholds", SavePolicyThresholdsAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/posture", SavePolicyPostureAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/ingestion", SaveIngestionFiltersAsync)
@@ -705,6 +711,97 @@ public static class AdminConfigurationEndpoints
             result.Settings,
             context.RequestAborted).ConfigureAwait(false);
         return Redirect(ThresholdsConfigurationPath, status: "Policy threshold settings saved.");
+    }
+
+    internal static async Task<IResult> SavePolicyPostureAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IPolicyPostureSettingsStore policyPosture,
+        IOptions<PolicyOptions> policyOptions,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(PostureConfigurationPath, error: "Step-up verification is required before editing the policy posture.");
+        }
+
+        if (!int.TryParse(form["rowVersion"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedRowVersion)
+            || expectedRowVersion < 0)
+        {
+            return Redirect(PostureConfigurationPath, error: "Policy posture settings version was not valid.  Reload the page and try again.");
+        }
+
+        var before = await policyPosture.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        var dryRun = form.ContainsKey("dryRun");
+        var manualApprovalMode = form.ContainsKey("manualApprovalMode");
+        var emergencyStop = form.ContainsKey("emergencyStop");
+
+        // Disabling dry-run is the switch that makes approved bans real.
+        // The transition requires a typed confirmation word in addition to
+        // the step-up gate (D-0038 amendment, 2026-09-17).
+        var effectiveCurrentDryRun = before?.DryRun ?? policyOptions.Value.Posture.DryRun;
+        if (effectiveCurrentDryRun && !dryRun)
+        {
+            var confirmation = form["confirmEnforce"].ToString().Trim();
+            if (!string.Equals(confirmation, EnforceConfirmationWord, StringComparison.Ordinal))
+            {
+                return Redirect(
+                    PostureConfigurationPath,
+                    error: $"Disabling dry-run enables real enforcement: approved bans will be applied to every enabled router.  Type {EnforceConfirmationWord} in the confirmation box to proceed.");
+            }
+        }
+
+        var candidate = new PolicyPostureSettings
+        {
+            DryRun = dryRun,
+            ManualApprovalMode = manualApprovalMode,
+            EmergencyStop = emergencyStop,
+        };
+        var result = await policyPosture.UpdateAsync(
+            candidate,
+            expectedRowVersion,
+            user.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(PostureConfigurationPath, error: "Policy posture settings were changed by another session.  Review the current values and save again.");
+        }
+
+        await configAuditor.RecordPolicyPostureSettingsWriteAsync(
+            user.Username,
+            before,
+            result.Settings,
+            context.RequestAborted).ConfigureAwait(false);
+
+        var saved = result.Settings!;
+        var status = "Policy posture saved.";
+        if (effectiveCurrentDryRun && !saved.DryRun)
+        {
+            status = "Policy posture saved.  Real enforcement is now active: approved bans will be applied to every enabled router.";
+        }
+        else if (saved.EmergencyStop && before?.EmergencyStop != true)
+        {
+            status = "Policy posture saved.  Emergency stop is active: all action execution is refused until it is lifted.";
+        }
+
+        return Redirect(PostureConfigurationPath, status: status);
     }
 
     private static bool TryReadRouterForm(

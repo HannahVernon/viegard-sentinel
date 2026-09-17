@@ -1283,6 +1283,89 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Policy_posture_settings_store_creates_updates_conflicts_notifies_and_seeds_once()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var listener = new PostgresPolicyPostureSettingsStore(factory, _dataSource!);
+        var writer = new PostgresPolicyPostureSettingsStore(factory, _dataSource!);
+        var now = new DateTimeOffset(2026, 9, 17, 18, 0, 0, TimeSpan.Zero);
+        var wait = listener.WaitForChangeAsync(
+            listener.CurrentChangeVersion,
+            TimeSpan.FromSeconds(10),
+            CancellationToken.None).AsTask();
+
+        await Task.Delay(300);
+        var saved = await writer.UpdateAsync(
+            new PolicyPostureSettings
+            {
+                DryRun = true,
+                ManualApprovalMode = true,
+                EmergencyStop = false,
+                UpdatedAt = now,
+                UpdatedBy = "hannah",
+            },
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: now);
+
+        var version = await wait.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.True(version > 0);
+        Assert.True(saved.Succeeded);
+        var savedSettings = saved.Settings!;
+        Assert.Equal(1, savedSettings.RowVersion);
+        Assert.True(savedSettings.DryRun);
+        Assert.Equal("hannah", savedSettings.UpdatedBy);
+
+        var updated = await writer.UpdateAsync(
+            savedSettings with { DryRun = false, EmergencyStop = true },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "operator",
+            updatedAt: now.AddMinutes(1));
+
+        Assert.True(updated.Succeeded);
+        var updatedSettings = updated.Settings!;
+        Assert.Equal(2, updatedSettings.RowVersion);
+        Assert.False(updatedSettings.DryRun);
+        Assert.True(updatedSettings.ManualApprovalMode);
+        Assert.True(updatedSettings.EmergencyStop);
+
+        var conflict = await writer.UpdateAsync(
+            updatedSettings with { DryRun = true },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "stale",
+            updatedAt: now.AddMinutes(2));
+
+        Assert.False(conflict.Succeeded);
+        Assert.Equal(2, conflict.Settings!.RowVersion);
+        Assert.False(conflict.Settings.DryRun);
+
+        var afterAdminSeed = await writer.TryCreateAsync(
+            PolicyPostureSettings.FromOptions(new PolicyOptions(), now.AddMinutes(3)));
+        Assert.False(afterAdminSeed.Created);
+        Assert.False(afterAdminSeed.Settings.DryRun);
+        Assert.Equal("operator", afterAdminSeed.Settings.UpdatedBy);
+
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.PolicyPostureSettings.ExecuteDeleteAsync();
+        }
+
+        var seedA = writer.TryCreateAsync(
+            PolicyPostureSettings.FromOptions(new PolicyOptions(), now.AddMinutes(4))).AsTask();
+        var seedB = listener.TryCreateAsync(
+            PolicyPostureSettings.FromOptions(
+                new PolicyOptions { Posture = new PolicyPostureOptions { DryRun = false, ManualApprovalMode = false, EmergencyStop = true } },
+                now.AddMinutes(5))).AsTask();
+        await Task.WhenAll(seedA, seedB);
+
+        await using var verify = factory.CreateDbContext();
+        Assert.Equal(1, await verify.PolicyPostureSettings.CountAsync());
+        var raced2 = await writer.GetAsync();
+        Assert.NotNull(raced2);
+        Assert.Equal(1, raced2!.RowVersion);
+    }
+
+    [PostgresFact]
     public async Task MikroTik_router_store_crud_enforces_uniqueness_concurrency_and_credentials()
     {
         var factory = new TestDbContextFactory(_dataSource!);

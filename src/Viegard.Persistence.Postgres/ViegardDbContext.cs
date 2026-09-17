@@ -55,6 +55,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<PolicyThresholdSettingsRow> PolicyThresholdSettings => Set<PolicyThresholdSettingsRow>();
 
+    public DbSet<PolicyPostureSettingsRow> PolicyPostureSettings => Set<PolicyPostureSettingsRow>();
+
     public DbSet<MikroTikRouterRow> MikroTikRouters => Set<MikroTikRouterRow>();
 
     public DbSet<QueueMessageRow> QueueMessages => Set<QueueMessageRow>();
@@ -283,6 +285,15 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Policy.PolicyThresholdSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<PolicyPostureSettingsRow>(entity =>
+        {
+            entity.ToTable("policy_posture_settings", table =>
+                table.HasCheckConstraint("CK_policy_posture_settings_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Policy.PolicyPostureSettings.MaxUpdatedByLength);
         });
 
         modelBuilder.Entity<MikroTikRouterRow>(entity =>

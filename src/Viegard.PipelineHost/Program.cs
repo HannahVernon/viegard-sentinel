@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Options;
 using Viegard.Actions.MikroTik;
@@ -136,6 +137,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IRetentionStore, InMemoryRetentionStore>();
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
+        builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();
 
         var eventsQueue = new ChannelWorkQueue<Guid>("events");
@@ -161,6 +163,8 @@ builder.Services.AddSingleton<IIngestionFilterDiagnostics, LoggingIngestionFilte
 builder.Services.AddSingleton<IngestionFilterSource>();
 builder.Services.AddSingleton<IPolicyThresholdDiagnostics, LoggingPolicyThresholdDiagnostics>();
 builder.Services.AddSingleton<PolicyThresholdSource>();
+builder.Services.AddSingleton<IPolicyPostureDiagnostics, LoggingPolicyPostureDiagnostics>();
+builder.Services.AddSingleton<PolicyPostureSource>();
 
 // IMAP source module (Phase 4; D-0019..D-0022).  Account configuration
 // (hosts, usernames) is environment-specific: in development it lives in
@@ -324,6 +328,15 @@ if (configuredRoles.Contains(RoleNames.Actions, StringComparer.OrdinalIgnoreCase
     builder.Services.AddSingleton<IActionProvider, MikroTikBanActionProvider>();
     builder.Services.AddHostedService<ActionWorker>();
     builder.Services.AddHostedService<BanReconciliationWorker>();
+}
+
+// The posture refresh loop feeds every posture consumer (policy engine,
+// action dispatch, ban reconciliation), so it runs when either role is on.
+// TryAddEnumerable keeps it single when a host runs both roles.
+if (configuredRoles.Contains(RoleNames.Policy, StringComparer.OrdinalIgnoreCase)
+    || configuredRoles.Contains(RoleNames.Actions, StringComparer.OrdinalIgnoreCase))
+{
+    builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PolicyPostureRefreshWorker>());
 }
 
 builder.Services.AddMaintenanceWorkers(configuredRoles);

@@ -184,6 +184,7 @@ public sealed class BanReconciliationWorkerTests
                     ManualApprovalMode = true,
                 },
             }),
+            new PolicyPostureSource(),
             Options.Create(new ActionWorkerOptions()),
             fixture.Http,
             audit,

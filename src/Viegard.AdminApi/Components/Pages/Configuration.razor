@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject IRetentionSettingsStore RetentionSettingsStore
 @inject IPolicyThresholdSettingsStore PolicyThresholdSettingsStore
+@inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
 @inject IIngestionFilterStore IngestionFilters
 @inject ISatelliteRoleStore SatelliteRoles
 @inject IMikroTikRouterStore Routers
@@ -24,6 +25,7 @@
         <a href="/configuration#routers">Routers</a>
         <a href="/configuration#upgrades">Upgrades</a>
         <a href="/configuration#thresholds">Policy thresholds</a>
+        <a href="/configuration#posture">Policy posture</a>
         <a href="/configuration#ingestion">Ingestion</a>
     </nav>
     <div class="page-content">
@@ -570,6 +572,88 @@
         }
     </section>
 
+    <section id="posture" class="indexed">
+        <h2>Policy posture</h2>
+        <p class="small">The posture flags govern what happens after a decision.  Dry-run composes router calls without applying them.  Manual approval routes every would-be action to operator review and wins over dry-run in the decision overlay.  Emergency stop refuses all action execution.</p>
+        <p class="small">Changes reach the policy engine, action dispatch, and ban reconciliation within moments through database notifications with a polling fallback.</p>
+
+        <h3>Status</h3>
+        <dl class="detail-list">
+            <dt>Settings row</dt><dd>@PostureSettingsState</dd>
+            <dt>Version</dt><dd>@(_postureSettings?.RowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")</dd>
+            <dt>Last changed</dt><dd>@PostureLastChanged</dd>
+        </dl>
+
+        @if (_postureSettings is null)
+        {
+            <p class="message">Showing deployment defaults.  The settings row seeds on the next maintenance-role startup unless an admin saves values first.</p>
+        }
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Flag</th>
+                    <th>Effective value</th>
+                    <th>Meaning</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>DryRun</code></td>
+                    <td><span class="@(PostureValues.DryRun ? "badge badge-green" : "badge badge-red")">@(PostureValues.DryRun ? "On" : "Off - enforcing")</span></td>
+                    <td>Actions compose the exact router calls without applying them.  Turning this off makes approved bans real.</td>
+                </tr>
+                <tr>
+                    <td><code>ManualApprovalMode</code></td>
+                    <td><span class="badge">@(PostureValues.ManualApprovalMode ? "On" : "Off")</span></td>
+                    <td>Every would-be action becomes a decision awaiting operator review.  Wins over dry-run in the decision overlay.</td>
+                </tr>
+                <tr>
+                    <td><code>EmergencyStop</code></td>
+                    <td><span class="@(PostureValues.EmergencyStop ? "badge badge-red" : "badge")">@(PostureValues.EmergencyStop ? "ACTIVE" : "Off")</span></td>
+                    <td>Refuses all action execution and ban reconciliation until lifted.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Edit policy posture</h3>
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/posture" class="edit-form">
+                <AntiforgeryToken />
+                <input type="hidden" name="rowVersion" value="@(_postureSettings?.RowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")" />
+                <label class="checkbox-label">
+                    <input type="checkbox" name="dryRun" checked="@PostureValues.DryRun" />
+                    Dry-run
+                    <span class="small">When checked, actions record what they would do and touch nothing.</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="manualApprovalMode" checked="@PostureValues.ManualApprovalMode" />
+                    Manual approval mode
+                    <span class="small">When checked, every would-be action requires operator approval on the decision page.</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" name="emergencyStop" checked="@PostureValues.EmergencyStop" />
+                    Emergency stop
+                    <span class="small">When checked, all action execution is refused, including reconciliation.</span>
+                </label>
+                <label>
+                    Enforcement confirmation
+                    <input name="confirmEnforce" type="text" autocomplete="off" placeholder="Required only when disabling dry-run" />
+                    <span class="small">Disabling dry-run makes approved bans real on every enabled router.  Type ENFORCE here to confirm that transition; leave blank otherwise.</span>
+                </label>
+                <button type="submit">Save policy posture</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Editing the policy posture requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#posture" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-posture" />
+            </div>
+        }
+    </section>
+
     <section id="ingestion" class="indexed">
         <h2>Ingestion</h2>
         <p class="small">Suppress high-volume MDaemon event kinds at normalization time.  Suppressed kinds are not turned into events or queued for correlation, but raw observations still record every source payload for forensics.</p>
@@ -651,6 +735,7 @@
 @code {
     private RetentionSettings? _settings;
     private PolicyThresholdSettings? _thresholdSettings;
+    private PolicyPostureSettings? _postureSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
     private IReadOnlyDictionary<string, IngestionFilter> _mdaemonFilters = new Dictionary<string, IngestionFilter>(StringComparer.Ordinal);
     private IReadOnlyList<SatelliteRoleInfo> _satelliteRoles = [];
@@ -702,11 +787,25 @@
         ? "Not seeded.  Showing deployment defaults; the settings row seeds on next maintenance startup."
         : $"{_thresholdSettings.UpdatedBy} at {Display.Format(_thresholdSettings.UpdatedAt)}";
 
+    private PolicyPostureValues PostureValues =>
+        _postureSettings is null
+            ? PolicyPostureValues.FromOptions(PolicyOptions.Value)
+            : new PolicyPostureValues(_postureSettings.DryRun, _postureSettings.ManualApprovalMode, _postureSettings.EmergencyStop);
+
+    private string PostureSettingsState => _postureSettings is null
+        ? "Not seeded"
+        : "Database-owned";
+
+    private string PostureLastChanged => _postureSettings is null
+        ? "Not seeded.  Showing deployment defaults; the settings row seeds on next maintenance startup."
+        : $"{_postureSettings.UpdatedBy} at {Display.Format(_postureSettings.UpdatedAt)}";
+
     protected override async Task OnInitializedAsync()
     {
         await Display.InitializeAsync().ConfigureAwait(false);
         _settings = await RetentionSettingsStore.GetAsync().ConfigureAwait(false);
         _thresholdSettings = await PolicyThresholdSettingsStore.GetAsync().ConfigureAwait(false);
+        _postureSettings = await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
         _mdaemonFilters = (await IngestionFilters
                 .ListForSourceAsync(MDaemonIngestionFilterPolicy.SourceType)

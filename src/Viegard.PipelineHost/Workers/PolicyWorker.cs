@@ -19,19 +19,21 @@ public sealed class PolicyWorker(
     IPolicyEngine policyEngine,
     IAuditLedger auditLedger,
     IOptions<PolicyOptions> options,
+    PolicyPostureSource postureSource,
     ILogger<PolicyWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var policyOptions = options.Value;
+        var startupPosture = postureSource.CurrentValues(policyOptions);
         logger.LogInformation(
-            "Policy worker started for queue '{QueueName}' with policy {PolicyId} {PolicyVersion}.  DryRun={DryRun}; ManualApprovalMode={ManualApprovalMode}; EmergencyStop={EmergencyStop}; action threshold confidence {ActionConfidence}, review confidence {ReviewConfidence}, minimum severity {MinSeverity}.",
+            "Policy worker started for queue '{QueueName}' with policy {PolicyId} {PolicyVersion}.  DryRun={DryRun}; ManualApprovalMode={ManualApprovalMode}; EmergencyStop={EmergencyStop}; action threshold confidence {ActionConfidence}, review confidence {ReviewConfidence}, minimum severity {MinSeverity}.  Posture is database-owned once seeded; values shown are the current snapshot.",
             classificationQueue.QueueName,
             DefaultPolicyEngine.DefaultPolicyId,
             DefaultPolicyEngine.DefaultPolicyVersion,
-            policyOptions.Posture.DryRun,
-            policyOptions.Posture.ManualApprovalMode,
-            policyOptions.Posture.EmergencyStop,
+            startupPosture.DryRun,
+            startupPosture.ManualApprovalMode,
+            startupPosture.EmergencyStop,
             policyOptions.AiActionConfidence,
             policyOptions.AiReviewConfidence,
             policyOptions.AiActionMinSeverity);
@@ -53,7 +55,7 @@ public sealed class PolicyWorker(
                     continue;
                 }
 
-                var posture = options.Value.Posture;
+                var posture = postureSource.CurrentValues(options.Value);
                 var decision = await policyEngine
                     .EvaluateAsync(
                         classification,

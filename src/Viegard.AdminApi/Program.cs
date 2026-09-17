@@ -218,6 +218,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IIngestionFilterStore, InMemoryIngestionFilterStore>();
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
+        builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<ISatelliteRoleStore, InMemorySatelliteRoleStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();
         builder.Services.AddSingleton<IHostUpgradeCommandStore, InMemoryHostUpgradeCommandStore>();

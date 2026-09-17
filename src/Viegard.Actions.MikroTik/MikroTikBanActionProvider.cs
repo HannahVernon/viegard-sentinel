@@ -20,6 +20,7 @@ public sealed class MikroTikBanActionProvider(
     IRouterCredentialProtector credentialProtector,
     ProtectedAddressList protectedAddresses,
     IOptions<PolicyOptions> policyOptions,
+    PolicyPostureSource postureSource,
     IMikroTikRouterHttpClientFactory httpClientFactory,
     TimeProvider timeProvider) : IResumableActionProvider
 {
@@ -90,7 +91,8 @@ public sealed class MikroTikBanActionProvider(
             return Failed(actionRecord, $"Provider '{actionRecord.ProviderId}' cannot be executed by provider '{ProviderId}'.", now);
         }
 
-        if (policyOptions.Value.Posture.EmergencyStop)
+        var posture = postureSource.CurrentValues(policyOptions.Value);
+        if (posture.EmergencyStop)
         {
             return Failed(
                 actionRecord,
@@ -118,7 +120,7 @@ public sealed class MikroTikBanActionProvider(
             .ToList();
         if (enabledRouters.Count == 0)
         {
-            if (!policyOptions.Value.Posture.DryRun)
+            if (!posture.DryRun)
             {
                 _ = await ApplyDesiredStateChangeAsync(actionRecord, normalized, now, cancellationToken).ConfigureAwait(false);
             }
@@ -128,7 +130,7 @@ public sealed class MikroTikBanActionProvider(
 
         var existingResults = ParseResults(actionRecord.ResultsJson);
         List<MikroTikRouterActionResult> results;
-        if (policyOptions.Value.Posture.DryRun)
+        if (posture.DryRun)
         {
             results = enabledRouters
                 .Select(router => DryRunResult(router, normalized, now))

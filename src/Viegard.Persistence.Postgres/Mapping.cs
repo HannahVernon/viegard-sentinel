@@ -614,6 +614,28 @@ internal static class Mapping
         UpdatedBy = row.UpdatedBy,
     };
 
+    public static PolicyPostureSettingsRow ToRow(this PolicyPostureSettings settings) => new()
+    {
+        Id = settings.Id,
+        DryRun = settings.DryRun,
+        ManualApprovalMode = settings.ManualApprovalMode,
+        EmergencyStop = settings.EmergencyStop,
+        RowVersion = settings.RowVersion,
+        UpdatedAt = Utc(settings.UpdatedAt),
+        UpdatedBy = settings.UpdatedBy,
+    };
+
+    public static PolicyPostureSettings ToDomain(this PolicyPostureSettingsRow row) => new()
+    {
+        Id = row.Id,
+        DryRun = row.DryRun,
+        ManualApprovalMode = row.ManualApprovalMode,
+        EmergencyStop = row.EmergencyStop,
+        RowVersion = row.RowVersion,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+    };
+
     public static MikroTikRouterRow ToRow(this MikroTikRouter router) => new()
     {
         Id = router.Id,

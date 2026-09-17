@@ -403,6 +403,23 @@ public sealed class PolicyThresholdSettingsRow
     public string UpdatedBy { get; set; } = string.Empty;
 }
 
+public sealed class PolicyPostureSettingsRow
+{
+    public int Id { get; set; }
+
+    public bool DryRun { get; set; }
+
+    public bool ManualApprovalMode { get; set; }
+
+    public bool EmergencyStop { get; set; }
+
+    public int RowVersion { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+}
+
 public sealed class MikroTikRouterRow
 {
     public Guid Id { get; set; }

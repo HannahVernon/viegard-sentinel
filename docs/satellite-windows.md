@@ -116,13 +116,15 @@ The installer writes `Viegard:Database:MaxPoolSize` 8 into the satellite configu
 
 ## Install on the MDaemon host
 
-Clone the repository on the MDaemon server, then run the installer.  No manual `dotnet publish` or hand-edited JSON is required.
+Clone the repository anywhere on the MDaemon server (this bootstrap clone only supplies the installer script and the origin URL), then run the installer:
 
 ```powershell
 git clone --branch dev https://code.hannahvernon.com/hannah-vernon/viegard-sentinel.git C:\Viegard
 Set-Location C:\Viegard
 .\deploy\windows\viegard-satellite.ps1 install -Client MDaemon
 ```
+
+The installer creates a **managed clone** at `C:\Program Files\Viegard Satellite\repo` (override with `-RepoDir`; supply `-CloneUrl` when not running from a clone).  All git operations, publishes, the scheduled task, and the service-side upgrade agent use the managed clone, never the bootstrap clone.  Placing it under Program Files means every ancestor directory is writable only by administrators, so no other local user can plant a `.git` directory anywhere along the resolved path.  The installer also whitelists the managed clone in git's system-level `safe.directory` configuration so git commands succeed for the service account and for the `SYSTEM` scheduled task, which do not own the clone.  After install, the bootstrap clone can be deleted.
 
 For an unattended or repeatable run, pass the prompted values as parameters:
 
@@ -175,8 +177,9 @@ Choice | Account | Trade-off
 
 ### What the installer creates
 
+- A managed clone of the repository at `C:\Program Files\Viegard Satellite\repo`, shared by all client profiles on the host, whitelisted in git's system-level `safe.directory` configuration.
 - A self-contained win-x64 publish of `src\Viegard.PipelineHost` under `C:\Program Files\Viegard Satellite\MDaemon\app`.
-- `appsettings.Production.json` in the publish output.  It sets `Viegard:WindowsService:ServiceName` to `ViegardSatelliteMDaemon`, sets `Viegard:Host:Roles` to `["sources"]`, configures `Viegard:HostUpgradeAgent` for this satellite target, configures PostgreSQL persistence, points the file secret provider at the local secrets directory, enables the MDaemon source, and sets `Viegard:Database:AutoMigrate` to `false`.
+- `appsettings.Production.json` in the publish output.  It sets `Viegard:WindowsService:ServiceName` to `ViegardSatelliteMDaemon`, sets `Viegard:Host:Roles` to `["sources"]`, configures `Viegard:HostUpgradeAgent` for this satellite target (including `CloneRoot` pinned to the managed clone), configures PostgreSQL persistence, points the file secret provider at the local secrets directory, enables the MDaemon source, and sets `Viegard:Database:AutoMigrate` to `false`.
 - `C:\Program Files\Viegard Satellite\MDaemon\secrets\viegard-db-password`, never printed and never stored in JSON.
 - Windows service `ViegardSatelliteMDaemon`, display name `Viegard Satellite Pipeline (MDaemon)`, delayed automatic start, and restart recovery at 1, 5, and 15 minutes.
 - Registry environment value `DOTNET_ENVIRONMENT=Production` for the service.
@@ -188,16 +191,15 @@ Routine MDaemon transcript chatter can be filtered centrally from **Configuratio
 
 ## Upgrade
 
-Run upgrade from the cloned repository in an elevated Windows PowerShell session:
+Run upgrade from any copy of the script in an elevated Windows PowerShell session:
 
 ```powershell
-Set-Location C:\Viegard
 .\deploy\windows\viegard-satellite.ps1 upgrade -Client MDaemon
 ```
 
-The upgrade command detects the repository root from the script path, refuses to run with local git changes, fetches origin, reports incoming commits, and runs `git pull --ff-only`.  It then compares the current clone HEAD with `app\.deployed-commit` under the resolved install directory.  It stops the service, republishes the app, preserves `appsettings.Production.json` and `secrets\viegard-db-password`, restarts the service, and verifies that the service reaches `Running` with no new `Viegard.PipelineHost` Error-level Application events in the startup window when the marker is missing, differs from clone HEAD, or `-Force` is supplied.  Warning-level entries from the startup window are printed for context but do not fail the upgrade.  It exits without republishing only when the marker exists and matches clone HEAD.  Every successful publish writes the clone's full HEAD SHA to `app\.deployed-commit`.
+The upgrade command operates on the managed clone at `C:\Program Files\Viegard Satellite\repo`, creating it first when it does not exist (hosts installed before the managed clone existed migrate automatically on their next upgrade; the URL and branch come from the clone containing the running script, or from `-CloneUrl`).  It refuses to run with local git changes, fetches origin, reports incoming commits, and runs `git pull --ff-only`.  It then compares the current clone HEAD with `app\.deployed-commit` under the resolved install directory.  It stops the service, republishes the app, preserves `appsettings.Production.json` and `secrets\viegard-db-password`, restarts the service, and verifies that the service reaches `Running` with no new `Viegard.PipelineHost` Error-level Application events in the startup window when the marker is missing, differs from clone HEAD, or `-Force` is supplied.  Warning-level entries from the startup window are printed for context but do not fail the upgrade.  It exits without republishing only when the marker exists and matches clone HEAD.  Every successful publish writes the clone's full HEAD SHA to `app\.deployed-commit`.
 
-Upgrade also performs a non-destructive configuration merge after the preserved JSON is restored.  Missing `Viegard:Database:MaxPoolSize` is added with value `8`, and missing `Viegard:HostUpgradeAgent` keys are added from the current client profile, script path, scheduled-task name, prompted upgrade target, and per-target state directory under `C:\ProgramData\Viegard\<target>`.  Existing values are not overwritten.  If the binaries are already current but the merge adds defaults, the script restarts the service so the new settings take effect.  With `-Yes`, the upgrade target prompt accepts the lowercase machine-name default.
+Upgrade also performs a configuration merge after the preserved JSON is restored.  Missing `Viegard:Database:MaxPoolSize` is added with value `8`, and missing `Viegard:HostUpgradeAgent` keys are added from the current client profile, scheduled-task name, prompted upgrade target, and per-target state directory under `C:\ProgramData\Viegard\<target>`.  The installer-owned path values `SatelliteScriptPath` and `CloneRoot` are corrected to the managed clone when they point elsewhere; all other existing values are not overwritten.  Upgrade also repoints an existing auto-upgrade scheduled task at the managed clone's script, preserving its schedule.  If the binaries are already current but the merge changes settings, the script restarts the service so they take effect.  With `-Yes`, the upgrade target prompt accepts the lowercase machine-name default.
 
 ## Scheduled auto-upgrade
 
@@ -219,10 +221,10 @@ Use `-Daily` for a daily schedule:
 .\deploy\windows\viegard-satellite.ps1 register-autoupgrade -Client MDaemon -Daily -Time 03:30
 ```
 
-The task action runs from the clone directory and invokes:
+The task action runs from the managed clone directory and invokes:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File <clone>\deploy\windows\viegard-satellite.ps1 upgrade -Client MDaemon -Yes
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\Viegard Satellite\repo\deploy\windows\viegard-satellite.ps1" upgrade -Client MDaemon -Yes
 ```
 
 The task name for the MDaemon profile is `ViegardSatelliteMDaemonAutoUpgrade`.  The installer writes the same name into `Viegard:HostUpgradeAgent:ScheduledTaskName`, so the service-side upgrade agent and the registered scheduled task stay aligned.
@@ -241,7 +243,7 @@ Each Windows satellite claims only the target written in its local `Viegard:Host
 
 When the service claims a command, it writes `viegard-host-upgrade-state.json` in `Viegard:HostUpgradeAgent:StateDirectory`, records the clone HEAD before the upgrade, and tries to run the scheduled task first.  Current installs default that directory to `C:\ProgramData\Viegard\<target>` and grant the service account Modify permission during install and upgrade.  This supersedes the earlier app-directory location under `C:\Program Files\Viegard Satellite\<Client>\app`, which non-privileged service accounts could not write.  The scheduled task runs as `SYSTEM` with highest privileges and executes the same git-based `upgrade -Client MDaemon -Yes` command documented above.  If the task cannot be started, the worker falls back to a detached elevated PowerShell launch and writes `viegard-host-upgrade-transcript.log` in the same state directory.
 
-Completion is reported by the service after it restarts.  On startup, the worker reads the state file, reads `app\.deployed-commit`, reads the clone HEAD from the script's repository, and marks the command succeeded only when the marker and clone HEAD match.  If the upgrade command decides the satellite is already current and does not restart the service, the worker sees the lingering state file after `Viegard:HostUpgradeAgent:StuckStateGracePeriod` (default 10 minutes, valid range 1 to 60 minutes), runs the same marker-vs-HEAD check, and completes the command without launching anything else.  While a state file exists and is still inside the grace period, the worker skips polling so it cannot double-launch a requeued command.  The command detail contains the before-and-after short commits and a bounded transcript tail when one exists.
+Completion is reported by the service after it restarts.  On startup, the worker reads the state file, reads `app\.deployed-commit`, reads the clone HEAD from the configured `Viegard:HostUpgradeAgent:CloneRoot` (older configurations without `CloneRoot` require the `.git` directory exactly two levels above `SatelliteScriptPath`; in both cases the resolver fails closed rather than searching ancestor directories), and marks the command succeeded only when the marker and clone HEAD match.  The agent passes `safe.directory` inline on its git call, so the read works even before the installer's system-level whitelist exists.  If the upgrade command decides the satellite is already current and does not restart the service, the worker sees the lingering state file after `Viegard:HostUpgradeAgent:StuckStateGracePeriod` (default 10 minutes, valid range 1 to 60 minutes), runs the same marker-vs-HEAD check, and completes the command without launching anything else.  While a state file exists and is still inside the grace period, the worker skips polling so it cannot double-launch a requeued command.  The command detail contains the before-and-after short commits and a bounded transcript tail when one exists.
 
 Status meanings in the Admin UI:
 

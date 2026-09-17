@@ -14,6 +14,12 @@ The satellite client profile to install, upgrade, or query.  Valid value today: 
 .PARAMETER InstallDir
 The installation directory.  The default is C:\Program Files\Viegard Satellite\<Client>.  The app is published under the app subdirectory and secrets are stored under the secrets subdirectory.
 
+.PARAMETER RepoDir
+The managed clone directory shared by all client profiles on this host.  The default is C:\Program Files\Viegard Satellite\repo.  Install, upgrade, and register-autoupgrade create the clone here when it does not exist, and all git and publish operations use it.  Placing the clone under Program Files keeps every ancestor directory admin-writable only.
+
+.PARAMETER CloneUrl
+The repository URL used to create the managed clone when it does not exist.  When omitted, the URL is read from origin of the clone containing the running script.
+
 .PARAMETER MDaemonRoot
 The MDaemon root folder.  The default prompt value is C:\MDaemon and the folder must contain a Logs subfolder.
 
@@ -77,6 +83,10 @@ param(
     [string]$Client,
 
     [string]$InstallDir,
+
+    [string]$RepoDir,
+
+    [string]$CloneUrl,
 
     [string]$MDaemonRoot,
 
@@ -1093,18 +1103,86 @@ function Get-EffectiveInstallDir {
     return (Join-Path $script:DefaultInstallRoot $script:ClientProfile.Name)
 }
 
-function Get-RepositoryRoot {
-    $currentItem = Get-Item -LiteralPath $PSScriptRoot
-    while ($null -ne $currentItem) {
-        $gitPath = Join-Path $currentItem.FullName ".git"
-        if (Test-Path -LiteralPath $gitPath) {
-            return $currentItem.FullName
-        }
-
-        $currentItem = $currentItem.Parent
+function Get-ManagedRepositoryRoot {
+    if (Test-ParameterProvided -Name "RepoDir") {
+        return [System.IO.Path]::GetFullPath($RepoDir)
     }
 
-    Stop-WithMessage "Could not find the repository root from script path $PSScriptRoot."
+    return Join-Path $script:DefaultInstallRoot "repo"
+}
+
+function Get-BootstrapRepositoryRoot {
+    # The running script may be a copy inside a clone (the bootstrap case,
+    # before the managed clone exists).  Only the fixed deploy\windows offset
+    # is accepted; the resolver never walks further up the directory tree, so
+    # a .git directory planted in an ancestor cannot redirect it.
+    $candidate = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+    if (Test-Path -LiteralPath (Join-Path $candidate ".git") -PathType Container) {
+        return $candidate
+    }
+
+    return $null
+}
+
+function Get-RepositoryRoot {
+    $managedRoot = Get-ManagedRepositoryRoot
+    if (Test-Path -LiteralPath (Join-Path $managedRoot ".git") -PathType Container) {
+        return $managedRoot
+    }
+
+    $bootstrapRoot = Get-BootstrapRepositoryRoot
+    if ($null -ne $bootstrapRoot) {
+        return $bootstrapRoot
+    }
+
+    Stop-WithMessage ("No managed clone exists at " + $managedRoot + " and the running script is not inside a git clone.  Run install or upgrade to create the managed clone.")
+}
+
+function Initialize-ManagedRepository {
+    $managedRoot = Get-ManagedRepositoryRoot
+    if (Test-Path -LiteralPath (Join-Path $managedRoot ".git") -PathType Container) {
+        Set-GitSafeDirectory -RepositoryRoot $managedRoot
+        return $managedRoot
+    }
+
+    $bootstrapRoot = Get-BootstrapRepositoryRoot
+    $cloneSourceUrl = $null
+    if (Test-ParameterProvided -Name "CloneUrl") {
+        $cloneSourceUrl = $CloneUrl
+    }
+    elseif ($null -ne $bootstrapRoot) {
+        $urlLines = @(Get-GitOutput -RepositoryRoot $bootstrapRoot -ArgumentList @("config", "--get", "remote.origin.url"))
+        if ($urlLines.Count -gt 0) {
+            $cloneSourceUrl = [string]$urlLines[0]
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($cloneSourceUrl)) {
+        Stop-WithMessage "Could not determine the repository URL for the managed clone.  Re-run with -CloneUrl."
+    }
+
+    $cloneBranch = $null
+    if ($null -ne $bootstrapRoot) {
+        $branchLines = @(Get-GitOutput -RepositoryRoot $bootstrapRoot -ArgumentList @("rev-parse", "--abbrev-ref", "HEAD"))
+        if ($branchLines.Count -gt 0 -and $branchLines[0] -ne "HEAD") {
+            $cloneBranch = [string]$branchLines[0]
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($cloneBranch)) {
+        $cloneBranch = "dev"
+    }
+
+    Write-InfoLine ("Creating the managed clone: " + $cloneSourceUrl + " (branch " + $cloneBranch + ") -> " + $managedRoot + " ...")
+    New-Directory -Path (Split-Path -Path $managedRoot -Parent)
+    & git clone --branch $cloneBranch $cloneSourceUrl $managedRoot
+    if ($LASTEXITCODE -ne 0) {
+        Stop-WithMessage "git clone failed for $cloneSourceUrl."
+    }
+
+    Set-GitSafeDirectory -RepositoryRoot $managedRoot
+    Write-InfoLine ("Created the managed clone at " + $managedRoot + ".")
+    return $managedRoot
 }
 
 function Get-SatelliteScriptPath {
@@ -1113,10 +1191,9 @@ function Get-SatelliteScriptPath {
         [string]$RepositoryRoot
     )
 
-    if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
-        return [System.IO.Path]::GetFullPath($PSCommandPath)
-    }
-
+    # Always reference the copy inside the repository root so the scheduled
+    # task and the upgrade agent follow the managed clone, not whichever
+    # copy of the script happens to be executing.
     return [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot "deploy\windows\viegard-satellite.ps1"))
 }
 
@@ -1141,6 +1218,36 @@ function Get-GitOutput {
     finally {
         Pop-Location
     }
+}
+
+function Set-GitSafeDirectory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot
+    )
+
+    # Git refuses to operate on a repository owned by a different user unless
+    # the path is whitelisted ("dubious ownership").  The satellite service
+    # account and the SYSTEM auto-upgrade task both read this clone, which is
+    # typically owned by the administrator who created it, so whitelist it in
+    # the system-level git configuration that every account reads.
+    $normalizedRoot = ([System.IO.Path]::GetFullPath($RepositoryRoot)).TrimEnd("\").Replace("\", "/")
+    $existingEntries = @(& git config --system --get-all safe.directory 2>&1)
+    if ($LASTEXITCODE -eq 0) {
+        foreach ($entry in $existingEntries) {
+            $entryText = [string]$entry
+            if ($entryText -eq "*" -or $entryText.TrimEnd("/").Equals($normalizedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                return
+            }
+        }
+    }
+
+    & git config --system --add safe.directory $normalizedRoot 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Stop-WithMessage "Failed to add $normalizedRoot to git's system-level safe.directory configuration."
+    }
+
+    Write-InfoLine ("Whitelisted " + $normalizedRoot + " in git's system-level safe.directory configuration.")
 }
 
 function Get-ShortCommit {
@@ -1322,6 +1429,7 @@ function New-SatelliteConfigurationJson {
             HostUpgradeAgent = [ordered]@{
                 Target = $InstallerConfig.HostUpgradeTarget
                 SatelliteScriptPath = $InstallerConfig.SatelliteScriptPath
+                CloneRoot = $InstallerConfig.CloneRoot
                 StateDirectory = $InstallerConfig.StateDirectory
                 ClientName = $InstallerConfig.Client
                 ScheduledTaskName = $InstallerConfig.AutoUpgradeTaskName
@@ -1422,9 +1530,42 @@ function New-HostUpgradeAgentConfiguration {
     return [pscustomobject][ordered]@{
         Target = $target
         SatelliteScriptPath = Get-SatelliteScriptPath -RepositoryRoot $RepositoryRoot
+        CloneRoot = $RepositoryRoot
         StateDirectory = Get-HostUpgradeStateDirectory -Target $target
         ClientName = $script:ClientProfile.Name
         ScheduledTaskName = Get-AutoUpgradeTaskName
+    }
+}
+
+function Set-ManagedConfigurationValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Parent,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        $Value,
+
+        [Parameter(Mandatory = $true)]
+        [ref]$Changed
+    )
+
+    # Managed values are owned by the installer: unlike Add-MissingConfigurationValue,
+    # an existing value that no longer matches is corrected, so satellites
+    # follow the managed clone when it moves.
+    $property = $Parent.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        Add-Member -InputObject $Parent -MemberType NoteProperty -Name $Name -Value $Value
+        $Changed.Value = $true
+        return
+    }
+
+    if (-not [string]::Equals([string]$property.Value, [string]$Value, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-InfoLine ("Repointing configuration value " + $Name + " from '" + [string]$property.Value + "' to '" + [string]$Value + "'.")
+        $property.Value = $Value
+        $Changed.Value = $true
     }
 }
 
@@ -1483,7 +1624,8 @@ function Merge-SatelliteConfiguration {
             $configuredTarget = [string]$agentProperty.Value.Target
         }
 
-        Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "SatelliteScriptPath" -Value (Get-SatelliteScriptPath -RepositoryRoot $RepositoryRoot) -Changed ([ref]$changed)
+        Set-ManagedConfigurationValue -Parent $agentProperty.Value -Name "SatelliteScriptPath" -Value (Get-SatelliteScriptPath -RepositoryRoot $RepositoryRoot) -Changed ([ref]$changed)
+        Set-ManagedConfigurationValue -Parent $agentProperty.Value -Name "CloneRoot" -Value $RepositoryRoot -Changed ([ref]$changed)
         if (-not [string]::IsNullOrWhiteSpace($configuredTarget)) {
             Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "StateDirectory" -Value (Get-HostUpgradeStateDirectory -Target $configuredTarget) -Changed ([ref]$changed)
         }
@@ -1502,7 +1644,7 @@ function Merge-SatelliteConfiguration {
 
     $json = $configuration | ConvertTo-Json -Depth 20
     Write-TextFile -Path $configurationPath -Content $json
-    Write-InfoLine "Merged missing satellite defaults into appsettings.Production.json without changing existing values."
+    Write-InfoLine "Merged satellite defaults into appsettings.Production.json (missing keys added; managed paths corrected)."
     return $true
 }
 
@@ -2173,6 +2315,7 @@ function Get-InstallConfiguration {
         HostUpgradeTarget = $upgradeTarget
         StateDirectory = $stateDirectory
         SatelliteScriptPath = $satelliteScriptPath
+        CloneRoot = $repositoryRoot
         AutoUpgradeTaskName = $autoUpgradeTaskName
     }
 }
@@ -2215,8 +2358,8 @@ function Invoke-Install {
         Stop-WithMessage ".NET 10 SDK is required.  Install it from https://dotnet.microsoft.com/download/dotnet/10.0 and re-run this script.  The installer does not download prerequisites."
     }
 
+    $repositoryRoot = Initialize-ManagedRepository
     $installerConfig = Get-InstallConfiguration
-    $repositoryRoot = Get-RepositoryRoot
     $serviceRecord = Get-ServiceRecord
     if ($null -ne $serviceRecord) {
         Stop-SatelliteService
@@ -2261,7 +2404,7 @@ function Invoke-Upgrade {
         Stop-WithMessage ".NET 10 SDK is required.  Install it from https://dotnet.microsoft.com/download/dotnet/10.0 and re-run this script.  The installer does not download prerequisites."
     }
 
-    $repositoryRoot = Get-RepositoryRoot
+    $repositoryRoot = Initialize-ManagedRepository
     $dirtyLines = @(Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("status", "--porcelain"))
     if ($dirtyLines.Count -gt 0) {
         Stop-WithMessage "The repository has local changes.  Review them before running upgrade."
@@ -2292,6 +2435,7 @@ function Invoke-Upgrade {
     $deployedCommit = Get-DeployedCommitMarker -AppDirectory $appDirectory
     $deployedMatchesClone = (-not [string]::IsNullOrWhiteSpace($deployedCommit)) -and $deployedCommit.Equals($afterCommit, [StringComparison]::OrdinalIgnoreCase)
     $configurationMerged = Merge-SatelliteConfiguration -AppDirectory $appDirectory -RepositoryRoot $repositoryRoot
+    Update-AutoUpgradeTaskAction -RepositoryRoot $repositoryRoot
     $stateDirectory = Get-ConfiguredHostUpgradeStateDirectory -InstallRoot $effectiveInstallDir
 
     if ($deployedMatchesClone -and (-not $Force.IsPresent)) {
@@ -2468,20 +2612,14 @@ function ConvertTo-ProcessArgument {
     return '"' + $Value.Replace('"', '\"') + '"'
 }
 
-function Register-AutoUpgradeTask {
-    if (-not (Test-Administrator)) {
-        Stop-WithMessage "The register-autoupgrade command must run from an elevated PowerShell session."
-    }
+function Get-AutoUpgradeTaskArgumentList {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot
+    )
 
-    $repositoryRoot = Get-RepositoryRoot
-    $scriptPath = $PSCommandPath
-    if ([string]::IsNullOrWhiteSpace($scriptPath)) {
-        $scriptPath = Join-Path $repositoryRoot "deploy\windows\viegard-satellite.ps1"
-    }
-
-    $startTime = Get-AutoUpgradeStartTime
-    $taskName = Get-AutoUpgradeTaskName
-    $argumentList = @(
+    $scriptPath = Get-SatelliteScriptPath -RepositoryRoot $RepositoryRoot
+    return @(
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
@@ -2492,6 +2630,48 @@ function Register-AutoUpgradeTask {
         (ConvertTo-ProcessArgument -Value $script:ClientProfile.Name),
         "-Yes"
     ) -join " "
+}
+
+function Update-AutoUpgradeTaskAction {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot
+    )
+
+    $taskName = Get-AutoUpgradeTaskName
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($null -eq $task) {
+        return
+    }
+
+    $expectedScriptPath = Get-SatelliteScriptPath -RepositoryRoot $RepositoryRoot
+    $needsUpdate = $false
+    foreach ($existingAction in @($task.Actions)) {
+        $argumentText = [string]$existingAction.Arguments
+        if ($argumentText -notlike ("*" + $expectedScriptPath + "*")) {
+            $needsUpdate = $true
+        }
+    }
+
+    if (-not $needsUpdate) {
+        return
+    }
+
+    $argumentList = Get-AutoUpgradeTaskArgumentList -RepositoryRoot $RepositoryRoot
+    $newAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argumentList -WorkingDirectory $RepositoryRoot
+    Set-ScheduledTask -TaskName $taskName -Action $newAction | Out-Null
+    Write-InfoLine ("Repointed scheduled task " + $taskName + " at the managed clone script " + $expectedScriptPath + ".")
+}
+
+function Register-AutoUpgradeTask {
+    if (-not (Test-Administrator)) {
+        Stop-WithMessage "The register-autoupgrade command must run from an elevated PowerShell session."
+    }
+
+    $repositoryRoot = Initialize-ManagedRepository
+    $startTime = Get-AutoUpgradeStartTime
+    $taskName = Get-AutoUpgradeTaskName
+    $argumentList = Get-AutoUpgradeTaskArgumentList -RepositoryRoot $repositoryRoot
 
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argumentList -WorkingDirectory $repositoryRoot
     if ($Daily.IsPresent) {

@@ -36,9 +36,15 @@ internal sealed class ProcessHostUpgradeAgentLauncher : IHostUpgradeAgentLaunche
 
     public async ValueTask<string?> GetCloneHeadAsync(string cloneRoot, CancellationToken cancellationToken)
     {
+        // The clone is typically owned by the interactive administrator while
+        // this process runs as the service account (and the upgrade task as
+        // SYSTEM).  Git refuses repositories owned by another user unless the
+        // path is whitelisted; pass safe.directory inline so the agent's read
+        // does not depend on host-level git configuration (the installer also
+        // whitelists the clone system-wide for the scheduled task's script).
         var result = await RunProcessAsync(
             "git",
-            ["-C", cloneRoot, "rev-parse", "HEAD"],
+            ["-c", $"safe.directory={cloneRoot}", "-C", cloneRoot, "rev-parse", "HEAD"],
             workingDirectory: cloneRoot,
             cancellationToken).ConfigureAwait(false);
         if (!result.Succeeded)

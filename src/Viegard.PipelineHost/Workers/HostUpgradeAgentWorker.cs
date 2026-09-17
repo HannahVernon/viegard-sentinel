@@ -109,29 +109,40 @@ internal sealed partial class HostUpgradeAgentWorker(
         await LaunchClaimedCommandAsync(command, cancellationToken).ConfigureAwait(false);
     }
 
-    internal static string ResolveCloneRoot(string satelliteScriptPath)
+    internal static string ResolveCloneRoot(string cloneRoot, string satelliteScriptPath)
     {
-        var scriptFullPath = Path.GetFullPath(satelliteScriptPath);
-        var current = File.Exists(scriptFullPath)
-            ? new FileInfo(scriptFullPath).Directory
-            : new DirectoryInfo(Path.GetDirectoryName(scriptFullPath) ?? Directory.GetCurrentDirectory());
-
-        for (var candidate = current; candidate is not null; candidate = candidate.Parent)
+        // Fail closed in both branches: the resolver requires a .git directory
+        // at an exact, admin-configured location and never walks up the tree,
+        // so a .git directory planted in an ancestor (for example C:\.git,
+        // creatable by any authenticated user on default ACLs) can never
+        // redirect the upgrade pipeline.
+        if (!string.IsNullOrWhiteSpace(cloneRoot))
         {
-            if (Directory.Exists(Path.Combine(candidate.FullName, ".git")))
+            var pinnedRoot = Path.GetFullPath(cloneRoot);
+            if (!Directory.Exists(Path.Combine(pinnedRoot, ".git")))
             {
-                return candidate.FullName;
+                throw new InvalidOperationException(
+                    $"The configured clone root does not contain a .git directory: {pinnedRoot}");
             }
+
+            return pinnedRoot;
         }
 
-        if (current?.Name.Equals("windows", StringComparison.OrdinalIgnoreCase) == true
-            && current.Parent?.Name.Equals("deploy", StringComparison.OrdinalIgnoreCase) == true
-            && current.Parent.Parent is { } repositoryRoot)
+        // Legacy configurations pin only the script path.  The script lives at
+        // <root>\deploy\windows\<script>; require the repository at that fixed
+        // offset.
+        var scriptFullPath = Path.GetFullPath(satelliteScriptPath);
+        var scriptDirectory = Path.GetDirectoryName(scriptFullPath)
+            ?? throw new InvalidOperationException(
+                $"Could not determine the directory of the satellite script path: {scriptFullPath}");
+        var expectedRoot = Path.GetFullPath(Path.Combine(scriptDirectory, "..", ".."));
+        if (!Directory.Exists(Path.Combine(expectedRoot, ".git")))
         {
-            return repositoryRoot.FullName;
+            throw new InvalidOperationException(
+                $"No .git directory exists at the expected clone root {expectedRoot} (two levels above the satellite script).  Configure Viegard:HostUpgradeAgent:CloneRoot explicitly.");
         }
 
-        return current?.FullName ?? Directory.GetCurrentDirectory();
+        return expectedRoot;
     }
 
     private async Task LaunchClaimedCommandAsync(HostUpgradeCommand command, CancellationToken cancellationToken)
@@ -397,13 +408,14 @@ internal sealed partial class HostUpgradeAgentWorker(
     {
         try
         {
-            return ResolveCloneRoot(_options.SatelliteScriptPath);
+            return ResolveCloneRoot(_options.CloneRoot, _options.SatelliteScriptPath);
         }
         catch (Exception ex)
         {
             logger.LogWarning(
                 ex,
-                "Could not resolve the satellite clone root from script path {SatelliteScriptPath}.",
+                "Could not resolve the satellite clone root.  CloneRoot: {CloneRoot}; SatelliteScriptPath: {SatelliteScriptPath}.",
+                LogSanitizer.Sanitize(_options.CloneRoot),
                 LogSanitizer.Sanitize(_options.SatelliteScriptPath));
             return null;
         }

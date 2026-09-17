@@ -83,6 +83,102 @@ public sealed class HostUpgradeAgentWorkerTests
     }
 
     [Fact]
+    public void Options_validation_rejects_relative_clone_root()
+    {
+        var validator = new HostUpgradeAgentOptionsValidator();
+
+        Assert.False(validator.Validate(Options.DefaultName, new HostUpgradeAgentOptions
+        {
+            Target = "sat-a",
+            SatelliteScriptPath = "C:\\Viegard\\deploy\\windows\\viegard-satellite.ps1",
+            CloneRoot = "relative\\clone",
+        }).Succeeded);
+        Assert.True(validator.Validate(Options.DefaultName, new HostUpgradeAgentOptions
+        {
+            Target = "sat-a",
+            SatelliteScriptPath = "C:\\Viegard\\deploy\\windows\\viegard-satellite.ps1",
+            CloneRoot = "C:\\Program Files\\Viegard Satellite\\repo",
+        }).Succeeded);
+    }
+
+    [Fact]
+    public void ResolveCloneRoot_uses_pinned_root_when_configured()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            var pinnedRoot = Path.Combine(testPaths.Root, "clone");
+
+            var resolved = HostUpgradeAgentWorker.ResolveCloneRoot(pinnedRoot, "C:\\elsewhere\\deploy\\windows\\viegard-satellite.ps1");
+
+            Assert.Equal(Path.GetFullPath(pinnedRoot), resolved);
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
+    }
+
+    [Fact]
+    public void ResolveCloneRoot_pinned_root_without_git_directory_fails_closed()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            var emptyRoot = Path.Combine(testPaths.Root, "no-clone");
+            Directory.CreateDirectory(emptyRoot);
+
+            Assert.Throws<InvalidOperationException>(
+                () => HostUpgradeAgentWorker.ResolveCloneRoot(emptyRoot, testPaths.ScriptPath));
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
+    }
+
+    [Fact]
+    public void ResolveCloneRoot_legacy_script_path_resolves_git_at_fixed_offset()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            var resolved = HostUpgradeAgentWorker.ResolveCloneRoot(string.Empty, testPaths.ScriptPath);
+
+            Assert.Equal(Path.GetFullPath(Path.Combine(testPaths.Root, "clone")), resolved);
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
+    }
+
+    [Fact]
+    public void ResolveCloneRoot_never_walks_up_past_the_fixed_offset()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            // A .git directory above the fixed <root>\deploy\windows offset
+            // must not be discovered; the resolver fails closed instead of
+            // walking up the tree.
+            var outerRoot = Path.Combine(testPaths.Root, "outer");
+            var scriptDirectory = Path.Combine(outerRoot, "inner", "deploy", "windows");
+            Directory.CreateDirectory(Path.Combine(outerRoot, ".git"));
+            Directory.CreateDirectory(scriptDirectory);
+            var scriptPath = Path.Combine(scriptDirectory, "viegard-satellite.ps1");
+            File.WriteAllText(scriptPath, "# test");
+
+            Assert.Throws<InvalidOperationException>(
+                () => HostUpgradeAgentWorker.ResolveCloneRoot(string.Empty, scriptPath));
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
+    }
+
+    [Fact]
     public async Task Poll_with_fresh_state_file_does_not_complete_or_claim()
     {
         var testPaths = CreateTestPaths();

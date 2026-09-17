@@ -16,6 +16,8 @@ public sealed class HostUpgradeAgentOptions
 
     public string SatelliteScriptPath { get; set; } = string.Empty;
 
+    public string CloneRoot { get; set; } = string.Empty;
+
     public string StateDirectory { get; set; } = string.Empty;
 
     public string ClientName { get; set; } = "MDaemon";
@@ -87,6 +89,21 @@ public sealed class HostUpgradeAgentOptionsValidator : IValidateOptions<HostUpgr
         if (string.IsNullOrWhiteSpace(options.SatelliteScriptPath))
         {
             failures.Add("Host upgrade agent satellite script path is required when Target is configured.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.CloneRoot))
+        {
+            try
+            {
+                if (!Path.IsPathFullyQualified(options.CloneRoot))
+                {
+                    failures.Add("Host upgrade agent clone root must be an absolute path when configured.");
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+            {
+                failures.Add("Host upgrade agent clone root must be an absolute path when configured.");
+            }
         }
 
         if (string.IsNullOrWhiteSpace(options.ClientName))

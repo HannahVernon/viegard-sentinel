@@ -139,9 +139,25 @@
         await handleResponse(response, button);
     }
 
+    function navigateTo(target) {
+        // The server no longer differentiates redirect URLs with banner
+        // query text (messages travel in the flash cookie), so the redirect
+        // target can equal the current path and query.  location.assign is a
+        // no-op or fragment-only jump in that case; force a reload so the
+        // page re-renders with the new session state and consumes the flash
+        // message.
+        const destination = new URL(target, window.location.href);
+        const samePathAndQuery = destination.pathname === window.location.pathname
+            && destination.search === window.location.search;
+        window.location.assign(destination.href);
+        if (samePathAndQuery) {
+            window.location.reload();
+        }
+    }
+
     async function handleResponse(response, button) {
         if (response.redirected) {
-            window.location.assign(response.url);
+            navigateTo(response.url);
             return;
         }
 
@@ -149,7 +165,7 @@
         if (contentType.includes("application/json")) {
             const payload = await response.json();
             if (payload.redirect) {
-                window.location.assign(payload.redirect);
+                navigateTo(payload.redirect);
                 return;
             }
 

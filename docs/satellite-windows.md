@@ -241,12 +241,12 @@ Each Windows satellite claims only the target written in its local `Viegard:Host
 
 When the service claims a command, it writes a state file beside the published app, records the clone HEAD before the upgrade, and tries to run the scheduled task first.  The scheduled task runs as `SYSTEM` with highest privileges and executes the same git-based `upgrade -Client MDaemon -Yes` command documented above.  If the task cannot be started, the worker falls back to a detached elevated PowerShell launch and writes transcript output beside the state file.
 
-Completion is reported by the service after it restarts.  On startup, the worker reads the state file, reads `app\.deployed-commit`, reads the clone HEAD from the script's repository, and marks the command succeeded only when the marker and clone HEAD match.  The command detail contains the before-and-after short commits and a bounded transcript tail when one exists.
+Completion is reported by the service after it restarts.  On startup, the worker reads the state file, reads `app\.deployed-commit`, reads the clone HEAD from the script's repository, and marks the command succeeded only when the marker and clone HEAD match.  If the upgrade command decides the satellite is already current and does not restart the service, the worker sees the lingering state file after `Viegard:HostUpgradeAgent:StuckStateGracePeriod` (default 10 minutes, valid range 1 to 60 minutes), runs the same marker-vs-HEAD check, and completes the command without launching anything else.  While a state file exists and is still inside the grace period, the worker skips polling so it cannot double-launch a requeued command.  The command detail contains the before-and-after short commits and a bounded transcript tail when one exists.
 
 Status meanings in the Admin UI:
 
 - `Pending`: the command has been queued but no agent for that target has claimed it yet.  This is expected if the target is mistyped or the satellite is offline.
-- `Running`: an agent claimed the command and launched the upgrade path.  If the upgrade never brings the service back, it remains Running until the agent starts again and reconciles the local state.
+- `Running`: an agent claimed the command and launched the upgrade path.  If the service never stops because the upgrade was already current, the same worker completes it after the stuck-state grace period.  If the upgrade stops the service but never brings it back, it remains Running until the agent starts again and reconciles the local state.
 - `Succeeded`: the restarted service verified that `.deployed-commit` matches clone HEAD.
 - `Failed`: the agent could not launch the upgrade, the restarted service found a marker mismatch, or startup reconciliation found a Running command for its target with no local state file.
 

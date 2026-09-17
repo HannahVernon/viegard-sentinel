@@ -31,6 +31,18 @@ public sealed class HostUpgradeAgentWorkerTests
         }).Succeeded);
         Assert.False(validator.Validate(Options.DefaultName, new HostUpgradeAgentOptions
         {
+            Target = "sat-a",
+            StuckStateGracePeriod = TimeSpan.FromSeconds(59),
+            SatelliteScriptPath = "C:\\Viegard\\deploy\\windows\\viegard-satellite.ps1",
+        }).Succeeded);
+        Assert.False(validator.Validate(Options.DefaultName, new HostUpgradeAgentOptions
+        {
+            Target = "sat-a",
+            StuckStateGracePeriod = TimeSpan.FromMinutes(61),
+            SatelliteScriptPath = "C:\\Viegard\\deploy\\windows\\viegard-satellite.ps1",
+        }).Succeeded);
+        Assert.False(validator.Validate(Options.DefaultName, new HostUpgradeAgentOptions
+        {
             Target = "Sat-A",
             SatelliteScriptPath = "C:\\Viegard\\deploy\\windows\\viegard-satellite.ps1",
         }).Succeeded);
@@ -49,6 +61,145 @@ public sealed class HostUpgradeAgentWorkerTests
             SatelliteScriptPath = "C:\\Viegard\\deploy\\windows\\viegard-satellite.ps1",
             PollInterval = TimeSpan.FromSeconds(5),
         }).Succeeded);
+    }
+
+    [Fact]
+    public async Task Poll_with_fresh_state_file_does_not_complete_or_claim()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            var time = new FakeTimeProvider(Now);
+            var store = new InMemoryHostUpgradeCommandStore(time);
+            var requested = await store.RequestAsync("sat-a", "hannah");
+            WriteStateFile(testPaths.AppDirectory, requested.Id, claimedAt: Now);
+            var launcher = new RecordingLauncher(testPaths.AppDirectory);
+            launcher.CloneHeads.Enqueue(AfterHead);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+
+            await worker.PollOnceAsync();
+
+            var command = Assert.Single(await store.ListRecentAsync("sat-a"));
+            Assert.Equal(HostUpgradeCommandStatus.Pending, command.Status);
+            Assert.Empty(launcher.CloneRootCalls);
+            Assert.Empty(launcher.ScheduledTaskCalls);
+            Assert.Empty(launcher.DetachedLaunches);
+            Assert.True(File.Exists(Path.Combine(testPaths.AppDirectory, StateFileName)));
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
+    }
+
+    [Fact]
+    public async Task Poll_with_aged_state_file_reports_success_when_marker_matches_clone_head()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            var time = new FakeTimeProvider(Now);
+            var store = new InMemoryHostUpgradeCommandStore(time);
+            var requested = await store.RequestAsync("sat-a", "hannah");
+            Assert.NotNull(await store.ClaimNextPendingAsync("sat-a"));
+            WriteStateFile(
+                testPaths.AppDirectory,
+                requested.Id,
+                claimedAt: Now.Subtract(TimeSpan.FromMinutes(11)),
+                cloneHeadBefore: AfterHead);
+            await File.WriteAllTextAsync(Path.Combine(testPaths.AppDirectory, ".deployed-commit"), AfterHead);
+            var launcher = new RecordingLauncher(testPaths.AppDirectory);
+            launcher.CloneHeads.Enqueue(AfterHead);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+
+            await worker.PollOnceAsync();
+
+            var command = Assert.Single(await store.ListRecentAsync("sat-a"));
+            Assert.Equal(HostUpgradeCommandStatus.Succeeded, command.Status);
+            Assert.NotNull(command.Detail);
+            Assert.Contains("already matched", command.Detail, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Combine(testPaths.AppDirectory, StateFileName)));
+            Assert.False(File.Exists(Path.Combine(testPaths.AppDirectory, TranscriptFileName)));
+            Assert.Empty(launcher.ScheduledTaskCalls);
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
+    }
+
+    [Fact]
+    public async Task Poll_with_aged_state_file_reports_failure_when_marker_differs_from_clone_head()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            var time = new FakeTimeProvider(Now);
+            var store = new InMemoryHostUpgradeCommandStore(time);
+            var requested = await store.RequestAsync("sat-a", "hannah");
+            Assert.NotNull(await store.ClaimNextPendingAsync("sat-a"));
+            WriteStateFile(
+                testPaths.AppDirectory,
+                requested.Id,
+                claimedAt: Now.Subtract(TimeSpan.FromMinutes(11)));
+            await File.WriteAllTextAsync(Path.Combine(testPaths.AppDirectory, ".deployed-commit"), "cccccccccccccccccccccccccccccccccccccccc");
+            var launcher = new RecordingLauncher(testPaths.AppDirectory);
+            launcher.CloneHeads.Enqueue(AfterHead);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+
+            await worker.PollOnceAsync();
+
+            var command = Assert.Single(await store.ListRecentAsync("sat-a"));
+            Assert.Equal(HostUpgradeCommandStatus.Failed, command.Status);
+            Assert.NotNull(command.Detail);
+            Assert.Contains("completion check failed", command.Detail, StringComparison.OrdinalIgnoreCase);
+            Assert.False(File.Exists(Path.Combine(testPaths.AppDirectory, StateFileName)));
+            Assert.Empty(launcher.ScheduledTaskCalls);
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
+    }
+
+    [Fact]
+    public async Task Poll_after_aged_state_completion_claims_normally_on_next_poll()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            var time = new FakeTimeProvider(Now);
+            var store = new InMemoryHostUpgradeCommandStore(time);
+            var completedRequest = await store.RequestAsync("sat-a", "hannah");
+            Assert.NotNull(await store.ClaimNextPendingAsync("sat-a"));
+            WriteStateFile(
+                testPaths.AppDirectory,
+                completedRequest.Id,
+                claimedAt: Now.Subtract(TimeSpan.FromMinutes(11)),
+                cloneHeadBefore: AfterHead);
+            await File.WriteAllTextAsync(Path.Combine(testPaths.AppDirectory, ".deployed-commit"), AfterHead);
+            var launcher = new RecordingLauncher(testPaths.AppDirectory);
+            launcher.CloneHeads.Enqueue(AfterHead);
+            launcher.CloneHeads.Enqueue(BeforeHead);
+            launcher.ScheduledResults.Enqueue(new HostUpgradeAgentProcessResult(0, "task started"));
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+
+            await worker.PollOnceAsync();
+            Assert.Empty(launcher.ScheduledTaskCalls);
+
+            time.Advance(HostUpgradeCommandPolicy.Cooldown.Add(TimeSpan.FromSeconds(1)));
+            var nextRequest = await store.RequestAsync("sat-a", "hannah");
+            await worker.PollOnceAsync();
+
+            var commands = await store.ListRecentAsync("sat-a", limit: 10);
+            var claimed = Assert.Single(commands, command => command.Id == nextRequest.Id);
+            Assert.Equal(HostUpgradeCommandStatus.Running, claimed.Status);
+            Assert.Equal(["ViegardSatelliteMDaemonAutoUpgrade"], launcher.ScheduledTaskCalls);
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
     }
 
     [Fact]
@@ -251,19 +402,24 @@ public sealed class HostUpgradeAgentWorkerTests
                 ClientName = "MDaemon",
                 ScheduledTaskName = "ViegardSatelliteMDaemonAutoUpgrade",
                 PollInterval = TimeSpan.FromSeconds(5),
+                StuckStateGracePeriod = TimeSpan.FromMinutes(10),
             }),
             store,
             launcher,
             timeProvider,
             NullLogger<HostUpgradeAgentWorker>.Instance);
 
-    private static void WriteStateFile(string appDirectory, Guid commandId)
+    private static void WriteStateFile(
+        string appDirectory,
+        Guid commandId,
+        DateTimeOffset? claimedAt = null,
+        string? cloneHeadBefore = BeforeHead)
     {
         var state = new
         {
             commandId,
-            claimedAt = Now,
-            cloneHeadBefore = BeforeHead,
+            claimedAt = claimedAt ?? Now,
+            cloneHeadBefore,
         };
         var raw = JsonSerializer.Serialize(state, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         File.WriteAllText(Path.Combine(appDirectory, StateFileName), raw);

@@ -78,6 +78,11 @@ internal sealed partial class HostUpgradeAgentWorker(
             return;
         }
 
+        if (await HandleExistingStateFileBeforeClaimAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
         var target = NormalizeConfiguredTarget();
         HostUpgradeCommand? command = null;
         try
@@ -188,23 +193,13 @@ internal sealed partial class HostUpgradeAgentWorker(
             return;
         }
 
-        HostUpgradeAgentState? state;
-        try
+        var state = await TryReadStateFileAsync(cancellationToken).ConfigureAwait(false);
+        if (state is null)
         {
-            var raw = await File.ReadAllTextAsync(StateFilePath, cancellationToken).ConfigureAwait(false);
-            state = JsonSerializer.Deserialize<HostUpgradeAgentState>(raw, StateJsonOptions);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Could not read local host upgrade state file {StateFilePath}.", LogSanitizer.Sanitize(StateFilePath));
             return;
         }
 
-        if (state is null || state.CommandId == Guid.Empty)
+        if (state.CommandId == Guid.Empty)
         {
             logger.LogWarning(
                 "Local host upgrade state file {StateFilePath} did not contain a command id.",
@@ -290,6 +285,48 @@ internal sealed partial class HostUpgradeAgentWorker(
         }
     }
 
+    private async ValueTask<bool> HandleExistingStateFileBeforeClaimAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(StateFilePath))
+        {
+            return false;
+        }
+
+        var state = await TryReadStateFileAsync(cancellationToken).ConfigureAwait(false);
+        if (state is null)
+        {
+            return true;
+        }
+
+        if (state.CommandId == Guid.Empty)
+        {
+            logger.LogWarning(
+                "Local host upgrade state file {StateFilePath} did not contain a command id.",
+                LogSanitizer.Sanitize(StateFilePath));
+            DeleteFileIfExists(StateFilePath);
+            return true;
+        }
+
+        var stateAge = timeProvider.GetUtcNow() - state.ClaimedAt.ToUniversalTime();
+        if (stateAge < _options.StuckStateGracePeriod)
+        {
+            logger.LogDebug(
+                "Local host upgrade state file for command {CommandId} is {StateAge} old, within the configured grace period {GracePeriod}; skipping claim.",
+                state.CommandId,
+                stateAge,
+                _options.StuckStateGracePeriod);
+            return true;
+        }
+
+        logger.LogWarning(
+            "Local host upgrade state file for command {CommandId} is {StateAge} old, exceeding the configured grace period {GracePeriod}.  Reporting completion before polling for another command.",
+            state.CommandId,
+            stateAge,
+            _options.StuckStateGracePeriod);
+        await ReportCompletionFromStateFileAsync(cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
     private async ValueTask<bool> TryWriteStateFileAsync(
         Guid commandId,
         string? cloneHeadBefore,
@@ -316,6 +353,24 @@ internal sealed partial class HostUpgradeAgentWorker(
         {
             logger.LogWarning(ex, "Could not write host upgrade state file {StateFilePath}.", LogSanitizer.Sanitize(StateFilePath));
             return false;
+        }
+    }
+
+    private async ValueTask<HostUpgradeAgentState?> TryReadStateFileAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var raw = await File.ReadAllTextAsync(StateFilePath, cancellationToken).ConfigureAwait(false);
+            return JsonSerializer.Deserialize<HostUpgradeAgentState>(raw, StateJsonOptions);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not read local host upgrade state file {StateFilePath}.", LogSanitizer.Sanitize(StateFilePath));
+            return null;
         }
     }
 
@@ -433,9 +488,17 @@ internal sealed partial class HostUpgradeAgentWorker(
         var beforeShort = ShortCommit(state.CloneHeadBefore);
         var afterShort = ShortCommit(cloneHead);
         var markerShort = ShortCommit(deployedCommit);
-        var prefix = succeeded
-            ? $"Upgrade completed: {beforeShort}..{afterShort}.  Deployed marker matched clone HEAD."
-            : $"Upgrade completion check failed: {beforeShort}..{afterShort}.  Deployed marker {markerShort}; clone HEAD {afterShort}.";
+        string prefix;
+        if (succeeded)
+        {
+            prefix = string.Equals(state.CloneHeadBefore, cloneHead, StringComparison.OrdinalIgnoreCase)
+                ? $"Upgrade completed: {beforeShort}..{afterShort}.  Deployed binary already matched clone HEAD."
+                : $"Upgrade completed: {beforeShort}..{afterShort}.  Deployed marker matched clone HEAD.";
+        }
+        else
+        {
+            prefix = $"Upgrade completion check failed: {beforeShort}..{afterShort}.  Deployed marker {markerShort}; clone HEAD {afterShort}.";
+        }
 
         return AppendTranscriptTail(prefix);
     }

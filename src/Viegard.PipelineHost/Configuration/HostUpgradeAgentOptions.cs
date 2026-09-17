@@ -9,6 +9,8 @@ public sealed class HostUpgradeAgentOptions
     public const string DefaultScheduledTaskName = "ViegardSatelliteMDaemonAutoUpgrade";
     public const int MinPollIntervalSeconds = 5;
     public const int MaxPollIntervalSeconds = 300;
+    public const int MinStuckStateGracePeriodMinutes = 1;
+    public const int MaxStuckStateGracePeriodMinutes = 60;
 
     public string Target { get; set; } = string.Empty;
 
@@ -19,6 +21,8 @@ public sealed class HostUpgradeAgentOptions
     public string ScheduledTaskName { get; set; } = DefaultScheduledTaskName;
 
     public TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(20);
+
+    public TimeSpan StuckStateGracePeriod { get; set; } = TimeSpan.FromMinutes(10);
 
     public bool Enabled => !string.IsNullOrWhiteSpace(Target);
 }
@@ -34,6 +38,12 @@ public sealed class HostUpgradeAgentOptionsValidator : IValidateOptions<HostUpgr
             || options.PollInterval > TimeSpan.FromSeconds(HostUpgradeAgentOptions.MaxPollIntervalSeconds))
         {
             failures.Add("Host upgrade agent poll interval must be between 5 seconds and 5 minutes.");
+        }
+
+        if (options.StuckStateGracePeriod < TimeSpan.FromMinutes(HostUpgradeAgentOptions.MinStuckStateGracePeriodMinutes)
+            || options.StuckStateGracePeriod > TimeSpan.FromMinutes(HostUpgradeAgentOptions.MaxStuckStateGracePeriodMinutes))
+        {
+            failures.Add("Host upgrade agent stuck-state grace period must be between 1 and 60 minutes.");
         }
 
         if (!options.Enabled)

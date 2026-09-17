@@ -179,6 +179,64 @@ public sealed class HostUpgradeAgentWorkerTests
     }
 
     [Fact]
+    public async Task WaitForFileAsync_returns_true_when_the_file_already_exists()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            var path = Path.Combine(testPaths.Root, "transcript.log");
+            File.WriteAllText(path, "started");
+
+            Assert.True(await ProcessHostUpgradeAgentLauncher.WaitForFileAsync(
+                path, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(50), CancellationToken.None));
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
+    }
+
+    [Fact]
+    public async Task WaitForFileAsync_returns_true_when_the_file_appears_within_the_window()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            var path = Path.Combine(testPaths.Root, "transcript.log");
+            var writer = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(150));
+                File.WriteAllText(path, "started");
+            });
+
+            Assert.True(await ProcessHostUpgradeAgentLauncher.WaitForFileAsync(
+                path, TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(50), CancellationToken.None));
+            await writer;
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
+    }
+
+    [Fact]
+    public async Task WaitForFileAsync_returns_false_when_the_file_never_appears()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            var path = Path.Combine(testPaths.Root, "transcript.log");
+
+            Assert.False(await ProcessHostUpgradeAgentLauncher.WaitForFileAsync(
+                path, TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(50), CancellationToken.None));
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
+    }
+
+    [Fact]
     public async Task Poll_with_fresh_state_file_does_not_complete_or_claim()
     {
         var testPaths = CreateTestPaths();

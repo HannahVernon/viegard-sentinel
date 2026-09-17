@@ -13,6 +13,8 @@ public sealed class MDaemonSourceOptions
 
     public string LogDirectory { get; set; } = string.Empty;
 
+    public string InstanceKey { get; set; } = string.Empty;
+
     public IList<MDaemonLogFileOptions> Files { get; } = [];
 
     public TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(5);
@@ -29,6 +31,58 @@ public sealed class MDaemonSourceOptions
     /// buffered whole (security-audit finding, 2026-08-25).
     /// </summary>
     public int MaxScanBytes { get; set; } = 8_388_608;
+
+    public static string NormalizeInstanceKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        var output = new char[normalized.Length];
+        for (var index = 0; index < normalized.Length; index++)
+        {
+            var character = normalized[index];
+            output[index] = IsSafeInstanceKeyCharacter(character) ? character : '_';
+        }
+
+        return new string(output);
+    }
+
+    public static bool IsSafeInstanceKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        foreach (var character in value)
+        {
+            if (!IsSafeInstanceKeyCharacter(character))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public static string RequireValidInstanceKey(string? value)
+    {
+        if (!IsSafeInstanceKey(value))
+        {
+            throw new InvalidOperationException(
+                "MDaemon: InstanceKey is required when the source is enabled and must use only lowercase letters, digits, dash, and underscore.");
+        }
+
+        return value!;
+    }
+
+    private static bool IsSafeInstanceKeyCharacter(char character) =>
+        character is >= 'a' and <= 'z'
+        || character is >= '0' and <= '9'
+        || character is '-' or '_';
 }
 
 /// <summary>One MDaemon filename pattern and the log family it represents.</summary>
@@ -58,6 +112,11 @@ public sealed class MDaemonSourceOptionsValidator : IValidateOptions<MDaemonSour
         if (!options.Enabled)
         {
             return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;
+        }
+
+        if (!MDaemonSourceOptions.IsSafeInstanceKey(options.InstanceKey))
+        {
+            failures.Add("MDaemon: InstanceKey is required when the source is enabled and must use only lowercase letters, digits, dash, and underscore.");
         }
 
         if (string.IsNullOrWhiteSpace(options.LogDirectory))

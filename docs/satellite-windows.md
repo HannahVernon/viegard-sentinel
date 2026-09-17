@@ -159,7 +159,7 @@ The installer asks for:
 - PostgreSQL username.
 - PostgreSQL password as a `SecureString`.  Existing secret files are kept and not overwritten.
 - PostgreSQL schema.  Default: `viegard`.
-- Instance ID.  This is required and has no default because instance IDs must be unique across every host that runs a satellite.  The prompt suggests `mdaemon-<hostname>`.
+- Instance ID.  This is required and has no default because instance IDs must be unique across every host that runs a satellite.  The prompt suggests `mdaemon-<hostname>`.  The MDaemon source derives a safe per-instance key from this value for file offsets and raw-observation payload references, so two satellites can ingest identical MDaemon-generated file names without sharing offsets or duplicate-detecting each other's lines.
 - Admin UI upgrade target.  Default: the lowercase Windows computer name.  It must use lowercase letters, digits, dash, and underscore, and it must not be `vm`.
 - MDaemon log kinds.  Valid values are `SmtpIn`, `SmtpOut`, `Imap`, `Pop3`, `Screening`, and `DynamicScreening`.  The default is all supported kinds.
 

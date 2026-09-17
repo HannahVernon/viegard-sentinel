@@ -404,17 +404,29 @@
 
     <section id="upgrades" class="indexed">
         <h2>Upgrades</h2>
-        <p class="small">Request an upgrade for the host-side Viegard deployment.  The request is executed by a privileged host-side agent outside the containers; the admin UI does not receive the Docker socket or host execution rights.</p>
-        <p class="small">The admin UI may briefly disconnect while its own container restarts.  If no host-side agent is installed for the target, the command remains Pending.</p>
+        <p class="small">Request an upgrade for a Viegard deployment target.  The request is executed by a privileged host-side or satellite-side agent; the admin UI does not receive the Docker socket, Windows elevation rights, or host execution rights.</p>
+        <p class="small">The admin UI may briefly disconnect while its own container restarts.  A satellite target only progresses when that Windows host is running the upgrade agent written by the installer.  If no agent is installed for the target, the command remains Pending.</p>
 
         <h3>Request upgrade</h3>
         @if (_stepUpFresh)
         {
             <form method="post" action="/configuration/upgrades/request" class="secondary-form">
                 <AntiforgeryToken />
-                <input type="hidden" name="target" value="@HostUpgradeCommandPolicy.DefaultTarget" />
+                <label>
+                    Known target
+                    <select name="target">
+                        @foreach (var target in _hostUpgradeTargets)
+                        {
+                            <option value="@target">@target</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    Or new target
+                    <input name="newTarget" maxlength="@HostUpgradeCommandPolicy.MaxTargetLength" pattern="[a-z0-9_-]{1,64}" placeholder="mdaemon-mail01" />
+                </label>
                 <button type="submit">Request upgrade</button>
-                <span class="small">Target: <code>@HostUpgradeCommandPolicy.DefaultTarget</code>.  Requests are single-flight per target and have a @HostUpgradeCommandPolicy.CooldownMinutes-minute cooldown after completion.</span>
+                <span class="small">Targets use lowercase letters, digits, dash, and underscore.  Requests are single-flight per target and have a @HostUpgradeCommandPolicy.CooldownMinutes-minute cooldown after completion.</span>
             </form>
         }
         else
@@ -426,7 +438,7 @@
         }
 
         <h3>Recent upgrade commands</h3>
-        <p class="message error" data-upgrades-stale hidden="@(!_hostUpgradeCommands.Any(IsStalePending))">A pending upgrade request is older than @HostUpgradeCommandPolicy.PendingStaleAfterMinutes minutes.  Confirm the host-side agent is installed and running for target <code>@HostUpgradeCommandPolicy.DefaultTarget</code>.</p>
+        <p class="message error" data-upgrades-stale hidden="@(!_hostUpgradeCommands.Any(IsStalePending))">A pending upgrade request is older than @HostUpgradeCommandPolicy.PendingStaleAfterMinutes minutes.  Confirm the host-side or satellite-side agent is installed and running for that target.</p>
         @if (_hostUpgradeCommands.Count == 0)
         {
             <p>No host upgrade commands have been requested.</p>
@@ -650,6 +662,7 @@
     private IReadOnlyDictionary<string, IngestionFilter> _mdaemonFilters = new Dictionary<string, IngestionFilter>(StringComparer.Ordinal);
     private IReadOnlyList<SatelliteRoleInfo> _satelliteRoles = [];
     private IReadOnlyList<MikroTikRouter> _routers = [];
+    private IReadOnlyList<string> _hostUpgradeTargets = [HostUpgradeCommandPolicy.DefaultTarget];
     private IReadOnlyList<HostUpgradeCommand> _hostUpgradeCommands = [];
     private SatelliteRoleSecret? _satelliteCredential;
     private bool _stepUpFresh;
@@ -715,7 +728,8 @@
             .ToDictionary(group => group.Key, group => group.OrderByDescending(filter => filter.UpdatedAt).First(), StringComparer.Ordinal);
         _satelliteRoles = await SatelliteRoles.ListAsync().ConfigureAwait(false);
         _routers = await Routers.ListAsync().ConfigureAwait(false);
-        _hostUpgradeCommands = await HostUpgrades.ListRecentAsync(HostUpgradeCommandPolicy.DefaultTarget).ConfigureAwait(false);
+        _hostUpgradeTargets = await HostUpgrades.ListTargetsAsync().ConfigureAwait(false);
+        _hostUpgradeCommands = await HostUpgrades.ListRecentAsync().ConfigureAwait(false);
         _now = DateTimeOffset.UtcNow;
 
         var context = HttpContextAccessor.HttpContext;

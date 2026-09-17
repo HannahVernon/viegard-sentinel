@@ -52,6 +52,34 @@ public sealed class InMemoryHostUpgradeCommandStore(TimeProvider? timeProvider =
         }
     }
 
+    public ValueTask<IReadOnlyList<string>> ListTargetsAsync(
+        int limit = HostUpgradeCommandPolicy.DefaultRecentLimit,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var safeLimit = Math.Clamp(limit, 1, HostUpgradeCommandPolicy.MaxRecentLimit);
+
+        lock (_sync)
+        {
+            var targets = new List<string> { HostUpgradeCommandPolicy.DefaultTarget };
+            targets.AddRange(
+                _commands
+                    .Where(command => command.Target != HostUpgradeCommandPolicy.DefaultTarget)
+                    .GroupBy(command => command.Target, StringComparer.Ordinal)
+                    .Select(group => new
+                    {
+                        Target = group.Key,
+                        LatestRequestedAt = group.Max(command => command.RequestedAt),
+                    })
+                    .OrderByDescending(item => item.LatestRequestedAt)
+                    .ThenBy(item => item.Target, StringComparer.Ordinal)
+                    .Select(item => item.Target)
+                    .Take(safeLimit - 1));
+
+            return ValueTask.FromResult<IReadOnlyList<string>>(targets);
+        }
+    }
+
     public ValueTask<HostUpgradeCommand?> ClaimNextPendingAsync(
         string target,
         CancellationToken cancellationToken = default)

@@ -569,16 +569,16 @@ public static class AdminConfigurationEndpoints
             return Redirect(UpgradesConfigurationPath, error: "Step-up verification is required before requesting a host upgrade.");
         }
 
-        var target = form["target"].ToString();
-        if (!string.Equals(target, HostUpgradeCommandPolicy.DefaultTarget, StringComparison.Ordinal))
+        var target = ResolveHostUpgradeTarget(form);
+        if (target.Error is { } targetError)
         {
-            return Redirect(UpgradesConfigurationPath, error: "Only the vm upgrade target is available in this version.");
+            return Redirect(UpgradesConfigurationPath, error: targetError);
         }
 
         try
         {
             var command = await hostUpgrades.RequestAsync(
-                HostUpgradeCommandPolicy.DefaultTarget,
+                target.Target!,
                 user.Username,
                 context.RequestAborted).ConfigureAwait(false);
             await configAuditor.RecordHostUpgradeRequestedAsync(
@@ -1034,6 +1034,22 @@ public static class AdminConfigurationEndpoints
                 $"The latest upgrade for {exception.Target} finished less than {HostUpgradeCommandPolicy.CooldownMinutes.ToString(CultureInfo.InvariantCulture)} minutes ago.  Wait a few minutes before requesting another.",
             _ => "The upgrade request could not be queued.",
         };
+
+    private static (string? Target, string? Error) ResolveHostUpgradeTarget(IFormCollection form)
+    {
+        var selectedTarget = form["target"].ToString();
+        var newTarget = form["newTarget"].ToString();
+        var rawTarget = string.IsNullOrWhiteSpace(newTarget) ? selectedTarget : newTarget;
+        try
+        {
+            return (HostUpgradeCommandPolicy.NormalizeTarget(rawTarget), null);
+        }
+        catch (ArgumentException ex)
+        {
+            var message = ex.Message.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)[0];
+            return (null, message);
+        }
+    }
 
     private sealed record SatelliteStepUpResult(Viegard.Domain.Admin.AdminUser? User, IResult? Failure);
 

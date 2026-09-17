@@ -114,6 +114,40 @@ public sealed class PostgresHostUpgradeCommandStore(
         return commands;
     }
 
+    public async ValueTask<IReadOnlyList<string>> ListTargetsAsync(
+        int limit = HostUpgradeCommandPolicy.DefaultRecentLimit,
+        CancellationToken cancellationToken = default)
+    {
+        var safeLimit = Math.Clamp(limit, 1, HostUpgradeCommandPolicy.MaxRecentLimit);
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT known.target
+            FROM (
+                SELECT @default_target::text AS target, NULL::timestamp with time zone AS latest_requested_at, 0 AS sort_key
+                UNION ALL
+                SELECT target, MAX(requested_at) AS latest_requested_at, CASE WHEN target = @default_target THEN 0 ELSE 1 END AS sort_key
+                FROM host_upgrade_commands
+                GROUP BY target
+            ) AS known
+            GROUP BY known.target
+            ORDER BY MIN(known.sort_key), MAX(known.latest_requested_at) DESC NULLS LAST, known.target
+            LIMIT @limit;
+            """;
+        command.Parameters.AddWithValue("default_target", HostUpgradeCommandPolicy.DefaultTarget);
+        command.Parameters.AddWithValue("limit", safeLimit);
+
+        var targets = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            targets.Add(reader.GetString(0));
+        }
+
+        return targets;
+    }
+
     public async ValueTask<HostUpgradeCommand?> ClaimNextPendingAsync(
         string target,
         CancellationToken cancellationToken = default)

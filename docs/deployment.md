@@ -42,7 +42,7 @@ Safety properties: secrets are generated only when missing and never overwritten
 
 ## Remote upgrades
 
-Remote host upgrades use a fixed-verb trust path.  The admin UI inserts a `host_upgrade_commands` row for target `vm`; it never receives the Docker socket, database credentials for the agent, or host execution rights.  A small root-owned agent on the Docker host already has the Docker privileges required to run an upgrade, polls the database through the adjacent `viegard-db` container, claims a Pending row, and runs only `deploy/viegard-deploy.sh upgrade --yes` with no operator-supplied command parameters.
+Remote host upgrades use a fixed-verb trust path.  The admin UI inserts a `host_upgrade_commands` row for the selected target; it never receives the Docker socket, database credentials for the Linux agent, Windows elevation rights, or host execution rights.  The `vm` target is handled by a small root-owned agent on the Docker host.  That agent already has the Docker privileges required to run an upgrade, polls the database through the adjacent `viegard-db` container, claims a Pending row for `vm`, and runs only `deploy/viegard-deploy.sh upgrade --yes` with no operator-supplied command parameters.
 
 Install the host agent from the deployment clone:
 
@@ -61,11 +61,11 @@ POLL_SECONDS=30
 
 Do not store database credentials in this file.  The agent runs `psql` through the `viegard-db` container with `docker compose exec`, so it uses the local database container context rather than a separate password.  If your deployment root is not `/opt/viegard-sentinel`, pass `--dir <root>` or `--agent-deploy-dir <root>/deploy` to `install-agent`.
 
-Operators request a host upgrade from **Configuration** -> **Upgrades** after step-up verification.  The page shows recent command history, status, and the captured tail of the script output with terminal color sequences removed.  The command table refreshes itself in place on the operator's configured status-refresh interval, so a running upgrade's status, start and finish times, and output detail appear without a manual page reload.  While the upgrade runs, the admin UI may briefly disconnect because its own container is rebuilt and restarted; the refresher tolerates this and resumes on the next tick.  If no host agent is installed or running, the command stays Pending; the UI flags Pending requests older than a few minutes so the operator can check the service.
+Operators request a host upgrade from **Configuration** -> **Upgrades** after step-up verification.  The page lists known targets from command history plus `vm`, and it accepts a validated new target for a newly configured satellite.  It shows recent command history across all targets, status, and the captured tail of the script output with terminal color sequences removed.  The command table refreshes itself in place on the operator's configured status-refresh interval, so a running upgrade's status, start and finish times, and output detail appear without a manual page reload.  While the VM upgrade runs, the admin UI may briefly disconnect because its own container is rebuilt and restarted; the refresher tolerates this and resumes on the next tick.  If no agent is installed or running for the chosen target, the command stays Pending; the UI flags Pending requests older than a few minutes so the operator can check the service.
 
 Requests are single-flight per target: a new request is rejected while an existing command for that target is Pending or Running.  After any finished command, the store enforces a 10-minute cooldown before accepting another request for the same target.  These checks are enforced in the command store, not only in the UI.
 
-Windows satellites are not upgraded by database commands in this version.  Use the scheduled git-based auto-upgrade task documented in [satellite-windows.md](satellite-windows.md); DB-commanded satellite upgrades are future work.
+Windows satellites use the same fixed-verb command table with per-satellite targets.  The Windows service claims only its configured target, starts the registered scheduled task for elevation, and reports completion after restart from its local state file and deployed-commit marker.  Configure the satellite-side agent through the installer workflow documented in [satellite-windows.md](satellite-windows.md).
 
 ## 1. Prepare secrets and directories
 

@@ -18,6 +18,10 @@ public interface IHostUpgradeCommandStore
         int limit = HostUpgradeCommandPolicy.DefaultRecentLimit,
         CancellationToken cancellationToken = default);
 
+    ValueTask<IReadOnlyList<string>> ListTargetsAsync(
+        int limit = HostUpgradeCommandPolicy.DefaultRecentLimit,
+        CancellationToken cancellationToken = default);
+
     ValueTask<HostUpgradeCommand?> ClaimNextPendingAsync(
         string target,
         CancellationToken cancellationToken = default);
@@ -72,6 +76,7 @@ public static class HostUpgradeCommandPolicy
     public const int DefaultRecentLimit = 20;
     public const int MaxRecentLimit = 100;
     public const int PendingStaleAfterMinutes = 3;
+    public const int MaxDetailLength = 2000;
 
     /// <summary>Minimum time between finished upgrades for the same target.</summary>
     public static TimeSpan Cooldown => TimeSpan.FromMinutes(CooldownMinutes);

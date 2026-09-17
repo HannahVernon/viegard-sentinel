@@ -244,14 +244,21 @@ public sealed class DefaultPolicyEngine(
         else
         {
             var beforeOverlay = outcome;
-            if (context.ManualApprovalMode)
-            {
-                outcome = DecisionOutcome.RequireApproval;
-            }
-
+            // Dry-run is applied first and manual-approval second, so manual
+            // approval mode captures every would-be action for operator
+            // review even while the dry-run posture is active.  Dry-run is
+            // enforced again at action dispatch, so an action approved under
+            // dry-run posture composes the router calls without applying
+            // them.  This ordering lets the approval flow be exercised end
+            // to end before enforcement is enabled (D-0038).
             if (context.DryRun)
             {
                 outcome = DecisionOutcome.DryRun;
+            }
+
+            if (context.ManualApprovalMode)
+            {
+                outcome = DecisionOutcome.RequireApproval;
             }
 
             if (outcome == beforeOverlay)

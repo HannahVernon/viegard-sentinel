@@ -664,6 +664,24 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
         return await GetAsync(id, cancellationToken).ConfigureAwait(false);
     }
 
+    public async ValueTask<int> BulkRejectUnreviewedAsync(
+        int maxSeverity,
+        string reviewedBy,
+        DateTimeOffset reviewedAt,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await db.Decisions
+            .Where(row => row.Outcome == (int)DecisionOutcome.RequireApproval
+                && row.ReviewedAt == null
+                && db.Classifications.Any(c => c.Id == row.ClassificationId && c.Severity <= maxSeverity))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.ReviewedBy, reviewedBy.Trim())
+                .SetProperty(row => row.ReviewedAt, reviewedAt.ToUniversalTime())
+                .SetProperty(row => row.ReviewOutcome, (int)DecisionReviewOutcome.Rejected), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     private static readonly Func<int, string>[] DecisionSearchClauses =
     [
         index => $"d.rationale ILIKE {{{index}}} ESCAPE '\\'",
@@ -686,6 +704,12 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
         {
             conditions.Add($"d.outcome = {{{args.Count}}}");
             args.Add((int)outcome);
+        }
+
+        if (filter?.MinSeverity is { } minSeverity)
+        {
+            conditions.Add($"EXISTS (SELECT 1 FROM classifications fc WHERE fc.id = d.classification_id AND fc.severity >= {{{args.Count}}})");
+            args.Add(minSeverity);
         }
 
         if (boundaryOffset is null)
@@ -772,6 +796,14 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
             "FROM decisions cursor_d LEFT JOIN classifications cursor_c ON cursor_c.id = cursor_d.classification_id",
             "COALESCE(c.category, '')",
             "COALESCE(cursor_c.category, '')",
+            "d.id",
+            "cursor_d.id"),
+        DecisionSortColumn.Severity => new(
+            "SELECT d.* FROM decisions d LEFT JOIN classifications c ON c.id = d.classification_id",
+            "FROM decisions d LEFT JOIN classifications c ON c.id = d.classification_id",
+            "FROM decisions cursor_d LEFT JOIN classifications cursor_c ON cursor_c.id = cursor_d.classification_id",
+            "COALESCE(c.severity, 0)",
+            "COALESCE(cursor_c.severity, 0)",
             "d.id",
             "cursor_d.id"),
         _ => null,

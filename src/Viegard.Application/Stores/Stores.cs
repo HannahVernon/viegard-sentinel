@@ -121,6 +121,18 @@ public interface IDecisionStore
         string reviewedBy,
         DateTimeOffset reviewedAt,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rejects every unreviewed RequireApproval decision whose
+    /// classification severity is at or below <paramref name="maxSeverity"/>
+    /// and returns the number rejected.  Intended for clearing low-severity
+    /// review-queue noise in one audited action.
+    /// </summary>
+    ValueTask<int> BulkRejectUnreviewedAsync(
+        int maxSeverity,
+        string reviewedBy,
+        DateTimeOffset reviewedAt,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence port for action records (Roost).</summary>

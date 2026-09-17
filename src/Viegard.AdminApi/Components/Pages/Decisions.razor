@@ -2,12 +2,17 @@
 @attribute [Authorize]
 @inject IDecisionStore DecisionStore
 @inject IClassificationStore ClassificationStore
+@inject IAdminUserStore Users
+@inject IAdminSessionStore Sessions
+@inject IOptions<AdminAuthOptions> AuthOptions
+@inject IHttpContextAccessor HttpContextAccessor
 @inject UserDisplay Display
 
 <PageTitle>Viegard decisions</PageTitle>
 
 <main class="admin-panel wide">
     <h1>Decisions</h1>
+    <FlashBanner />
 
     @if (_searchTimedOut)
     {
@@ -29,6 +34,10 @@
                 }
             </select>
         </label>
+        <label for="decision-filter-minseverity">
+            Min severity
+            <input id="decision-filter-minseverity" name="minSeverity" type="number" min="1" max="10" value="@(_minSeverity?.ToString() ?? string.Empty)" placeholder="1-10" />
+        </label>
         @foreach (var parameter in ActiveFilterHiddenParams)
         {
             <input type="hidden" name="@parameter.Key" value="@parameter.Value" />
@@ -40,6 +49,37 @@
             <a class="filter-clear" href="/decisions">Clear</a>
         }
     </form>
+
+    @if (_outcome == DecisionOutcome.RequireApproval)
+    {
+        <section class="card">
+            <h2>Bulk reject</h2>
+            <p class="small">Rejects every unreviewed decision awaiting approval whose severity is at or below the chosen value.  Higher-severity decisions stay in the queue for individual review.</p>
+            @if (!_stepUpFresh)
+            {
+                <div class="step-up-strip">
+                    <span>Step-up verification is required before bulk-rejecting decisions.</span>
+                    <StepUpPrompt ReturnTo="/decisions?outcome=RequireApproval" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-bulk-reject" />
+                </div>
+            }
+            else
+            {
+                <form method="post" action="/decisions/bulk-reject" class="decision-review-form">
+                    <AntiforgeryToken />
+                    <label>
+                        Max severity
+                        <select name="maxSeverity">
+                            @for (var severity = 1; severity <= 10; severity++)
+                            {
+                                <option value="@severity" selected="@(severity == 3)">@severity</option>
+                            }
+                        </select>
+                    </label>
+                    <button type="submit" class="secondary-button">Reject all at or below</button>
+                </form>
+            }
+        </section>
+    }
 
     @if (_rows.Count == 0)
     {
@@ -53,6 +93,7 @@
                     <SortHeader Title="Created" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Created)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
                     <SortHeader Title="Policy" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Policy)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
                     <SortHeader Title="Outcome" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Outcome)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
+                    <SortHeader Title="Severity" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Severity)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
                     <th>Review</th>
                     <SortHeader Title="Classification" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Classification)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
                     <th>Rationale</th>
@@ -65,7 +106,14 @@
                         <td><a href="/decisions/@row.Decision.Id">@Display.Format(row.Decision.CreatedAt)</a></td>
                         <td>@row.Decision.PolicyId @row.Decision.PolicyVersion</td>
                         <td><span class="@AdminText.OutcomeCss(row.Decision.Outcome)">@AdminText.DecisionOutcomeLabel(row.Decision.Outcome)</span></td>
-                        <td><span class="@ReviewCss(row.Decision)">@ReviewLabel(row.Decision)</span></td>
+                        <td>@SeverityBadge(row.Classification)</td>
+                        <td>
+                            <span class="@ReviewCss(row.Decision)">@ReviewLabel(row.Decision)</span>
+                            @if (row.Decision is { Outcome: DecisionOutcome.RequireApproval, ReviewedAt: null })
+                            {
+                                <div class="small">waiting @WaitingAge(row.Decision.CreatedAt)</div>
+                            }
+                        </td>
                         <td>@ClassificationSummary(row.Classification)</td>
                         <td>@AdminText.OneLine(row.Decision.Rationale, 220)</td>
                     </tr>
@@ -87,12 +135,15 @@
     private string? _filterText;
     private bool _searchTimedOut;
     private DecisionOutcome? _outcome;
+    private int? _minSeverity;
     private string? _sortKey;
     private SortDirection? _sortDirection;
+    private bool _stepUpFresh;
+    private bool _hasSecurityKeys;
 
     private int _take = KeysetPagination.DefaultPageSize;
 
-    private bool HasFilters => _filterText is not null || _outcome is not null;
+    private bool HasFilters => _filterText is not null || _outcome is not null || _minSeverity is not null;
 
     private IEnumerable<KeyValuePair<string, string>> ActiveFilterHiddenParams => ActiveParameters(_filterHiddenParams);
 
@@ -114,6 +165,9 @@
     [SupplyParameterFromQuery(Name = "outcome")]
     public string? OutcomeRaw { get; set; }
 
+    [SupplyParameterFromQuery(Name = "minSeverity")]
+    public string? MinSeverityRaw { get; set; }
+
     [SupplyParameterFromQuery(Name = "sort")]
     public string? Sort { get; set; }
 
@@ -126,15 +180,26 @@
         _take = Take is null ? Display.DefaultPageSize : KeysetPagination.ClampPageSize(Take);
         _filterText = ListFilterText.Normalize(Q);
         _outcome = ListFilterParser.ParseEnum<DecisionOutcome>(OutcomeRaw);
+        _minSeverity = int.TryParse(MinSeverityRaw, out var minSeverity) && minSeverity is >= 1 and <= 10
+            ? minSeverity
+            : null;
         var sort = ListSortParser.ParseDecision(Sort, Dir);
+        if (sort is null && _outcome == DecisionOutcome.RequireApproval)
+        {
+            // The review queue defaults to highest severity first so urgent
+            // items surface at the top; any explicit sort overrides this.
+            sort = new ListSort<DecisionSortColumn>(DecisionSortColumn.Severity, SortDirection.Desc);
+        }
+
         _sortKey = sort is { } activeSort ? ListSortParser.ToQueryKey(activeSort.Column) : null;
         _sortDirection = sort?.Direction;
         var direction = _sortDirection is null ? null : ListSortParser.ToQueryValue(_sortDirection.Value);
         var take = _take.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        _filters = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["sort"] = _sortKey, ["dir"] = direction };
-        _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["take"] = take };
+        var minSeverityText = _minSeverity?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _filters = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["minSeverity"] = minSeverityText, ["sort"] = _sortKey, ["dir"] = direction };
+        _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["minSeverity"] = minSeverityText, ["take"] = take };
         _filterHiddenParams = new Dictionary<string, string?> { ["take"] = take, ["sort"] = _sortKey, ["dir"] = direction };
-        var filter = new DecisionListFilter(_filterText, _outcome);
+        var filter = new DecisionListFilter(_filterText, _outcome, _minSeverity);
         try
         {
             _currentCursor = Page is { } requestedPage
@@ -158,11 +223,65 @@
         }
 
         _rows = rows;
+
+        if (_outcome == DecisionOutcome.RequireApproval && HttpContextAccessor.HttpContext is { } context)
+        {
+            if (Guid.TryParse(context.User.FindFirstValue(AdminCookieNames.SessionIdClaim), out var sessionId))
+            {
+                var session = await Sessions.GetAsync(sessionId).ConfigureAwait(false);
+                _stepUpFresh = session?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
+            }
+
+            if (Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+            {
+                var credentials = await Users.ListWebAuthnCredentialsAsync(userId).ConfigureAwait(false);
+                _hasSecurityKeys = credentials.Count > 0;
+            }
+        }
     }
 
     private static string ClassificationSummary(Classification? classification) => classification is null
         ? "not found"
-        : $"{classification.Category} severity {classification.Severity}";
+        : classification.Category;
+
+    private static RenderFragment SeverityBadge(Classification? classification) => builder =>
+    {
+        if (classification is null)
+        {
+            builder.OpenElement(0, "span");
+            builder.AddAttribute(1, "class", "small");
+            builder.AddContent(2, "-");
+            builder.CloseElement();
+            return;
+        }
+
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", SeverityCss(classification.Severity));
+        builder.AddContent(2, classification.Severity);
+        builder.CloseElement();
+    };
+
+    private static string SeverityCss(int severity) => severity switch
+    {
+        >= 7 => "badge badge-red",
+        >= 4 => "badge badge-amber",
+        _ => "badge",
+    };
+
+    private static string WaitingAge(DateTimeOffset createdAt)
+    {
+        var elapsed = DateTimeOffset.UtcNow - createdAt.ToUniversalTime();
+        if (elapsed < TimeSpan.Zero)
+        {
+            elapsed = TimeSpan.Zero;
+        }
+
+        return elapsed.TotalDays >= 1
+            ? $"{(int)elapsed.TotalDays}d {elapsed.Hours}h"
+            : elapsed.TotalHours >= 1
+                ? $"{(int)elapsed.TotalHours}h {elapsed.Minutes}m"
+                : $"{Math.Max(1, elapsed.Minutes)}m";
+    }
 
     private static string ReviewLabel(Decision decision)
     {

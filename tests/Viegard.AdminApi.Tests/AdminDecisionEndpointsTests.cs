@@ -135,6 +135,78 @@ public sealed class AdminDecisionEndpointsTests
     }
 
     [Fact]
+    public async Task BulkReject_requires_step_up_before_rejecting()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        var decision = await fixture.AddDecisionChainAsync("ip=198.51.100.10", severity: 2);
+        fixture.Context.Request.Form = BulkRejectForm("3");
+
+        var result = await fixture.InvokeBulkRejectAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.Null((await fixture.Decisions.GetAsync(decision.Id))!.ReviewedAt);
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BulkReject_rejects_invalid_max_severity()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        var decision = await fixture.AddDecisionChainAsync("ip=198.51.100.10", severity: 2);
+
+        foreach (var invalid in new[] { "", "0", "11", "abc" })
+        {
+            fixture.Context.Response.Body = Stream.Null;
+            fixture.Context.Response.Headers.Clear();
+            fixture.Context.Request.Form = BulkRejectForm(invalid);
+
+            var result = await fixture.InvokeBulkRejectAsync();
+            var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+            Assert.Contains("Max%20severity%20must%20be%20a%20number%20between%201%20and%2010", location, StringComparison.Ordinal);
+        }
+
+        Assert.Null((await fixture.Decisions.GetAsync(decision.Id))!.ReviewedAt);
+    }
+
+    [Fact]
+    public async Task BulkReject_rejects_only_low_severity_unreviewed_decisions_and_audits()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        var low = await fixture.AddDecisionChainAsync("ip=198.51.100.10", severity: 1);
+        var alsoLow = await fixture.AddDecisionChainAsync("ip=198.51.100.11", severity: 3);
+        var high = await fixture.AddDecisionChainAsync("ip=198.51.100.12", severity: 8);
+        fixture.Context.Request.Form = BulkRejectForm("3");
+
+        var result = await fixture.InvokeBulkRejectAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Rejected%202%20decisions%20at%20severity%203%20or%20below", location, StringComparison.Ordinal);
+        Assert.Equal(DecisionReviewOutcome.Rejected, (await fixture.Decisions.GetAsync(low.Id))!.ReviewOutcome);
+        Assert.Equal(DecisionReviewOutcome.Rejected, (await fixture.Decisions.GetAsync(alsoLow.Id))!.ReviewOutcome);
+        Assert.Equal("hannah", (await fixture.Decisions.GetAsync(low.Id))!.ReviewedBy);
+        Assert.Null((await fixture.Decisions.GetAsync(high.Id))!.ReviewedAt);
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("bulk-rejected 2 unreviewed decisions at severity 3 or below", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BulkReject_reports_zero_matches_without_error()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        var high = await fixture.AddDecisionChainAsync("ip=198.51.100.12", severity: 8);
+        fixture.Context.Request.Form = BulkRejectForm("3");
+
+        var result = await fixture.InvokeBulkRejectAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("No%20unreviewed%20decisions%20at%20severity%203%20or%20below", location, StringComparison.Ordinal);
+        Assert.Null((await fixture.Decisions.GetAsync(high.Id))!.ReviewedAt);
+    }
+
+    [Fact]
     public async Task Unban_rejects_invalid_ip_without_action()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
@@ -256,6 +328,9 @@ public sealed class AdminDecisionEndpointsTests
     private static FormCollection UnbanForm(string ip) =>
         Form(("ip", ip));
 
+    private static FormCollection BulkRejectForm(string maxSeverity) =>
+        Form(("maxSeverity", maxSeverity));
+
     private static FormCollection Form(params (string Key, string Value)[] pairs) =>
         new(pairs.ToDictionary(
             pair => pair.Key,
@@ -313,8 +388,8 @@ public sealed class AdminDecisionEndpointsTests
             await users.CreateAsync(user);
             await sessions.CreateAsync(session);
 
-            var decisions = new InMemoryDecisionStore();
             var classifications = new InMemoryClassificationStore();
+            var decisions = new InMemoryDecisionStore(classifications);
             var incidents = new InMemoryIncidentStore();
             var actions = new InMemoryActionStore();
             var activeBans = new InMemoryActiveBanStore();
@@ -363,7 +438,7 @@ public sealed class AdminDecisionEndpointsTests
                 new DecisionTargetResolver(classifications, incidents));
         }
 
-        public async Task<Decision> AddDecisionChainAsync(string correlationKey)
+        public async Task<Decision> AddDecisionChainAsync(string correlationKey, int severity = 7)
         {
             var incident = new Incident
             {
@@ -383,7 +458,7 @@ public sealed class AdminDecisionEndpointsTests
                 ClassifierId = "test-classifier",
                 Category = "scanner",
                 Confidence = 0.8,
-                Severity = 7,
+                Severity = severity,
                 Reasons = ["test"],
                 RecommendedAction = "temp-ban-ip",
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -426,6 +501,16 @@ public sealed class AdminDecisionEndpointsTests
                 ActiveBans,
                 Actions,
                 ActionQueue,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeBulkRejectAsync() =>
+            AdminDecisionEndpoints.BulkRejectAsync(
+                Context,
+                Antiforgery,
+                Decisions,
                 Users,
                 Sessions,
                 AuthAuditor,

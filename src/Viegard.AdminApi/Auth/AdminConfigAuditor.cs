@@ -355,6 +355,36 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
         }
     }
 
+    public async ValueTask RecordDecisionBulkRejectAsync(
+        string username,
+        int maxSeverity,
+        int rejectedCount,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin decision review by {username}: bulk-rejected {rejectedCount} unreviewed decisions at severity {maxSeverity} or below.",
+                SourceId = "admin:decisions",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "DecisionBulkRejected",
+                    Username = username,
+                    MaxSeverity = maxSeverity,
+                    RejectedCount = rejectedCount,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin decision bulk-reject audit record.");
+        }
+    }
+
     public async ValueTask RecordAdminErrorsClearedAsync(
         string username,
         long removedCount,

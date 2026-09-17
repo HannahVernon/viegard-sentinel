@@ -10,7 +10,7 @@ public sealed record EventListFilter(string? Text);
 
 public sealed record IncidentListFilter(string? Text, IncidentState? State);
 
-public sealed record DecisionListFilter(string? Text, DecisionOutcome? Outcome);
+public sealed record DecisionListFilter(string? Text, DecisionOutcome? Outcome, int? MinSeverity = null);
 
 public sealed record AuditListFilter(string? Text, PipelineStage? Stage);
 
@@ -41,6 +41,7 @@ public enum DecisionSortColumn
     Policy,
     Outcome,
     Classification,
+    Severity,
 }
 
 public enum AuditSortColumn
@@ -118,6 +119,7 @@ public static class ListSortParser
         DecisionSortColumn.Policy => "policy",
         DecisionSortColumn.Outcome => "outcome",
         DecisionSortColumn.Classification => "classification",
+        DecisionSortColumn.Severity => "severity",
         _ => string.Empty,
     };
 
@@ -166,6 +168,7 @@ public static class ListSortParser
             "policy" => DecisionSortColumn.Policy,
             "outcome" => DecisionSortColumn.Outcome,
             "classification" => DecisionSortColumn.Classification,
+            "severity" => DecisionSortColumn.Severity,
             _ => null,
         };
 

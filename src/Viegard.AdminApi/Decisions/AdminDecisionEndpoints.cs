@@ -28,6 +28,9 @@ public static class AdminDecisionEndpoints
         app.MapPost("/decisions/review", ReviewDecisionAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
+        app.MapPost("/decisions/bulk-reject", BulkRejectAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
         app.MapPost("/bans/unban", UnbanAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
@@ -173,6 +176,53 @@ public static class AdminDecisionEndpoints
             "Queued",
             context.RequestAborted).ConfigureAwait(false);
         return Redirect(path, status: $"Decision approved.  Ban action {action.Id:N} queued for {resolution.Target.Ip}.");
+    }
+
+    private const string BulkRejectReturnPath = "/decisions?outcome=RequireApproval";
+
+    internal static async Task<IResult> BulkRejectAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IDecisionStore decisions,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var gate = await RequireStepUpAsync(
+            context,
+            users,
+            sessions,
+            authAuditor,
+            BulkRejectReturnPath,
+            "bulk-rejecting decisions").ConfigureAwait(false);
+        if (gate.Failure is not null)
+        {
+            return gate.Failure;
+        }
+
+        if (!int.TryParse(form["maxSeverity"].ToString(), out var maxSeverity)
+            || maxSeverity is < 1 or > 10)
+        {
+            return Redirect(BulkRejectReturnPath, error: "Max severity must be a number between 1 and 10.");
+        }
+
+        var rejected = await decisions.BulkRejectUnreviewedAsync(
+            maxSeverity,
+            gate.User!.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+
+        await configAuditor.RecordDecisionBulkRejectAsync(
+            gate.User.Username,
+            maxSeverity,
+            rejected,
+            context.RequestAborted).ConfigureAwait(false);
+
+        return rejected == 0
+            ? Redirect(BulkRejectReturnPath, status: $"No unreviewed decisions at severity {maxSeverity} or below were found.")
+            : Redirect(BulkRejectReturnPath, status: $"Rejected {rejected} decision{(rejected == 1 ? "" : "s")} at severity {maxSeverity} or below.");
     }
 
     internal static async Task<IResult> UnbanAsync(

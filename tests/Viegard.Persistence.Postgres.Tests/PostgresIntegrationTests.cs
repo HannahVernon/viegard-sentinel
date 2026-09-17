@@ -57,7 +57,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         // Clean slate for queue tables between runs.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE actions, active_bans, queue_messages, queue_counters, retention_settings, policy_threshold_settings, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE actions, active_bans, queue_messages, queue_counters, retention_settings, policy_threshold_settings, policy_posture_settings, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()

@@ -452,7 +452,6 @@
                         <th>Requested</th>
                         <th>Started</th>
                         <th>Finished</th>
-                        <th>Detail</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -466,10 +465,9 @@
                             <td>@command.RequestedBy at @Display.Format(command.RequestedAt)</td>
                             <td data-cmd-cell="started">@FormatOptionalTimestamp(command.StartedAt)</td>
                             <td data-cmd-cell="finished">@FormatOptionalTimestamp(command.FinishedAt)</td>
-                            <td data-cmd-cell="detail">@DetailSummary(command.Detail)</td>
                         </tr>
-                        <tr class="details-row" data-cmd-detail="@command.Id.ToString("N")" hidden="@(!HasLongDetail(command.Detail))">
-                            <td colspan="5">
+                        <tr class="details-row" data-cmd-detail="@command.Id.ToString("N")" hidden="@(!HasDetail(command.Detail))">
+                            <td colspan="4">
                                 <details class="json-details">
                                     <summary>Output detail</summary>
                                     <pre class="json-block">@AdminText.Limit(command.Detail)</pre>
@@ -862,11 +860,8 @@
     private string FormatOptionalTimestamp(DateTimeOffset? value) =>
         value is null ? "" : Display.Format(value.Value);
 
-    private static string DetailSummary(string? detail) =>
-        HostUpgradeStatusPayload.DetailSummary(detail);
-
-    private static bool HasLongDetail(string? detail) =>
-        HostUpgradeStatusPayload.HasLongDetail(detail);
+    private static bool HasDetail(string? detail) =>
+        HostUpgradeStatusPayload.HasDetail(detail);
 
     private static string StatusCss(HostUpgradeCommandStatus status) =>
         HostUpgradeStatusPayload.StatusCss(status);

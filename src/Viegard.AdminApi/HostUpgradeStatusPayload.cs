@@ -12,18 +12,14 @@ namespace Viegard.AdminApi;
 /// </summary>
 public static class HostUpgradeStatusPayload
 {
-    /// <summary>Detail longer than this gets an expandable output row.</summary>
-    public const int LongDetailThreshold = 160;
-
     public sealed record CommandRowPayload(
         string Key,
         string Status,
         string StatusCss,
         string Started,
         string Finished,
-        string Detail,
         string FullDetail,
-        bool HasLongDetail);
+        bool HasDetail);
 
     public sealed record Payload(
         IReadOnlyList<CommandRowPayload> Commands,
@@ -44,9 +40,8 @@ public static class HostUpgradeStatusPayload
                 StatusCss: StatusCss(command.Status),
                 Started: command.StartedAt is { } started ? format(started) : string.Empty,
                 Finished: command.FinishedAt is { } finished ? format(finished) : string.Empty,
-                Detail: DetailSummary(command.Detail),
                 FullDetail: AdminText.Limit(command.Detail),
-                HasLongDetail: HasLongDetail(command.Detail)))
+                HasDetail: HasDetail(command.Detail)))
             .ToList();
 
         var stalePending = commands.Any(command => HostUpgradeCommandPolicy.IsPendingStale(command, now));
@@ -63,9 +58,6 @@ public static class HostUpgradeStatusPayload
         _ => "badge",
     };
 
-    public static string DetailSummary(string? detail) =>
-        string.IsNullOrWhiteSpace(detail) ? string.Empty : AdminText.OneLine(detail);
-
-    public static bool HasLongDetail(string? detail) =>
-        !string.IsNullOrWhiteSpace(detail) && detail.Length > LongDetailThreshold;
+    public static bool HasDetail(string? detail) =>
+        !string.IsNullOrWhiteSpace(detail);
 }

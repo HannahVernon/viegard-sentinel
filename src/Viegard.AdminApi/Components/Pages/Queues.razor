@@ -9,14 +9,14 @@
 
 <main class="admin-panel wide page-layout">
     <nav class="page-index" aria-label="Dashboard sections">
-        <a class="index-default-link" href="/queues#retention">Retention</a>
-        <a href="/queues#queues">Queues</a>
+        <a class="index-default-link" href="/queues#queues">Queues</a>
         <a href="/queues#instances">Instances</a>
+        <a href="/queues#retention">Retention</a>
     </nav>
     <div class="page-content">
     <h1>Dashboard/Queues</h1>
 
-    <section id="retention" class="card indexed index-default">
+    <section id="retention" class="card indexed">
         <h2>Retention</h2>
         <dl class="detail-list">
             <dt>State</dt><dd>@RetentionState</dd>
@@ -33,7 +33,7 @@
     }
     else
     {
-        <section id="queues" class="card indexed">
+        <section id="queues" class="card indexed index-default">
             <h2>Queues</h2>
             <table class="data-table" data-live-queues>
                 <caption>Queues are shared across all instances; values come from the freshest report.</caption>

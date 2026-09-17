@@ -47,7 +47,7 @@
                     status.textContent = row.status;
                 }
 
-                ["started", "finished", "detail"].forEach(name => {
+                ["started", "finished"].forEach(name => {
                     const cell = tr.querySelector('[data-cmd-cell="' + name + '"]');
                     if (cell && row[name] !== undefined && row[name] !== null) {
                         cell.textContent = String(row[name]);
@@ -57,7 +57,7 @@
 
             const detailRow = detailByKey.get(row.key);
             if (detailRow) {
-                detailRow.hidden = row.hasLongDetail !== true;
+                detailRow.hidden = row.hasDetail !== true;
                 const pre = detailRow.querySelector("pre");
                 if (pre && typeof row.fullDetail === "string") {
                     pre.textContent = row.fullDetail;

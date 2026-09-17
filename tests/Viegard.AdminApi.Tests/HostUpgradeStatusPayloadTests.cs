@@ -45,8 +45,8 @@ public sealed class HostUpgradeStatusPayloadTests
         Assert.Equal("badge badge-green", row.StatusCss);
         Assert.Equal(Format(started), row.Started);
         Assert.Equal(Format(finished), row.Finished);
-        Assert.Equal("done", row.Detail);
-        Assert.False(row.HasLongDetail);
+        Assert.Equal("done", row.FullDetail);
+        Assert.True(row.HasDetail);
         Assert.False(payload.StalePending);
     }
 
@@ -62,13 +62,12 @@ public sealed class HostUpgradeStatusPayloadTests
         Assert.Equal("badge badge-blue", row.StatusCss);
         Assert.NotEqual(string.Empty, row.Started);
         Assert.Equal(string.Empty, row.Finished);
-        Assert.Equal(string.Empty, row.Detail);
         Assert.Equal(string.Empty, row.FullDetail);
-        Assert.False(row.HasLongDetail);
+        Assert.False(row.HasDetail);
     }
 
     [Fact]
-    public void Build_flags_long_detail_and_flattens_the_summary_to_one_line()
+    public void Build_bounds_full_detail_and_reports_detail_presence()
     {
         var detail = string.Join("\n", Enumerable.Repeat("0123456789", 20));
         var payload = HostUpgradeStatusPayload.Build(
@@ -78,9 +77,7 @@ public sealed class HostUpgradeStatusPayloadTests
 
         var row = Assert.Single(payload.Commands);
         Assert.Equal("badge badge-red", row.StatusCss);
-        Assert.True(row.HasLongDetail);
-        Assert.DoesNotContain('\n', row.Detail);
-        Assert.EndsWith("... [truncated]", row.Detail);
+        Assert.True(row.HasDetail);
         Assert.Contains("0123456789", row.FullDetail);
     }
 

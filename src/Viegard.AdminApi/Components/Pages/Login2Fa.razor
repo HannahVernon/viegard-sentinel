@@ -1,4 +1,4 @@
-﻿@page "/login/2fa"
+@page "/login/2fa"
 @attribute [AllowAnonymous]
 @inject IHttpContextAccessor HttpContextAccessor
 @inject PendingTwoFactorCookie PendingCookie
@@ -13,14 +13,7 @@
         <h1>Second factor</h1>
     </div>
 
-    @if (!string.IsNullOrWhiteSpace(Error))
-    {
-        <p class="message error">@Error</p>
-    }
-    @if (!string.IsNullOrWhiteSpace(Status))
-    {
-        <p class="message">@Status</p>
-    }
+    <FlashBanner />
 
     @if (_user is null)
     {
@@ -105,12 +98,6 @@
     private string _setupSecret = string.Empty;
     private string _otpUri = string.Empty;
     private bool _hasWebAuthnCredentials;
-
-    [SupplyParameterFromQuery(Name = "error")]
-    public string? Error { get; set; }
-
-    [SupplyParameterFromQuery(Name = "status")]
-    public string? Status { get; set; }
 
     protected override async Task OnInitializedAsync()
     {

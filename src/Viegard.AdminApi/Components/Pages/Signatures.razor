@@ -19,14 +19,7 @@
     <div class="page-content">
     <h1>Detection signatures</h1>
 
-    @if (!string.IsNullOrWhiteSpace(Error))
-    {
-        <p class="message error">@Error</p>
-    }
-    @if (!string.IsNullOrWhiteSpace(Status))
-    {
-        <p class="message">@Status</p>
-    }
+    <FlashBanner />
 
     @if (!_stepUpFresh)
     {
@@ -233,12 +226,6 @@
 
     [SupplyParameterFromQuery(Name = "editId")]
     public Guid? EditId { get; set; }
-
-    [SupplyParameterFromQuery(Name = "error")]
-    public string? Error { get; set; }
-
-    [SupplyParameterFromQuery(Name = "status")]
-    public string? Status { get; set; }
 
     [SupplyParameterFromQuery(Name = "q")]
     public string? Q { get; set; }

@@ -22,15 +22,7 @@
     {
         <Breadcrumbs Ancestors="DecisionBreadcrumbs" Current="@AdminText.ShortId(_decision.Id)" />
         <h1>Decision @AdminText.ShortId(_decision.Id)</h1>
-        @if (!string.IsNullOrWhiteSpace(Status))
-        {
-            <p class="message">@Status</p>
-        }
-
-        @if (!string.IsNullOrWhiteSpace(Error))
-        {
-            <p class="message error">@Error</p>
-        }
+        <FlashBanner />
 
         <dl class="detail-list">
             <dt>Created</dt><dd>@Display.Format(_decision.CreatedAt)</dd>
@@ -146,12 +138,6 @@
 @code {
     [Parameter]
     public Guid Id { get; set; }
-
-    [SupplyParameterFromQuery(Name = "error")]
-    public string? Error { get; set; }
-
-    [SupplyParameterFromQuery(Name = "status")]
-    public string? Status { get; set; }
 
     private Decision? _decision;
     private Classification? _classification;

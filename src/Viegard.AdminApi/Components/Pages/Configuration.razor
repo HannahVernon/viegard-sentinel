@@ -29,14 +29,7 @@
     <div class="page-content">
     <h1>Service configuration</h1>
 
-    @if (!string.IsNullOrWhiteSpace(Error))
-    {
-        <p class="message error">@Error</p>
-    }
-    @if (!string.IsNullOrWhiteSpace(Status))
-    {
-        <p class="message">@Status</p>
-    }
+    <FlashBanner />
 
     <section id="retention" class="indexed index-default">
         <h2>Retention</h2>
@@ -667,12 +660,6 @@
     private bool _stepUpFresh;
     private bool _hasSecurityKeys;
     private DateTimeOffset _now;
-
-    [SupplyParameterFromQuery(Name = "error")]
-    public string? Error { get; set; }
-
-    [SupplyParameterFromQuery(Name = "status")]
-    public string? Status { get; set; }
 
     [SupplyParameterFromQuery(Name = "confirmRevoke")]
     public string? ConfirmRevoke { get; set; }

@@ -317,7 +317,7 @@ public static class AdminAuthEndpoints
         }
 
         await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme).ConfigureAwait(false);
-        return Results.Redirect("/login?status=Signed%20out.");
+        return Results.Redirect("/login").WithFlash(status: "Signed out.");
     }
 
     private static async Task<IResult> ChangePasswordAsync(
@@ -624,7 +624,7 @@ public static class AdminAuthEndpoints
 
         await auditor.RecordAsync(AdminAuthEventKind.WebAuthnEnrolled, user.Username, context, cancellationToken: context.RequestAborted)
             .ConfigureAwait(false);
-        return JsonRedirect(BuildRedirectPath("/account", status: "Security key enrolled."));
+        return JsonRedirect("/account").WithFlash(status: "Security key enrolled.");
     }
 
     private static async Task<IResult> BeginWebAuthnAssertionAsync(
@@ -678,7 +678,7 @@ public static class AdminAuthEndpoints
         var assertionUser = await TryResolveWebAuthnUserAsync(context, users, pendingCookie).ConfigureAwait(false);
         if (assertionUser is null)
         {
-            return JsonRedirect(BuildRedirectPath("/login", error: UniformFailure), StatusCodes.Status401Unauthorized);
+            return JsonRedirect("/login", StatusCodes.Status401Unauthorized).WithFlash(error: UniformFailure);
         }
 
         if (assertionUser.LockedUntil is not null && assertionUser.LockedUntil > DateTimeOffset.UtcNow)
@@ -690,13 +690,13 @@ public static class AdminAuthEndpoints
                 context,
                 enqueueForCorrelation: true,
                 cancellationToken: context.RequestAborted).ConfigureAwait(false);
-            return JsonRedirect(BuildRedirectPath("/login", error: UniformFailure), StatusCodes.Status400BadRequest);
+            return JsonRedirect("/login", StatusCodes.Status400BadRequest).WithFlash(error: UniformFailure);
         }
 
         if (!stateCookie.TryReadAssertion(context, out var serverState))
         {
             await RecordWebAuthnFailureAsync(context, users, auditor, assertionUser).ConfigureAwait(false);
-            return JsonRedirect(WebAuthnFailureRedirect(pendingFlow), StatusCodes.Status400BadRequest);
+            return WebAuthnFailureRedirect(pendingFlow);
         }
 
         stateCookie.ClearAssertion(context);
@@ -709,14 +709,14 @@ public static class AdminAuthEndpoints
         catch (JsonException)
         {
             await RecordWebAuthnFailureAsync(context, users, auditor, assertionUser).ConfigureAwait(false);
-            return JsonRedirect(WebAuthnFailureRedirect(pendingFlow), StatusCodes.Status400BadRequest);
+            return WebAuthnFailureRedirect(pendingFlow);
         }
 
         using var document = parsedDocument;
         if (!TryReadRawCredentialId(document.RootElement, out var rawCredentialId))
         {
             await RecordWebAuthnFailureAsync(context, users, auditor, assertionUser).ConfigureAwait(false);
-            return JsonRedirect(WebAuthnFailureRedirect(pendingFlow), StatusCodes.Status400BadRequest);
+            return WebAuthnFailureRedirect(pendingFlow);
         }
 
         var credential = await users.GetWebAuthnCredentialByCredentialIdAsync(rawCredentialId, context.RequestAborted)
@@ -724,7 +724,7 @@ public static class AdminAuthEndpoints
         if (credential is null || credential.UserId != assertionUser.Id)
         {
             await RecordWebAuthnFailureAsync(context, users, auditor, assertionUser).ConfigureAwait(false);
-            return JsonRedirect(WebAuthnFailureRedirect(pendingFlow), StatusCodes.Status400BadRequest);
+            return WebAuthnFailureRedirect(pendingFlow);
         }
 
         var result = await webAuthn.CompleteAssertionAsync(
@@ -749,7 +749,7 @@ public static class AdminAuthEndpoints
                     cancellationToken: context.RequestAborted).ConfigureAwait(false);
             }
 
-            return JsonRedirect(WebAuthnFailureRedirect(pendingFlow), StatusCodes.Status400BadRequest);
+            return WebAuthnFailureRedirect(pendingFlow);
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -773,7 +773,7 @@ public static class AdminAuthEndpoints
 
         if (!TryGetCurrentSessionId(context.User, out var sessionId))
         {
-            return JsonRedirect(BuildRedirectPath("/login", error: UniformFailure), StatusCodes.Status401Unauthorized);
+            return JsonRedirect("/login", StatusCodes.Status401Unauthorized).WithFlash(error: UniformFailure);
         }
 
         var stepUpReturn = SafeReturnPath(
@@ -784,7 +784,7 @@ public static class AdminAuthEndpoints
         await sessions.StampStepUpAsync(sessionId, now, context.RequestAborted).ConfigureAwait(false);
         await auditor.RecordAsync(AdminAuthEventKind.StepUpSucceeded, assertionUser.Username, context, cancellationToken: context.RequestAborted)
             .ConfigureAwait(false);
-        return JsonRedirect(BuildRedirectPath(stepUpReturn, status: "Step-up verification complete."));
+        return JsonRedirect(stepUpReturn).WithFlash(status: "Step-up verification complete.");
     }
 
     private static async Task<IResult> DeleteWebAuthnCredentialAsync(
@@ -926,7 +926,9 @@ public static class AdminAuthEndpoints
         var user = await users.GetByIdAsync(userId, context.RequestAborted).ConfigureAwait(false);
         await auditor.RecordAsync(AdminAuthEventKind.SessionRevoked, user?.Username, context, cancellationToken: context.RequestAborted)
             .ConfigureAwait(false);
-        return all ? Results.Redirect("/login?status=Signed%20out%20everywhere.") : Redirect("/account", status: "Session revoked.");
+        return all
+            ? Results.Redirect("/login").WithFlash(status: "Signed out everywhere.")
+            : Redirect("/account", status: "Session revoked.");
     }
 
     private static async Task<IResult> CompleteSuccessfulPendingSecondFactorAsync(
@@ -1028,10 +1030,9 @@ public static class AdminAuthEndpoints
     private static IResult JsonError(string error, int statusCode) =>
         Results.Json(new { error }, JsonOptions, statusCode: statusCode);
 
-    private static string WebAuthnFailureRedirect(bool pendingFlow) =>
-        pendingFlow
-            ? BuildRedirectPath("/login/2fa", error: UniformFailure)
-            : BuildRedirectPath("/account", error: UniformFailure);
+    private static IResult WebAuthnFailureRedirect(bool pendingFlow) =>
+        JsonRedirect(pendingFlow ? "/login/2fa" : "/account", StatusCodes.Status400BadRequest)
+            .WithFlash(error: UniformFailure);
 
     private static async Task SignInAsync(
         HttpContext context,
@@ -1121,31 +1122,7 @@ public static class AdminAuthEndpoints
     }
 
     private static IResult Redirect(string path, string? status = null, string? error = null) =>
-        Results.Redirect(BuildRedirectPath(path, status, error));
-
-    public static string BuildRedirectPath(string path, string? status = null, string? error = null)
-    {
-        var query = status is not null
-            ? $"status={Uri.EscapeDataString(status)}"
-            : error is not null
-                ? $"error={Uri.EscapeDataString(error)}"
-                : string.Empty;
-        if (string.IsNullOrEmpty(query))
-        {
-            return path;
-        }
-
-        // The query must precede any fragment or the browser treats it as
-        // part of the fragment (e.g. /account#totp -> /account?query#totp).
-        // Some configuration flows already carry non-secret query values,
-        // such as a fetched router certificate fingerprint, so append with
-        // '&' when the path already contains a query string.
-        var hash = path.IndexOf('#', StringComparison.Ordinal);
-        var prefix = hash < 0 ? path : path[..hash];
-        var fragment = hash < 0 ? string.Empty : path[hash..];
-        var separator = prefix.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-        return $"{prefix}{separator}{query}{fragment}";
-    }
+        Results.Redirect(path).WithFlash(status: status, error: error);
 
     private sealed record WebAuthnRegistrationCompleteRequest(string? Name, JsonElement? Response);
 }

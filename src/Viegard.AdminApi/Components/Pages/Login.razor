@@ -1,4 +1,4 @@
-﻿@page "/login"
+@page "/login"
 @attribute [AllowAnonymous]
 
 <PageTitle>Admin login</PageTitle>
@@ -10,14 +10,7 @@
     </div>
     <p class="tagline">Sign in with your local operator account.</p>
 
-    @if (!string.IsNullOrWhiteSpace(Error))
-    {
-        <p class="message error">@Error</p>
-    }
-    @if (!string.IsNullOrWhiteSpace(Status))
-    {
-        <p class="message">@Status</p>
-    }
+    <FlashBanner />
 
     <form method="post" action="/auth/login">
         <AntiforgeryToken />
@@ -34,9 +27,4 @@
 </main>
 
 @code {
-    [SupplyParameterFromQuery(Name = "error")]
-    public string? Error { get; set; }
-
-    [SupplyParameterFromQuery(Name = "status")]
-    public string? Status { get; set; }
 }

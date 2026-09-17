@@ -62,7 +62,7 @@ public static class AdminSignatureEndpoints
         var input = SignatureFormInput.From(form);
         if (!TryReadSignature(input, user.Username, out var signature, out var error))
         {
-            return Results.Redirect(BuildSignatureFormRedirect(input, error: error));
+            return Results.Redirect(BuildSignatureFormRedirect(input)).WithFlash(error: error);
         }
 
         var before = await signatures.GetAsync(signature.Id, context.RequestAborted).ConfigureAwait(false);
@@ -103,7 +103,7 @@ public static class AdminSignatureEndpoints
 
         if (!TryReadSignature(input, user.Username, out var signature, out var error))
         {
-            return Results.Redirect(BuildSignatureFormRedirect(input, error: error));
+            return Results.Redirect(BuildSignatureFormRedirect(input)).WithFlash(error: error);
         }
 
         var preview = await ScanPreviewAsync(
@@ -362,17 +362,12 @@ public static class AdminSignatureEndpoints
         return new SignaturePreviewResult(scanned, matchCount, newest, oldest, matchIds, capped);
     }
 
-    private static string BuildSignatureFormRedirect(SignatureFormInput input, SignaturePreviewResult? preview = null, string? error = null)
+    private static string BuildSignatureFormRedirect(SignatureFormInput input, SignaturePreviewResult? preview = null)
     {
         var parameters = input.ToQueryParameters();
         if (!string.IsNullOrWhiteSpace(input.IdText))
         {
             parameters.Add(new("editId", input.IdText));
-        }
-
-        if (!string.IsNullOrWhiteSpace(error))
-        {
-            parameters.Add(new("error", error));
         }
 
         if (preview is not null)
@@ -403,20 +398,8 @@ public static class AdminSignatureEndpoints
             : null;
     }
 
-    private static IResult Redirect(string path, string? status = null, string? error = null)
-    {
-        var parameters = new List<KeyValuePair<string, string?>>();
-        if (status is not null)
-        {
-            parameters.Add(new("status", status));
-        }
-        else if (error is not null)
-        {
-            parameters.Add(new("error", error));
-        }
-
-        return Results.Redirect(BuildRedirectPath(path, parameters));
-    }
+    private static IResult Redirect(string path, string? status = null, string? error = null) =>
+        Results.Redirect(path).WithFlash(status: status, error: error);
 
     private static string BuildRedirectPath(string path, List<KeyValuePair<string, string?>> parameters)
     {

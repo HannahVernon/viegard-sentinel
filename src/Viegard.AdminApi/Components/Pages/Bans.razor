@@ -13,15 +13,7 @@
 <main class="admin-panel wide">
     <h1>Bans</h1>
 
-    @if (!string.IsNullOrWhiteSpace(Status))
-    {
-        <p class="message">@Status</p>
-    }
-
-    @if (!string.IsNullOrWhiteSpace(Error))
-    {
-        <p class="message error">@Error</p>
-    }
+    <FlashBanner />
 
     @if (!_hasFreshStepUp)
     {
@@ -116,12 +108,6 @@
 </main>
 
 @code {
-    [SupplyParameterFromQuery(Name = "error")]
-    public string? Error { get; set; }
-
-    [SupplyParameterFromQuery(Name = "status")]
-    public string? Status { get; set; }
-
     private DateTimeOffset _now;
     private IReadOnlyList<ActiveBan> _activeBans = [];
     private IReadOnlyList<ActionRecord> _recentActions = [];

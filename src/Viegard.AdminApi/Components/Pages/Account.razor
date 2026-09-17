@@ -24,14 +24,7 @@
     <div class="page-content">
     <h1>Admin account</h1>
 
-    @if (!string.IsNullOrWhiteSpace(Error))
-    {
-        <p class="message error">@Error</p>
-    }
-    @if (!string.IsNullOrWhiteSpace(Status))
-    {
-        <p class="message">@Status</p>
-    }
+    <FlashBanner />
 
     @if (_user is null)
     {
@@ -315,12 +308,6 @@
     private bool _stepUpFresh;
     private static readonly int[] PageSizeOptions = [25, 50, 100, 200];
     private static readonly int[] StatusRefreshOptions = [10, 15, 30, 60, 120, 300];
-
-    [SupplyParameterFromQuery(Name = "error")]
-    public string? Error { get; set; }
-
-    [SupplyParameterFromQuery(Name = "status")]
-    public string? Status { get; set; }
 
     protected override async Task OnInitializedAsync()
     {

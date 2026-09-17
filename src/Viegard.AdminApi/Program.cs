@@ -11,6 +11,7 @@ using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Components;
 using Viegard.AdminApi.Configuration;
 using Viegard.AdminApi.Decisions;
+using Viegard.AdminApi.Errors;
 using Viegard.AdminApi.Signatures;
 using Viegard.Application.Actions;
 using Viegard.Application.Audit;
@@ -209,6 +210,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ICorrectionStore, InMemoryCorrectionStore>();
         builder.Services.AddSingleton<IAdminUserStore, InMemoryAdminUserStore>();
         builder.Services.AddSingleton<IAdminSessionStore, InMemoryAdminSessionStore>();
+        builder.Services.AddSingleton<IAdminErrorStore, InMemoryAdminErrorStore>();
         builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
         builder.Services.AddSingleton<IActiveBanStore, InMemoryActiveBanStore>();
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
@@ -374,6 +376,7 @@ app.MapAdminAuthEndpoints();
 app.MapAdminSignatureEndpoints();
 app.MapAdminConfigurationEndpoints();
 app.MapAdminDecisionEndpoints();
+app.MapAdminErrorEndpoints();
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>();
 

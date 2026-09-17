@@ -9,6 +9,11 @@
 <main class="admin-panel wide">
     <h1>Decisions</h1>
 
+    @if (_searchTimedOut)
+    {
+        <p class="message error">The search took too long and was stopped after 60 seconds.  Try a more specific term.</p>
+    }
+
     <form method="get" action="/decisions" class="filter-bar" aria-label="Decision filters">
         <label for="decision-filter-q">
             Search
@@ -80,6 +85,7 @@
     private IReadOnlyDictionary<string, string?> _sortHeaderParams = new Dictionary<string, string?>();
     private IReadOnlyDictionary<string, string?> _filterHiddenParams = new Dictionary<string, string?>();
     private string? _filterText;
+    private bool _searchTimedOut;
     private DecisionOutcome? _outcome;
     private string? _sortKey;
     private SortDirection? _sortDirection;
@@ -129,14 +135,22 @@
         _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["take"] = take };
         _filterHiddenParams = new Dictionary<string, string?> { ["take"] = take, ["sort"] = _sortKey, ["dir"] = direction };
         var filter = new DecisionListFilter(_filterText, _outcome);
-        _currentCursor = Page is { } requestedPage
-            ? await DecisionStore.GetPageCursorAsync(requestedPage, _take, filter, sort).ConfigureAwait(false)
-            : Cursor;
-        _page = await DecisionStore.ListPageAsync(_currentCursor, _take, filter, sort)
-            .ConfigureAwait(false);
-        _previousCursor = Page is null
-            ? Prev
-            : await PreviousPageCursorAsync(filter, sort).ConfigureAwait(false);
+        try
+        {
+            _currentCursor = Page is { } requestedPage
+                ? await DecisionStore.GetPageCursorAsync(requestedPage, _take, filter, sort).ConfigureAwait(false)
+                : Cursor;
+            _page = await DecisionStore.ListPageAsync(_currentCursor, _take, filter, sort).ConfigureAwait(false);
+            _previousCursor = Page is null
+                ? Prev
+                : await PreviousPageCursorAsync(filter, sort).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (_filterText is not null && AdminQueryTimeout.IsTimeout(ex))
+        {
+            // The short search command budget elapsed; render the friendly
+            // banner with an empty page instead of the generic error page.
+            _searchTimedOut = true;
+        }
         var rows = new List<DecisionRow>();
         foreach (var decision in _page.Items)
         {

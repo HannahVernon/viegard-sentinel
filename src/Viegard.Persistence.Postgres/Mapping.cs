@@ -636,6 +636,32 @@ internal static class Mapping
         UpdatedBy = row.UpdatedBy,
     };
 
+    public static AdminErrorRow ToRow(this AdminError error) => new()
+    {
+        Id = error.Id,
+        OccurredAt = Utc(error.OccurredAt),
+        RequestId = error.RequestId,
+        Path = error.Path,
+        Method = error.Method,
+        Username = error.Username,
+        ExceptionType = error.ExceptionType,
+        Message = error.Message,
+        StackTrace = error.StackTrace,
+    };
+
+    public static AdminError ToDomain(this AdminErrorRow row) => new()
+    {
+        Id = row.Id,
+        OccurredAt = row.OccurredAt,
+        RequestId = row.RequestId,
+        Path = row.Path,
+        Method = row.Method,
+        Username = row.Username,
+        ExceptionType = row.ExceptionType,
+        Message = row.Message,
+        StackTrace = row.StackTrace,
+    };
+
     public static MikroTikRouterRow ToRow(this MikroTikRouter router) => new()
     {
         Id = router.Id,

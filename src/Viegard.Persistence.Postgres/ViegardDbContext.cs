@@ -57,6 +57,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<PolicyPostureSettingsRow> PolicyPostureSettings => Set<PolicyPostureSettingsRow>();
 
+    public DbSet<AdminErrorRow> AdminErrors => Set<AdminErrorRow>();
+
     public DbSet<MikroTikRouterRow> MikroTikRouters => Set<MikroTikRouterRow>();
 
     public DbSet<QueueMessageRow> QueueMessages => Set<QueueMessageRow>();
@@ -294,6 +296,21 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Policy.PolicyPostureSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<AdminErrorRow>(entity =>
+        {
+            entity.ToTable("admin_errors");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.HasIndex(e => e.OccurredAt).IsDescending();
+            entity.Property(e => e.RequestId).HasMaxLength(Viegard.Domain.Admin.AdminError.MaxRequestIdLength);
+            entity.Property(e => e.Path).HasMaxLength(Viegard.Domain.Admin.AdminError.MaxPathLength);
+            entity.Property(e => e.Method).HasMaxLength(Viegard.Domain.Admin.AdminError.MaxMethodLength);
+            entity.Property(e => e.Username).HasMaxLength(Viegard.Domain.Admin.AdminError.MaxUsernameLength);
+            entity.Property(e => e.ExceptionType).HasMaxLength(Viegard.Domain.Admin.AdminError.MaxExceptionTypeLength);
+            entity.Property(e => e.Message).HasMaxLength(Viegard.Domain.Admin.AdminError.MaxMessageLength);
+            entity.Property(e => e.StackTrace).HasMaxLength(Viegard.Domain.Admin.AdminError.MaxStackTraceLength);
         });
 
         modelBuilder.Entity<MikroTikRouterRow>(entity =>

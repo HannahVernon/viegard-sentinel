@@ -110,6 +110,7 @@ public sealed class PostgresEventStore(IDbContextFactory<ViegardDbContext> facto
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        PostgresPaging.ApplySearchTimeout(db, filter?.Text);
         var take = safePageSize + 1;
         var rows = await db.Events.FromSqlInterpolated(BuildEventQuery(filter, sort, beforeId, seekAfterId: null, limit: take))
             .AsNoTracking()
@@ -145,6 +146,7 @@ public sealed class PostgresEventStore(IDbContextFactory<ViegardDbContext> facto
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        PostgresPaging.ApplySearchTimeout(db, filter?.Text);
         var totalCount = await db.Events.FromSqlInterpolated(BuildEventQuery(filter, sort, seekBeforeId: null, seekAfterId: null, limit: null))
             .LongCountAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -311,6 +313,7 @@ public sealed class PostgresIncidentStore(IDbContextFactory<ViegardDbContext> fa
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        PostgresPaging.ApplySearchTimeout(db, filter?.Text);
         var take = safePageSize + 1;
         var rows = await db.Incidents.FromSqlInterpolated(BuildIncidentQuery(filter, sort, beforeId, seekAfterId: null, limit: take))
             .AsNoTracking()
@@ -340,6 +343,7 @@ public sealed class PostgresIncidentStore(IDbContextFactory<ViegardDbContext> fa
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        PostgresPaging.ApplySearchTimeout(db, filter?.Text);
         var totalCount = await db.Incidents.FromSqlInterpolated(BuildIncidentQuery(filter, sort, seekBeforeId: null, seekAfterId: null, limit: null))
             .LongCountAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -587,6 +591,7 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        PostgresPaging.ApplySearchTimeout(db, filter?.Text);
         var take = safePageSize + 1;
         var rows = await db.Decisions.FromSqlInterpolated(BuildDecisionQuery(filter, sort, beforeId, seekAfterId: null, limit: take))
             .AsNoTracking()
@@ -622,6 +627,7 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        PostgresPaging.ApplySearchTimeout(db, filter?.Text);
         var totalCount = await db.Decisions.FromSqlInterpolated(BuildDecisionQuery(filter, sort, seekBeforeId: null, seekAfterId: null, limit: null))
             .LongCountAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -884,6 +890,7 @@ public sealed class PostgresAuditLedger(IDbContextFactory<ViegardDbContext> fact
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        PostgresPaging.ApplySearchTimeout(db, filter?.Text);
         var take = safePageSize + 1;
         var rows = await db.AuditRecords.FromSqlInterpolated(BuildAuditQuery(filter, sort, beforeId, seekAfterId: null, limit: take))
             .AsNoTracking()
@@ -925,6 +932,7 @@ public sealed class PostgresAuditLedger(IDbContextFactory<ViegardDbContext> fact
     {
         var safePageSize = PostgresPaging.SafePageSize(pageSize);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        PostgresPaging.ApplySearchTimeout(db, filter?.Text);
         var totalCount = await db.AuditRecords.FromSqlInterpolated(BuildAuditQuery(filter, sort, seekBeforeId: null, seekAfterId: null, limit: null))
             .LongCountAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -1846,6 +1854,21 @@ internal static class PostgresSearchSql
 internal static class PostgresPaging
 {
     public static int SafePageSize(int pageSize) => Math.Clamp(pageSize, 1, 200);
+
+    /// <summary>
+    /// Interactive text searches get a bounded command budget so a
+    /// pathological plan (for example a zero-match term walking the whole
+    /// id index) surfaces as a friendly timeout in the UI instead of an
+    /// unexplained generic error page.  The filter form shows a first-party
+    /// progress signal while the search runs.
+    /// </summary>
+    public static void ApplySearchTimeout(ViegardDbContext db, string? filterText)
+    {
+        if (!string.IsNullOrEmpty(filterText))
+        {
+            db.Database.SetCommandTimeout(TimeSpan.FromSeconds(60));
+        }
+    }
 
     public static long? BoundaryOffset(int pageNumber, int pageSize, long totalCount)
     {

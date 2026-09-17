@@ -8,6 +8,11 @@
 <main class="admin-panel wide">
     <h1>Events</h1>
 
+    @if (_searchTimedOut)
+    {
+        <p class="message error">The search took too long and was stopped after 60 seconds.  Try a more specific term.</p>
+    }
+
     <form method="get" action="/events" class="filter-bar" aria-label="Event filters">
         <label for="event-filter-q">
             Search
@@ -64,6 +69,7 @@
     private IReadOnlyDictionary<string, string?> _sortHeaderParams = new Dictionary<string, string?>();
     private IReadOnlyDictionary<string, string?> _filterHiddenParams = new Dictionary<string, string?>();
     private string? _filterText;
+    private bool _searchTimedOut;
     private string? _sortKey;
     private SortDirection? _sortDirection;
 
@@ -108,13 +114,22 @@
         _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["take"] = take };
         _filterHiddenParams = new Dictionary<string, string?> { ["take"] = take, ["sort"] = _sortKey, ["dir"] = direction };
         var filter = new EventListFilter(_filterText);
-        _currentCursor = Page is { } requestedPage
-            ? await EventStore.GetPageCursorAsync(requestedPage, _take, filter, sort).ConfigureAwait(false)
-            : Cursor;
-        _page = await EventStore.ListPageAsync(_currentCursor, _take, filter, sort).ConfigureAwait(false);
-        _previousCursor = Page is null
-            ? Prev
-            : await PreviousPageCursorAsync(filter, sort).ConfigureAwait(false);
+        try
+        {
+            _currentCursor = Page is { } requestedPage
+                ? await EventStore.GetPageCursorAsync(requestedPage, _take, filter, sort).ConfigureAwait(false)
+                : Cursor;
+            _page = await EventStore.ListPageAsync(_currentCursor, _take, filter, sort).ConfigureAwait(false);
+            _previousCursor = Page is null
+                ? Prev
+                : await PreviousPageCursorAsync(filter, sort).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (_filterText is not null && AdminQueryTimeout.IsTimeout(ex))
+        {
+            // The short search command budget elapsed; render the friendly
+            // banner with an empty page instead of the generic error page.
+            _searchTimedOut = true;
+        }
     }
 
     private async Task<Guid?> PreviousPageCursorAsync(EventListFilter filter, ListSort<EventSortColumn>? sort)

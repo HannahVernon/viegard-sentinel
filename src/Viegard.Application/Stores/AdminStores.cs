@@ -56,6 +56,18 @@ public interface IAdminUserStore
     ValueTask SavePreferencesAsync(AdminUserPreferences preferences, CancellationToken cancellationToken = default);
 }
 
+/// <summary>Persistence port for captured unhandled admin-request errors.</summary>
+public interface IAdminErrorStore
+{
+    /// <summary>Adds an error and trims the store to <see cref="AdminError.KeepNewest"/> rows.</summary>
+    ValueTask AddAsync(AdminError error, CancellationToken cancellationToken = default);
+
+    ValueTask<IReadOnlyList<AdminError>> ListRecentAsync(int take, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes every stored error and returns the removed count.</summary>
+    ValueTask<long> ClearAsync(CancellationToken cancellationToken = default);
+}
+
 /// <summary>Persistence port for revocable server-side admin sessions.</summary>
 public interface IAdminSessionStore
 {

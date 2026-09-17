@@ -188,7 +188,7 @@ public sealed class DeterministicIncidentClassifierTests
     }
 
     [Fact]
-    public async Task Deterministic_spine_end_to_end_produces_dry_run_decision()
+    public async Task Deterministic_spine_end_to_end_produces_a_decision_awaiting_review()
     {
         var eventStore = new InMemoryEventStore();
         var incidentStore = new InMemoryIncidentStore();
@@ -245,7 +245,10 @@ public sealed class DeterministicIncidentClassifierTests
         var persistedDecision = await decisionStore.GetAsync(decision.Id);
         var decidedIncident = await incidentStore.GetAsync(incident.Id);
         Assert.NotNull(persistedDecision);
-        Assert.Equal(DecisionOutcome.DryRun, persistedDecision.Outcome);
+        // The default posture is DryRun + ManualApprovalMode; approval-wins
+        // precedence mints the decision for operator review, and dry-run is
+        // enforced again at action dispatch.
+        Assert.Equal(DecisionOutcome.RequireApproval, persistedDecision.Outcome);
         Assert.Equal(IncidentState.Decided, decidedIncident?.State);
         Assert.Equal("block-source-ip", classification.RecommendedAction);
         Assert.Equal(1.0, classification.Confidence);

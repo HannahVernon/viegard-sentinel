@@ -58,6 +58,22 @@ public sealed class PolicyEngineTests
     }
 
     [Fact]
+    public async Task Manual_approval_mode_wins_over_dry_run_so_reviews_exist_under_dry_run_posture()
+    {
+        var fixture = await CreateFixtureAsync();
+
+        var wouldAct = await fixture.Engine.EvaluateAsync(
+            AiClassification(fixture.IncidentId, confidence: 0.95, severity: 8),
+            ActiveContext with { DryRun = true, ManualApprovalMode = true });
+        var recordOnly = await fixture.Engine.EvaluateAsync(
+            AiClassification(fixture.IncidentId, confidence: 0.5, severity: 8),
+            ActiveContext with { DryRun = true, ManualApprovalMode = true });
+
+        Assert.Equal(DecisionOutcome.RequireApproval, wouldAct.Outcome);
+        Assert.Equal(DecisionOutcome.RecordOnly, recordOnly.Outcome);
+    }
+
+    [Fact]
     public async Task Ai_thresholds_distinguish_action_review_and_record_only_bands()
     {
         var fixture = await CreateFixtureAsync();

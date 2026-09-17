@@ -6,6 +6,7 @@ public enum CustomSignatureTarget
     HttpQuery,
     HttpUserAgent,
     HttpPath,
+    EventKind,
 }
 
 public enum CustomSignatureMatchType
@@ -25,6 +26,7 @@ public sealed record CustomSignature
     public const int MaxUpdatedByLength = 128;
     public const int MinSeverity = 0;
     public const int MaxSeverity = 10;
+    public const double MaxEvidenceWeight = 5.0;
 
     public required Guid Id { get; init; }
 
@@ -93,9 +95,11 @@ public static class CustomSignatureValidator
             errors.Add("Severity must be within 0-10.");
         }
 
-        if (!double.IsFinite(signature.EvidenceWeight) || signature.EvidenceWeight is < 0.0 or > 1.0)
+        if (!double.IsFinite(signature.EvidenceWeight)
+            || signature.EvidenceWeight < 0.0
+            || signature.EvidenceWeight > CustomSignature.MaxEvidenceWeight)
         {
-            errors.Add("Evidence weight must be within 0.0-1.0.");
+            errors.Add($"Evidence weight must be within 0.0-{CustomSignature.MaxEvidenceWeight:0.0}.");
         }
 
         if (signature.Version < 0)

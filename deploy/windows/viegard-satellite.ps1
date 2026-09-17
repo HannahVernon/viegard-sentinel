@@ -1914,6 +1914,52 @@ function Write-EventEntries {
     }
 }
 
+function Test-StartupErrorEvent {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$EventEntry
+    )
+
+    $providerName = [string]$EventEntry.ProviderName
+    if (-not $providerName.Equals("Viegard.PipelineHost", [StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
+
+    if ($null -eq $EventEntry.Level) {
+        return $false
+    }
+
+    $levelValue = [int]$EventEntry.Level
+    return ($levelValue -gt 0 -and $levelValue -le 2)
+}
+
+function Write-StartupEventEntries {
+    param(
+        [object[]]$Events
+    )
+
+    if ($null -eq $Events -or $Events.Count -eq 0) {
+        Write-InfoLine "No new relevant Viegard Application event-log entries were found in the startup window."
+        return
+    }
+
+    Write-InfoLine "Relevant Application event-log entries from the startup window:"
+    foreach ($eventEntry in $Events) {
+        $message = ([string]$eventEntry.Message) -replace "[\r\n]+", " "
+        if ($message.Length -gt 260) {
+            $message = $message.Substring(0, 260) + "..."
+        }
+
+        $levelLabel = [string]$eventEntry.LevelDisplayName
+        if ([string]::IsNullOrWhiteSpace($levelLabel)) {
+            $levelLabel = "Level " + ([string]$eventEntry.Level)
+        }
+
+        $line = ("  {0:u} {1} {2}: {3}" -f $eventEntry.TimeCreated, $levelLabel, $eventEntry.ProviderName, $message)
+        [Console]::Out.WriteLine($line)
+    }
+}
+
 function Test-SatelliteStartup {
     param(
         [datetime]$Since
@@ -1931,13 +1977,16 @@ function Test-SatelliteStartup {
         }
 
         $events = Get-RelevantApplicationEvents -Since $Since -MaxEvents 8
+        $startupErrors = @()
         foreach ($eventEntry in $events) {
-            $message = [string]$eventEntry.Message
-            if ($message.IndexOf("starting with roles: sources", [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                Write-EventEntries -Events $events
-                Write-InfoLine "Verified startup event confirming the sources role."
-                return
+            if (Test-StartupErrorEvent -EventEntry $eventEntry) {
+                $startupErrors += $eventEntry
             }
+        }
+
+        if ($startupErrors.Count -gt 0) {
+            Write-StartupEventEntries -Events $events
+            Stop-WithMessage "Service $script:ServiceName reached Running, but new Viegard.PipelineHost Error-level Application event(s) appeared during startup."
         }
 
         if ($attempt -lt 6) {
@@ -1945,8 +1994,8 @@ function Test-SatelliteStartup {
         }
     }
 
-    Write-EventEntries -Events $events
-    Stop-WithMessage "The service is Running, but no Application event confirming roles [sources] was found within 30 seconds."
+    Write-StartupEventEntries -Events $events
+    Write-InfoLine "Service $script:ServiceName is Running; no startup errors in the Application log."
 }
 
 function Start-SatelliteService {

@@ -20,6 +20,11 @@ h1:focus {
     outline: none;
 }
 
+html {
+    /* Fragment jumps must land below the sticky header. */
+    scroll-padding-top: 5rem;
+}
+
 .valid.modified:not([type=checkbox]) {
     outline: 1px solid var(--ok);
 }
@@ -64,6 +69,12 @@ a:hover {
     padding: 0.65rem 1.5rem;
     background: #0f1218;
     border-bottom: 2px solid var(--accent);
+    /* Keep the navigation and the refresh/status indicators in view.  The
+       sticky companions: html scroll-padding-top keeps fragment jumps from
+       landing under the bar, and .page-index offsets its own sticky top. */
+    position: sticky;
+    top: 0;
+    z-index: 100;
 }
 
 .admin-header a {
@@ -104,6 +115,52 @@ a:hover {
 .admin-nav a:hover {
     color: var(--ink);
     background: var(--bg-raised);
+}
+
+/* Refresh-activity indicator (header) and per-table age captions */
+
+.refresh-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.refresh-indicator.stale {
+    color: var(--accent-strong);
+}
+
+.refresh-arrow {
+    display: inline-block;
+    width: 0.85rem;
+    height: 0.85rem;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+}
+
+.refresh-arrow.spinning {
+    animation: refresh-spin 0.8s linear infinite;
+}
+
+@keyframes refresh-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .refresh-arrow.spinning {
+        animation: none;
+    }
+}
+
+.refresh-caption {
+    margin: 0.35rem 0 0;
+    color: var(--muted);
+    font-size: 0.82rem;
 }
 
 /* Breadcrumbs */
@@ -155,7 +212,7 @@ a:hover {
 
 .page-index {
     position: sticky;
-    top: 1.25rem;
+    top: 5rem;
     align-self: start;
     display: flex;
     flex-direction: column;

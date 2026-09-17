@@ -18,6 +18,9 @@
                 <a href="/account">Account</a>
             </nav>
             <div class="header-side">
+                <span class="refresh-indicator" data-refresh-indicator data-refresh-host="nav" title="Live values refresh automatically." hidden>
+                    <span class="refresh-arrow" aria-hidden="true"></span><span data-refresh-age></span>
+                </span>
                 <a class="status-dot-link" href="/queues" title="Worst queue or instance telemetry light; refreshes every @_refreshSeconds seconds.">
                     <span class="status-dot @_statusCss" data-status-dot data-refresh-ms="@(_refreshSeconds * 1000)"></span><span data-status-label>@_statusLabel</span>
                 </a>

@@ -122,7 +122,8 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IEventStore, InMemoryEventStore>();
         builder.Services.AddSingleton<IIncidentStore, InMemoryIncidentStore>();
         builder.Services.AddSingleton<IClassificationStore, InMemoryClassificationStore>();
-        builder.Services.AddSingleton<IDecisionStore, InMemoryDecisionStore>();
+        builder.Services.AddSingleton<IDecisionStore>(sp =>
+            new InMemoryDecisionStore(sp.GetRequiredService<IClassificationStore>() as InMemoryClassificationStore));
         builder.Services.AddSingleton<IActionStore, InMemoryActionStore>();
         builder.Services.AddSingleton<ICorrectionStore, InMemoryCorrectionStore>();
         builder.Services.AddSingleton<IAdminUserStore, InMemoryAdminUserStore>();

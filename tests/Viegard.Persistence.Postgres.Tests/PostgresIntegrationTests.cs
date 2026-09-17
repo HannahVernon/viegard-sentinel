@@ -607,6 +607,20 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var decisionJumpPage = await decisionStore.ListPageAsync(decisionJumpCursor, pageSize: 2, filter: decisionFilter, sort: classificationSort);
         Assert.Equal(decisionPage2.Items.Select(d => d.Id), decisionJumpPage.Items.Select(d => d.Id));
 
+        var severitySort = new ListSort<DecisionSortColumn>(DecisionSortColumn.Severity, SortDirection.Desc);
+        var severityPage1 = await decisionStore.ListPageAsync(beforeId: null, pageSize: 2, filter: decisionFilter, sort: severitySort);
+        var severityPage2 = await decisionStore.ListPageAsync(severityPage1.NextCursor, pageSize: 2, filter: decisionFilter, sort: severitySort);
+        Assert.Equal([decisionC.Id, decisionB.Id], severityPage1.Items.Select(d => d.Id));
+        Assert.Equal(decisionA.Id, Assert.Single(severityPage2.Items).Id);
+        var severityJumpCursor = await decisionStore.GetPageCursorAsync(2, 2, decisionFilter, severitySort);
+        var severityJumpPage = await decisionStore.ListPageAsync(severityJumpCursor, pageSize: 2, filter: decisionFilter, sort: severitySort);
+        Assert.Equal(severityPage2.Items.Select(d => d.Id), severityJumpPage.Items.Select(d => d.Id));
+
+        var minSeverityFilter = new DecisionListFilter(prefix, null, MinSeverity: 5);
+        var minSeverityPage = await decisionStore.ListPageAsync(beforeId: null, pageSize: 10, filter: minSeverityFilter, sort: severitySort);
+        Assert.Equal([decisionC.Id, decisionB.Id], minSeverityPage.Items.Select(d => d.Id));
+        Assert.Equal(2, minSeverityPage.TotalCount);
+
         var auditLedger = new PostgresAuditLedger(factory, resolver);
         var auditNone = AuditRecord($"{prefix} audit none", null, now.AddMinutes(1));
         var auditA = AuditRecord($"{prefix} audit a", $"{prefix}-audit-a", now.AddMinutes(2));
@@ -1596,6 +1610,48 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var saved = await store.GetAsync(decision.Id);
         Assert.NotNull(saved!.ReviewedAt);
         Assert.NotNull(saved.ReviewOutcome);
+    }
+
+    [PostgresFact]
+    public async Task Decision_store_bulk_reject_rejects_only_matching_unreviewed_decisions()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var resolver = new ReferenceResolver(factory);
+        var classificationStore = new PostgresClassificationStore(factory, resolver);
+        var store = new PostgresDecisionStore(factory, resolver);
+        var now = DateTimeOffset.UtcNow;
+        var prefix = $"it-bulkreject-{ViegardId.New():N}";
+
+        var lowClassification = CreateClassification($"{prefix}-low", "scanner", 2, now);
+        var highClassification = CreateClassification($"{prefix}-high", "scanner", 8, now);
+        await classificationStore.AddAsync(lowClassification);
+        await classificationStore.AddAsync(highClassification);
+
+        var lowPending = Decision(lowClassification.Id, $"{prefix}-low-pending", DecisionOutcome.RequireApproval, prefix, now);
+        var highPending = Decision(highClassification.Id, $"{prefix}-high-pending", DecisionOutcome.RequireApproval, prefix, now);
+        var lowAuthorized = Decision(lowClassification.Id, $"{prefix}-low-authorized", DecisionOutcome.ActionAuthorized, prefix, now);
+        var lowReviewed = Decision(lowClassification.Id, $"{prefix}-low-reviewed", DecisionOutcome.RequireApproval, prefix, now) with
+        {
+            ReviewedBy = "hannah",
+            ReviewedAt = now.AddMinutes(-1),
+            ReviewOutcome = DecisionReviewOutcome.Approved,
+        };
+        foreach (var item in new[] { lowPending, highPending, lowAuthorized, lowReviewed })
+        {
+            await store.AddAsync(item);
+        }
+
+        var rejected = await store.BulkRejectUnreviewedAsync(3, "operator", now);
+
+        Assert.Equal(1, rejected);
+        var updated = await store.GetAsync(lowPending.Id);
+        Assert.Equal(DecisionReviewOutcome.Rejected, updated!.ReviewOutcome);
+        Assert.Equal("operator", updated.ReviewedBy);
+        Assert.NotNull(updated.ReviewedAt);
+        Assert.Null((await store.GetAsync(highPending.Id))!.ReviewedAt);
+        Assert.Null((await store.GetAsync(lowAuthorized.Id))!.ReviewedAt);
+        Assert.Equal(DecisionReviewOutcome.Approved, (await store.GetAsync(lowReviewed.Id))!.ReviewOutcome);
+        Assert.Equal(0, await store.BulkRejectUnreviewedAsync(3, "operator", now));
     }
 
     [PostgresFact]

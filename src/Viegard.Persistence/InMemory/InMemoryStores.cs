@@ -153,6 +153,9 @@ public sealed class InMemoryClassificationStore : IClassificationStore
     public ValueTask<Classification?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(_classifications.GetValueOrDefault(id));
 
+    internal int? TryGetSeverity(Guid id) =>
+        _classifications.TryGetValue(id, out var classification) ? classification.Severity : null;
+
     public ValueTask<IReadOnlyList<Classification>> ListForSubjectAsync(
         ClassificationSubjectKind subjectKind,
         Guid subjectId,
@@ -173,6 +176,12 @@ public sealed class InMemoryDecisionStore : IDecisionStore
 {
     private readonly object _sync = new();
     private readonly ConcurrentDictionary<Guid, Decision> _decisions = new();
+    private readonly InMemoryClassificationStore? _classifications;
+
+    public InMemoryDecisionStore(InMemoryClassificationStore? classifications = null)
+    {
+        _classifications = classifications;
+    }
 
     public ValueTask AddAsync(Decision decision, CancellationToken cancellationToken = default)
     {
@@ -199,11 +208,11 @@ public sealed class InMemoryDecisionStore : IDecisionStore
         ListSort<DecisionSortColumn>? sort = null,
         CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(InMemoryPaging.Page(
-            InMemoryPaging.ApplyFilter(_decisions.Values, filter),
+            ApplySeverityFilter(InMemoryPaging.ApplyFilter(_decisions.Values, filter), filter),
             beforeId,
             pageSize,
             d => d.Id,
-            InMemoryPaging.DecisionComparison(sort)));
+            Comparison(sort)));
 
     public ValueTask<Guid?> GetPageCursorAsync(
         int pageNumber,
@@ -212,11 +221,24 @@ public sealed class InMemoryDecisionStore : IDecisionStore
         ListSort<DecisionSortColumn>? sort = null,
         CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(InMemoryPaging.PageCursor(
-            InMemoryPaging.ApplyFilter(_decisions.Values, filter),
+            ApplySeverityFilter(InMemoryPaging.ApplyFilter(_decisions.Values, filter), filter),
             pageNumber,
             pageSize,
             d => d.Id,
-            InMemoryPaging.DecisionComparison(sort)));
+            Comparison(sort)));
+
+    private int SeverityOf(Decision decision) =>
+        _classifications?.TryGetSeverity(decision.ClassificationId) ?? 0;
+
+    private IEnumerable<Decision> ApplySeverityFilter(IEnumerable<Decision> source, DecisionListFilter? filter) =>
+        filter?.MinSeverity is { } minSeverity
+            ? source.Where(d => _classifications?.TryGetSeverity(d.ClassificationId) is { } severity && severity >= minSeverity)
+            : source;
+
+    private Comparison<Decision>? Comparison(ListSort<DecisionSortColumn>? sort) =>
+        sort is { Column: DecisionSortColumn.Severity, Direction: SortDirection.Asc or SortDirection.Desc } severitySort
+            ? InMemoryPaging.CompareBy<Decision, int>(SeverityOf, d => d.Id, severitySort.Direction)
+            : InMemoryPaging.DecisionComparison(sort);
 
     public ValueTask<Decision?> TryReviewAsync(
         Guid id,
@@ -242,6 +264,38 @@ public sealed class InMemoryDecisionStore : IDecisionStore
             };
             _decisions[id] = reviewed;
             return ValueTask.FromResult<Decision?>(reviewed);
+        }
+    }
+
+    public ValueTask<int> BulkRejectUnreviewedAsync(
+        int maxSeverity,
+        string reviewedBy,
+        DateTimeOffset reviewedAt,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            var rejected = 0;
+            foreach (var decision in _decisions.Values)
+            {
+                if (decision.Outcome != DecisionOutcome.RequireApproval
+                    || decision.ReviewedAt is not null
+                    || _classifications?.TryGetSeverity(decision.ClassificationId) is not { } severity
+                    || severity > maxSeverity)
+                {
+                    continue;
+                }
+
+                _decisions[decision.Id] = decision with
+                {
+                    ReviewedBy = reviewedBy.Trim(),
+                    ReviewedAt = reviewedAt.ToUniversalTime(),
+                    ReviewOutcome = DecisionReviewOutcome.Rejected,
+                };
+                rejected++;
+            }
+
+            return ValueTask.FromResult(rejected);
         }
     }
 }
@@ -1097,7 +1151,7 @@ internal static class InMemoryPaging
         };
     }
 
-    private static Comparison<T> CompareBy<T, TKey>(
+    internal static Comparison<T> CompareBy<T, TKey>(
         Func<T, TKey> getKey,
         Func<T, Guid> getId,
         SortDirection direction,

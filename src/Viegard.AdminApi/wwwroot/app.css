@@ -446,6 +446,27 @@ a:focus-visible {
     outline-offset: 1px;
 }
 
+/* Checkbox rows: the global block, full-width input styling would break a
+   checkbox onto its own line above its text.  Lay the box beside the label
+   text with the hint wrapping underneath it. */
+.checkbox-label {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 0.55rem;
+    align-items: baseline;
+}
+
+.checkbox-label input[type="checkbox"] {
+    display: inline-block;
+    width: auto;
+    margin: 0;
+}
+
+.checkbox-label .small {
+    grid-column: 2;
+    font-weight: 400;
+}
+
 button {
     margin-top: 0.5rem;
     padding: 0.5rem 1rem;

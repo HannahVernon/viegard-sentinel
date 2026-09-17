@@ -16,6 +16,8 @@ public sealed class HostUpgradeAgentOptions
 
     public string SatelliteScriptPath { get; set; } = string.Empty;
 
+    public string StateDirectory { get; set; } = string.Empty;
+
     public string ClientName { get; set; } = "MDaemon";
 
     public string ScheduledTaskName { get; set; } = DefaultScheduledTaskName;
@@ -25,6 +27,20 @@ public sealed class HostUpgradeAgentOptions
     public TimeSpan StuckStateGracePeriod { get; set; } = TimeSpan.FromMinutes(10);
 
     public bool Enabled => !string.IsNullOrWhiteSpace(Target);
+
+    public string GetStateDirectory()
+    {
+        var normalizedTarget = HostUpgradeCommandPolicy.NormalizeTarget(Target);
+        if (!string.IsNullOrWhiteSpace(StateDirectory))
+        {
+            return Path.GetFullPath(StateDirectory);
+        }
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "Viegard",
+            normalizedTarget);
+    }
 }
 
 public sealed class HostUpgradeAgentOptionsValidator : IValidateOptions<HostUpgradeAgentOptions>
@@ -48,6 +64,7 @@ public sealed class HostUpgradeAgentOptionsValidator : IValidateOptions<HostUpgr
 
         if (!options.Enabled)
         {
+            ValidateStateDirectory();
             return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;
         }
 
@@ -82,6 +99,28 @@ public sealed class HostUpgradeAgentOptionsValidator : IValidateOptions<HostUpgr
             failures.Add("Host upgrade agent scheduled task name is required when Target is configured.");
         }
 
+        ValidateStateDirectory();
+
         return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;
+
+        void ValidateStateDirectory()
+        {
+            if (string.IsNullOrWhiteSpace(options.StateDirectory))
+            {
+                return;
+            }
+
+            try
+            {
+                if (!Path.IsPathFullyQualified(options.StateDirectory))
+                {
+                    failures.Add("Host upgrade agent state directory must be an absolute path when configured.");
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+            {
+                failures.Add("Host upgrade agent state directory must be an absolute path when configured.");
+            }
+        }
     }
 }

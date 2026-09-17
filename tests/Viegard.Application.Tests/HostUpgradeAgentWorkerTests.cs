@@ -26,6 +26,12 @@ public sealed class HostUpgradeAgentWorkerTests
         Assert.False(validator.Validate(Options.DefaultName, new HostUpgradeAgentOptions
         {
             Target = "sat-a",
+            SatelliteScriptPath = "C:\\Viegard\\deploy\\windows\\viegard-satellite.ps1",
+            StateDirectory = "relative-state",
+        }).Succeeded);
+        Assert.False(validator.Validate(Options.DefaultName, new HostUpgradeAgentOptions
+        {
+            Target = "sat-a",
             PollInterval = TimeSpan.FromSeconds(4),
             SatelliteScriptPath = "C:\\Viegard\\deploy\\windows\\viegard-satellite.ps1",
         }).Succeeded);
@@ -64,6 +70,19 @@ public sealed class HostUpgradeAgentWorkerTests
     }
 
     [Fact]
+    public void Options_default_state_directory_uses_program_data_and_target()
+    {
+        var options = new HostUpgradeAgentOptions { Target = "sat-a" };
+
+        var expected = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "Viegard",
+            "sat-a");
+
+        Assert.Equal(expected, options.GetStateDirectory());
+    }
+
+    [Fact]
     public async Task Poll_with_fresh_state_file_does_not_complete_or_claim()
     {
         var testPaths = CreateTestPaths();
@@ -72,10 +91,10 @@ public sealed class HostUpgradeAgentWorkerTests
             var time = new FakeTimeProvider(Now);
             var store = new InMemoryHostUpgradeCommandStore(time);
             var requested = await store.RequestAsync("sat-a", "hannah");
-            WriteStateFile(testPaths.AppDirectory, requested.Id, claimedAt: Now);
+            WriteStateFile(testPaths.StateDirectory, requested.Id, claimedAt: Now);
             var launcher = new RecordingLauncher(testPaths.AppDirectory);
             launcher.CloneHeads.Enqueue(AfterHead);
-            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, testPaths.StateDirectory, time);
 
             await worker.PollOnceAsync();
 
@@ -84,7 +103,7 @@ public sealed class HostUpgradeAgentWorkerTests
             Assert.Empty(launcher.CloneRootCalls);
             Assert.Empty(launcher.ScheduledTaskCalls);
             Assert.Empty(launcher.DetachedLaunches);
-            Assert.True(File.Exists(Path.Combine(testPaths.AppDirectory, StateFileName)));
+            Assert.True(File.Exists(Path.Combine(testPaths.StateDirectory, StateFileName)));
         }
         finally
         {
@@ -103,14 +122,14 @@ public sealed class HostUpgradeAgentWorkerTests
             var requested = await store.RequestAsync("sat-a", "hannah");
             Assert.NotNull(await store.ClaimNextPendingAsync("sat-a"));
             WriteStateFile(
-                testPaths.AppDirectory,
+                testPaths.StateDirectory,
                 requested.Id,
                 claimedAt: Now.Subtract(TimeSpan.FromMinutes(11)),
                 cloneHeadBefore: AfterHead);
             await File.WriteAllTextAsync(Path.Combine(testPaths.AppDirectory, ".deployed-commit"), AfterHead);
             var launcher = new RecordingLauncher(testPaths.AppDirectory);
             launcher.CloneHeads.Enqueue(AfterHead);
-            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, testPaths.StateDirectory, time);
 
             await worker.PollOnceAsync();
 
@@ -118,8 +137,8 @@ public sealed class HostUpgradeAgentWorkerTests
             Assert.Equal(HostUpgradeCommandStatus.Succeeded, command.Status);
             Assert.NotNull(command.Detail);
             Assert.Contains("already matched", command.Detail, StringComparison.Ordinal);
-            Assert.False(File.Exists(Path.Combine(testPaths.AppDirectory, StateFileName)));
-            Assert.False(File.Exists(Path.Combine(testPaths.AppDirectory, TranscriptFileName)));
+            Assert.False(File.Exists(Path.Combine(testPaths.StateDirectory, StateFileName)));
+            Assert.False(File.Exists(Path.Combine(testPaths.StateDirectory, TranscriptFileName)));
             Assert.Empty(launcher.ScheduledTaskCalls);
         }
         finally
@@ -139,13 +158,13 @@ public sealed class HostUpgradeAgentWorkerTests
             var requested = await store.RequestAsync("sat-a", "hannah");
             Assert.NotNull(await store.ClaimNextPendingAsync("sat-a"));
             WriteStateFile(
-                testPaths.AppDirectory,
+                testPaths.StateDirectory,
                 requested.Id,
                 claimedAt: Now.Subtract(TimeSpan.FromMinutes(11)));
             await File.WriteAllTextAsync(Path.Combine(testPaths.AppDirectory, ".deployed-commit"), "cccccccccccccccccccccccccccccccccccccccc");
             var launcher = new RecordingLauncher(testPaths.AppDirectory);
             launcher.CloneHeads.Enqueue(AfterHead);
-            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, testPaths.StateDirectory, time);
 
             await worker.PollOnceAsync();
 
@@ -153,7 +172,7 @@ public sealed class HostUpgradeAgentWorkerTests
             Assert.Equal(HostUpgradeCommandStatus.Failed, command.Status);
             Assert.NotNull(command.Detail);
             Assert.Contains("completion check failed", command.Detail, StringComparison.OrdinalIgnoreCase);
-            Assert.False(File.Exists(Path.Combine(testPaths.AppDirectory, StateFileName)));
+            Assert.False(File.Exists(Path.Combine(testPaths.StateDirectory, StateFileName)));
             Assert.Empty(launcher.ScheduledTaskCalls);
         }
         finally
@@ -173,7 +192,7 @@ public sealed class HostUpgradeAgentWorkerTests
             var completedRequest = await store.RequestAsync("sat-a", "hannah");
             Assert.NotNull(await store.ClaimNextPendingAsync("sat-a"));
             WriteStateFile(
-                testPaths.AppDirectory,
+                testPaths.StateDirectory,
                 completedRequest.Id,
                 claimedAt: Now.Subtract(TimeSpan.FromMinutes(11)),
                 cloneHeadBefore: AfterHead);
@@ -182,7 +201,7 @@ public sealed class HostUpgradeAgentWorkerTests
             launcher.CloneHeads.Enqueue(AfterHead);
             launcher.CloneHeads.Enqueue(BeforeHead);
             launcher.ScheduledResults.Enqueue(new HostUpgradeAgentProcessResult(0, "task started"));
-            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, testPaths.StateDirectory, time);
 
             await worker.PollOnceAsync();
             Assert.Empty(launcher.ScheduledTaskCalls);
@@ -214,12 +233,13 @@ public sealed class HostUpgradeAgentWorkerTests
             var launcher = new RecordingLauncher(testPaths.AppDirectory);
             launcher.CloneHeads.Enqueue(BeforeHead);
             launcher.ScheduledResults.Enqueue(new HostUpgradeAgentProcessResult(0, "task started"));
-            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, testPaths.StateDirectory, time);
 
             await worker.PollOnceAsync();
 
-            var statePath = Path.Combine(testPaths.AppDirectory, StateFileName);
+            var statePath = Path.Combine(testPaths.StateDirectory, StateFileName);
             Assert.True(File.Exists(statePath));
+            Assert.False(File.Exists(Path.Combine(testPaths.AppDirectory, StateFileName)));
             using var stateJson = JsonDocument.Parse(await File.ReadAllTextAsync(statePath));
             Assert.Equal(requested.Id, stateJson.RootElement.GetProperty("commandId").GetGuid());
             Assert.Equal(BeforeHead, stateJson.RootElement.GetProperty("cloneHeadBefore").GetString());
@@ -228,6 +248,46 @@ public sealed class HostUpgradeAgentWorkerTests
 
             var command = Assert.Single(await store.ListRecentAsync("sat-a"));
             Assert.Equal(HostUpgradeCommandStatus.Running, command.Status);
+        }
+        finally
+        {
+            testPaths.Delete();
+        }
+    }
+
+    [Fact]
+    public async Task Worker_uses_configured_state_directory_for_state_and_transcript()
+    {
+        var testPaths = CreateTestPaths();
+        try
+        {
+            var time = new FakeTimeProvider(Now);
+            var store = new InMemoryHostUpgradeCommandStore(time);
+            var requested = await store.RequestAsync("sat-a", "hannah");
+            var launcher = new RecordingLauncher(testPaths.AppDirectory);
+            launcher.CloneHeads.Enqueue(BeforeHead);
+            launcher.CloneHeads.Enqueue(AfterHead);
+            launcher.ScheduledResults.Enqueue(new HostUpgradeAgentProcessResult(1, "missing task"));
+            launcher.DetachedResults.Enqueue(new HostUpgradeAgentProcessResult(0, "detached"));
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, testPaths.StateDirectory, time);
+
+            await worker.PollOnceAsync();
+
+            var launch = Assert.Single(launcher.DetachedLaunches);
+            Assert.Equal(Path.Combine(testPaths.StateDirectory, TranscriptFileName), launch.TranscriptPath);
+            Assert.True(File.Exists(Path.Combine(testPaths.StateDirectory, StateFileName)));
+            Assert.False(File.Exists(Path.Combine(testPaths.AppDirectory, StateFileName)));
+
+            await File.WriteAllTextAsync(Path.Combine(testPaths.AppDirectory, ".deployed-commit"), AfterHead);
+            await File.WriteAllTextAsync(Path.Combine(testPaths.StateDirectory, TranscriptFileName), "completed");
+
+            await worker.RunStartupAsync();
+
+            var command = Assert.Single(await store.ListRecentAsync("sat-a"));
+            Assert.Equal(requested.Id, command.Id);
+            Assert.Equal(HostUpgradeCommandStatus.Succeeded, command.Status);
+            Assert.False(File.Exists(Path.Combine(testPaths.StateDirectory, StateFileName)));
+            Assert.False(File.Exists(Path.Combine(testPaths.StateDirectory, TranscriptFileName)));
         }
         finally
         {
@@ -248,7 +308,7 @@ public sealed class HostUpgradeAgentWorkerTests
             launcher.CloneHeads.Enqueue(BeforeHead);
             launcher.ScheduledResults.Enqueue(new HostUpgradeAgentProcessResult(1, "missing task \u001b[31m"));
             launcher.DetachedResults.Enqueue(new HostUpgradeAgentProcessResult(1, "fallback failed"));
-            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, testPaths.StateDirectory, time);
 
             await worker.PollOnceAsync();
 
@@ -259,7 +319,9 @@ public sealed class HostUpgradeAgentWorkerTests
             Assert.Contains("Could not launch", command.Detail, StringComparison.Ordinal);
             Assert.Contains("fallback failed", command.Detail, StringComparison.Ordinal);
             Assert.DoesNotContain("\u001b", command.Detail, StringComparison.Ordinal);
-            Assert.False(File.Exists(Path.Combine(testPaths.AppDirectory, StateFileName)));
+            var launch = Assert.Single(launcher.DetachedLaunches);
+            Assert.Equal(Path.Combine(testPaths.StateDirectory, TranscriptFileName), launch.TranscriptPath);
+            Assert.False(File.Exists(Path.Combine(testPaths.StateDirectory, StateFileName)));
         }
         finally
         {
@@ -277,12 +339,12 @@ public sealed class HostUpgradeAgentWorkerTests
             var store = new InMemoryHostUpgradeCommandStore(time);
             var requested = await store.RequestAsync("sat-a", "hannah");
             Assert.NotNull(await store.ClaimNextPendingAsync("sat-a"));
-            WriteStateFile(testPaths.AppDirectory, requested.Id);
+            WriteStateFile(testPaths.StateDirectory, requested.Id);
             await File.WriteAllTextAsync(Path.Combine(testPaths.AppDirectory, ".deployed-commit"), AfterHead);
-            await File.WriteAllTextAsync(Path.Combine(testPaths.AppDirectory, TranscriptFileName), "line one\r\nline two\u0001\r\n");
+            await File.WriteAllTextAsync(Path.Combine(testPaths.StateDirectory, TranscriptFileName), "line one\r\nline two\u0001\r\n");
             var launcher = new RecordingLauncher(testPaths.AppDirectory);
             launcher.CloneHeads.Enqueue(AfterHead);
-            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, testPaths.StateDirectory, time);
 
             await worker.RunStartupAsync();
 
@@ -292,8 +354,8 @@ public sealed class HostUpgradeAgentWorkerTests
             Assert.Contains("aaaaaaaaa..bbbbbbbbb", command.Detail, StringComparison.Ordinal);
             Assert.Contains("Transcript tail", command.Detail, StringComparison.Ordinal);
             Assert.DoesNotContain("\u0001", command.Detail, StringComparison.Ordinal);
-            Assert.False(File.Exists(Path.Combine(testPaths.AppDirectory, StateFileName)));
-            Assert.False(File.Exists(Path.Combine(testPaths.AppDirectory, TranscriptFileName)));
+            Assert.False(File.Exists(Path.Combine(testPaths.StateDirectory, StateFileName)));
+            Assert.False(File.Exists(Path.Combine(testPaths.StateDirectory, TranscriptFileName)));
         }
         finally
         {
@@ -311,11 +373,11 @@ public sealed class HostUpgradeAgentWorkerTests
             var store = new InMemoryHostUpgradeCommandStore(time);
             var requested = await store.RequestAsync("sat-a", "hannah");
             Assert.NotNull(await store.ClaimNextPendingAsync("sat-a"));
-            WriteStateFile(testPaths.AppDirectory, requested.Id);
+            WriteStateFile(testPaths.StateDirectory, requested.Id);
             await File.WriteAllTextAsync(Path.Combine(testPaths.AppDirectory, ".deployed-commit"), "cccccccccccccccccccccccccccccccccccccccc");
             var launcher = new RecordingLauncher(testPaths.AppDirectory);
             launcher.CloneHeads.Enqueue(AfterHead);
-            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, testPaths.StateDirectory, time);
 
             await worker.RunStartupAsync();
 
@@ -345,7 +407,7 @@ public sealed class HostUpgradeAgentWorkerTests
             Assert.NotNull(await store.ClaimNextPendingAsync("sat-a"));
             Assert.NotNull(await store.ClaimNextPendingAsync("sat-b"));
             var launcher = new RecordingLauncher(testPaths.AppDirectory);
-            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, testPaths.StateDirectory, time);
 
             await worker.RunStartupAsync();
 
@@ -372,7 +434,7 @@ public sealed class HostUpgradeAgentWorkerTests
             var store = new InMemoryHostUpgradeCommandStore(time);
             await store.RequestAsync("sat-a", "hannah");
             var launcher = new RecordingLauncher(testPaths.AppDirectory) { IsWindows = false };
-            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, time);
+            var worker = CreateWorker(store, launcher, testPaths.ScriptPath, testPaths.StateDirectory, time);
 
             await worker.RunStartupAsync();
             await worker.PollOnceAsync();
@@ -392,6 +454,7 @@ public sealed class HostUpgradeAgentWorkerTests
         InMemoryHostUpgradeCommandStore store,
         RecordingLauncher launcher,
         string scriptPath,
+        string stateDirectory,
         FakeTimeProvider timeProvider,
         string target = "sat-a") =>
         new(
@@ -401,6 +464,7 @@ public sealed class HostUpgradeAgentWorkerTests
                 SatelliteScriptPath = scriptPath,
                 ClientName = "MDaemon",
                 ScheduledTaskName = "ViegardSatelliteMDaemonAutoUpgrade",
+                StateDirectory = stateDirectory,
                 PollInterval = TimeSpan.FromSeconds(5),
                 StuckStateGracePeriod = TimeSpan.FromMinutes(10),
             }),
@@ -410,11 +474,12 @@ public sealed class HostUpgradeAgentWorkerTests
             NullLogger<HostUpgradeAgentWorker>.Instance);
 
     private static void WriteStateFile(
-        string appDirectory,
+        string stateDirectory,
         Guid commandId,
         DateTimeOffset? claimedAt = null,
         string? cloneHeadBefore = BeforeHead)
     {
+        Directory.CreateDirectory(stateDirectory);
         var state = new
         {
             commandId,
@@ -422,13 +487,14 @@ public sealed class HostUpgradeAgentWorkerTests
             cloneHeadBefore,
         };
         var raw = JsonSerializer.Serialize(state, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        File.WriteAllText(Path.Combine(appDirectory, StateFileName), raw);
+        File.WriteAllText(Path.Combine(stateDirectory, StateFileName), raw);
     }
 
     private static TestPaths CreateTestPaths()
     {
         var root = Path.Combine(AppContext.BaseDirectory, "host-upgrade-agent-tests", Guid.NewGuid().ToString("N"));
         var appDirectory = Path.Combine(root, "app");
+        var stateDirectory = Path.Combine(root, "state");
         var cloneRoot = Path.Combine(root, "clone");
         var scriptDirectory = Path.Combine(cloneRoot, "deploy", "windows");
         Directory.CreateDirectory(appDirectory);
@@ -436,7 +502,7 @@ public sealed class HostUpgradeAgentWorkerTests
         Directory.CreateDirectory(scriptDirectory);
         var scriptPath = Path.Combine(scriptDirectory, "viegard-satellite.ps1");
         File.WriteAllText(scriptPath, "# test");
-        return new TestPaths(root, appDirectory, scriptPath);
+        return new TestPaths(root, appDirectory, stateDirectory, scriptPath);
     }
 
     private sealed class RecordingLauncher(string appBaseDirectory) : IHostUpgradeAgentLauncher
@@ -486,7 +552,7 @@ public sealed class HostUpgradeAgentWorkerTests
         }
     }
 
-    private sealed record TestPaths(string Root, string AppDirectory, string ScriptPath)
+    private sealed record TestPaths(string Root, string AppDirectory, string StateDirectory, string ScriptPath)
     {
         public void Delete()
         {

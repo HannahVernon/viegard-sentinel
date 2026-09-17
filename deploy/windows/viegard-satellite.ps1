@@ -128,6 +128,7 @@ $script:ServiceDescription = $null
 $script:DeployedCommitFileName = ".deployed-commit"
 $script:AutoUpgradeTaskNamePrefix = "ViegardSatellite"
 $script:AutoUpgradeTaskNameSuffix = "AutoUpgrade"
+$script:HostUpgradeStateRootName = "Viegard"
 
 foreach ($providedName in $PSBoundParameters.Keys) {
     $script:ProvidedParameters[$providedName] = $true
@@ -784,6 +785,21 @@ function Get-HostUpgradeTargetValue {
     }
 }
 
+function Get-HostUpgradeStateDirectory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Target
+    )
+
+    $normalizedTarget = $Target.Trim()
+    if (-not (Test-HostUpgradeTarget -Target $normalizedTarget)) {
+        Stop-WithMessage "Host upgrade state directory cannot be resolved because the target is invalid: $Target"
+    }
+
+    $programDataRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)
+    return [System.IO.Path]::Combine($programDataRoot, $script:HostUpgradeStateRootName, $normalizedTarget)
+}
+
 function Read-SecureValue {
     while ($true) {
         $secureValue = Read-Host -Prompt "PostgreSQL password" -AsSecureString
@@ -1306,6 +1322,7 @@ function New-SatelliteConfigurationJson {
             HostUpgradeAgent = [ordered]@{
                 Target = $InstallerConfig.HostUpgradeTarget
                 SatelliteScriptPath = $InstallerConfig.SatelliteScriptPath
+                StateDirectory = $InstallerConfig.StateDirectory
                 ClientName = $InstallerConfig.Client
                 ScheduledTaskName = $InstallerConfig.AutoUpgradeTaskName
             }
@@ -1401,9 +1418,11 @@ function New-HostUpgradeAgentConfiguration {
         [string]$RepositoryRoot
     )
 
+    $target = Get-HostUpgradeTargetValue
     return [pscustomobject][ordered]@{
-        Target = Get-HostUpgradeTargetValue
+        Target = $target
         SatelliteScriptPath = Get-SatelliteScriptPath -RepositoryRoot $RepositoryRoot
+        StateDirectory = Get-HostUpgradeStateDirectory -Target $target
         ClientName = $script:ClientProfile.Name
         ScheduledTaskName = Get-AutoUpgradeTaskName
     }
@@ -1455,11 +1474,20 @@ function Merge-SatelliteConfiguration {
         $changed = $true
     }
     elseif (Test-ConfigurationObject -Value $agentProperty.Value) {
+        $configuredTarget = $null
         if ($null -eq $agentProperty.Value.PSObject.Properties["Target"]) {
-            Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "Target" -Value (Get-HostUpgradeTargetValue) -Changed ([ref]$changed)
+            $configuredTarget = Get-HostUpgradeTargetValue
+            Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "Target" -Value $configuredTarget -Changed ([ref]$changed)
+        }
+        else {
+            $configuredTarget = [string]$agentProperty.Value.Target
         }
 
         Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "SatelliteScriptPath" -Value (Get-SatelliteScriptPath -RepositoryRoot $RepositoryRoot) -Changed ([ref]$changed)
+        if (-not [string]::IsNullOrWhiteSpace($configuredTarget)) {
+            Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "StateDirectory" -Value (Get-HostUpgradeStateDirectory -Target $configuredTarget) -Changed ([ref]$changed)
+        }
+
         Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "ClientName" -Value $script:ClientProfile.Name -Changed ([ref]$changed)
         Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "ScheduledTaskName" -Value (Get-AutoUpgradeTaskName) -Changed ([ref]$changed)
     }
@@ -1574,6 +1602,57 @@ function Grant-ReadAccessToPath {
     $servicePrincipal = $ServiceAccountConfig.AclPrincipal
     Invoke-Icacls -ArgumentList @($Path, "/grant", "${servicePrincipal}:(OI)(CI)RX")
     Write-InfoLine "Granted the selected service account read access to $Path."
+}
+
+function Get-ServiceAclPrincipal {
+    $serviceRecord = Get-ServiceRecord
+    if ($null -eq $serviceRecord -or [string]::IsNullOrWhiteSpace([string]$serviceRecord.StartName)) {
+        return $null
+    }
+
+    $startName = [string]$serviceRecord.StartName
+    if ($startName.Equals("LocalSystem", [StringComparison]::OrdinalIgnoreCase)) {
+        return "NT AUTHORITY\SYSTEM"
+    }
+
+    if ($startName.Equals("LocalService", [StringComparison]::OrdinalIgnoreCase)) {
+        return "NT AUTHORITY\LOCAL SERVICE"
+    }
+
+    if ($startName.Equals("NetworkService", [StringComparison]::OrdinalIgnoreCase)) {
+        return "NT AUTHORITY\NETWORK SERVICE"
+    }
+
+    return $startName
+}
+
+function Set-HostUpgradeStateDirectoryAcl {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$StateDirectory,
+
+        [pscustomobject]$ServiceAccountConfig
+    )
+
+    New-Directory -Path $StateDirectory
+    if ($null -ne $ServiceAccountConfig) {
+        $servicePrincipal = $ServiceAccountConfig.AclPrincipal
+    }
+    else {
+        $servicePrincipal = Get-ServiceAclPrincipal
+    }
+
+    if ([string]::IsNullOrWhiteSpace($servicePrincipal)) {
+        Write-WarnLine "Could not determine the service account; leaving the host upgrade state directory ACL unchanged."
+        return
+    }
+
+    Invoke-Icacls -ArgumentList @(
+        $StateDirectory,
+        "/grant:r",
+        "${servicePrincipal}:(OI)(CI)M"
+    )
+    Write-InfoLine "Granted the selected service account modify access to $StateDirectory."
 }
 
 function Grant-ClientProfileAccess {
@@ -1900,6 +1979,32 @@ function Read-ConfigFile {
     }
 }
 
+function Get-ConfiguredHostUpgradeStateDirectory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InstallRoot
+    )
+
+    $configuration = Read-ConfigFile -InstallRoot $InstallRoot
+    if ($null -ne $configuration -and $null -ne $configuration.PSObject.Properties["Viegard"] -and $null -ne $configuration.Viegard) {
+        $viegardSection = $configuration.Viegard
+        if ($null -eq $viegardSection.PSObject.Properties["HostUpgradeAgent"]) {
+            return Get-HostUpgradeStateDirectory -Target (Get-DefaultHostUpgradeTarget)
+        }
+
+        $agentSection = $viegardSection.HostUpgradeAgent
+        if ($null -ne $agentSection -and $null -ne $agentSection.PSObject.Properties["StateDirectory"] -and (-not [string]::IsNullOrWhiteSpace([string]$agentSection.StateDirectory))) {
+            return [string]$agentSection.StateDirectory
+        }
+
+        if ($null -ne $agentSection -and $null -ne $agentSection.PSObject.Properties["Target"] -and (-not [string]::IsNullOrWhiteSpace([string]$agentSection.Target))) {
+            return Get-HostUpgradeStateDirectory -Target ([string]$agentSection.Target)
+        }
+    }
+
+    return Get-HostUpgradeStateDirectory -Target (Get-DefaultHostUpgradeTarget)
+}
+
 function Get-InstallConfiguration {
     $effectiveInstallDir = Get-EffectiveInstallDir
     $appDirectory = Join-Path $effectiveInstallDir "app"
@@ -1985,6 +2090,7 @@ function Get-InstallConfiguration {
     }
 
     $upgradeTarget = Get-HostUpgradeTargetValue
+    $stateDirectory = Get-HostUpgradeStateDirectory -Target $upgradeTarget
     $repositoryRoot = Get-RepositoryRoot
     $satelliteScriptPath = Get-SatelliteScriptPath -RepositoryRoot $repositoryRoot
     $autoUpgradeTaskName = Get-AutoUpgradeTaskName
@@ -2016,6 +2122,7 @@ function Get-InstallConfiguration {
         PostgresPassword = $databasePassword
         InstanceId = $hostInstanceId
         HostUpgradeTarget = $upgradeTarget
+        StateDirectory = $stateDirectory
         SatelliteScriptPath = $satelliteScriptPath
         AutoUpgradeTaskName = $autoUpgradeTaskName
     }
@@ -2034,6 +2141,7 @@ function Write-InstallSummary {
     [Console]::Out.WriteLine("  Install dir:  " + $InstallerConfig.InstallDir)
     [Console]::Out.WriteLine("  Instance ID:  " + $InstallerConfig.InstanceId)
     [Console]::Out.WriteLine("  Upgrade target: " + $InstallerConfig.HostUpgradeTarget)
+    [Console]::Out.WriteLine("  Upgrade state: " + $InstallerConfig.StateDirectory)
     $summaryLines = & $script:ClientProfile.GetSummaryLines $InstallerConfig.ProfileSettings
     foreach ($summaryLine in $summaryLines) {
         [Console]::Out.WriteLine($summaryLine)
@@ -2082,6 +2190,7 @@ function Invoke-Install {
     $executablePath = Join-Path $installerConfig.AppDirectory "Viegard.PipelineHost.exe"
     Set-ServiceRegistration -ExecutablePath $executablePath -ServiceAccountConfig $installerConfig.ServiceAccount
     Set-SecretsAcl -SecretsDirectory $installerConfig.SecretsDirectory -PasswordFile $installerConfig.PasswordFile -ServiceAccountConfig $installerConfig.ServiceAccount
+    Set-HostUpgradeStateDirectoryAcl -StateDirectory $installerConfig.StateDirectory -ServiceAccountConfig $installerConfig.ServiceAccount
     Grant-ClientProfileAccess -InstallerConfig $installerConfig
     Start-SatelliteService
     if (-not $configurationWritten) {
@@ -2134,8 +2243,10 @@ function Invoke-Upgrade {
     $deployedCommit = Get-DeployedCommitMarker -AppDirectory $appDirectory
     $deployedMatchesClone = (-not [string]::IsNullOrWhiteSpace($deployedCommit)) -and $deployedCommit.Equals($afterCommit, [StringComparison]::OrdinalIgnoreCase)
     $configurationMerged = Merge-SatelliteConfiguration -AppDirectory $appDirectory -RepositoryRoot $repositoryRoot
+    $stateDirectory = Get-ConfiguredHostUpgradeStateDirectory -InstallRoot $effectiveInstallDir
 
     if ($deployedMatchesClone -and (-not $Force.IsPresent)) {
+        Set-HostUpgradeStateDirectoryAcl -StateDirectory $stateDirectory
         if ($configurationMerged) {
             Write-InfoLine "Configuration defaults were added; restarting the satellite service to apply them."
             Stop-SatelliteService -AlreadyConfirmed
@@ -2181,6 +2292,7 @@ function Invoke-Upgrade {
 
     $executablePath = Join-Path $appDirectory "Viegard.PipelineHost.exe"
     Set-ServiceRegistration -ExecutablePath $executablePath -ServiceAccountConfig $serviceAccountConfig
+    Set-HostUpgradeStateDirectoryAcl -StateDirectory $stateDirectory -ServiceAccountConfig $serviceAccountConfig
     if ($null -ne $serviceAccountConfig) {
         $secretsDirectory = Join-Path $effectiveInstallDir "secrets"
         $passwordFile = Join-Path $secretsDirectory $script:DatabasePasswordSecretName
@@ -2268,6 +2380,8 @@ function Write-Status {
             Write-InfoLine "Admin UI upgrade target: $upgradeTarget"
         }
 
+        $stateDirectory = Get-ConfiguredHostUpgradeStateDirectory -InstallRoot $effectiveInstallDir
+        Write-InfoLine "Upgrade state directory: $stateDirectory"
         Write-InfoLine "Postgres target: ${databaseHostName}:$databasePort/$databaseName schema $databaseSchema"
         if (Test-TcpConnect -ServerName $databaseHostName -PortNumber $databasePort) {
             Write-InfoLine "Postgres TCP check: reachable."

@@ -7,4 +7,13 @@
 .github/
 docs/
 deploy/secrets/
+# Deployment runtime state lives under deploy/ on the host and must never
+# enter the build context: postgres data, database dumps, DataProtection
+# keys, and the TLS private key.  The build stage runs COPY . ., so anything
+# not excluded here lands in builder layers.
+deploy/data/
+deploy/backups/
+deploy/certs/
+deploy/docker-compose.yml
+.deployed-commit
 *.md

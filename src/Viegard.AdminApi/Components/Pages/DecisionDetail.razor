@@ -35,7 +35,7 @@
         <dl class="detail-list">
             <dt>Created</dt><dd>@Display.Format(_decision.CreatedAt)</dd>
             <dt>Policy</dt><dd>@_decision.PolicyId @_decision.PolicyVersion</dd>
-            <dt>Outcome</dt><dd><span class="@AdminText.OutcomeCss(_decision.Outcome)">@_decision.Outcome</span></dd>
+            <dt>Outcome</dt><dd><span class="@AdminText.OutcomeCss(_decision.Outcome)">@AdminText.DecisionOutcomeLabel(_decision.Outcome)</span></dd>
             <dt>Review</dt><dd>@ReviewStatus</dd>
             <dt>Classification</dt><dd>@ClassificationText</dd>
             <dt>Rationale</dt><dd>@AdminText.Limit(_decision.Rationale)</dd>

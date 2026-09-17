@@ -79,11 +79,20 @@ public static class AdminText
 
     public static string OutcomeCss(DecisionOutcome outcome) => outcome switch
     {
-        DecisionOutcome.Permit => "badge badge-green",
+        DecisionOutcome.ActionAuthorized => "badge badge-green",
         DecisionOutcome.DryRun => "badge badge-blue",
         DecisionOutcome.RequireApproval => "badge badge-amber",
-        DecisionOutcome.Deny => "badge badge-red",
+        DecisionOutcome.RecordOnly => "badge",
         _ => "badge",
+    };
+
+    public static string DecisionOutcomeLabel(DecisionOutcome outcome) => outcome switch
+    {
+        DecisionOutcome.ActionAuthorized => "Action authorized",
+        DecisionOutcome.RecordOnly => "Record only",
+        DecisionOutcome.RequireApproval => "Require approval",
+        DecisionOutcome.DryRun => "Dry run",
+        _ => outcome.ToString(),
     };
 
     public static string PayloadTypeName(EventPayload payload) => payload.GetType().Name;

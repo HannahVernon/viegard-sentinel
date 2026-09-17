@@ -150,9 +150,9 @@ public sealed class ListFilterTests
     public async Task In_memory_decision_filter_combines_boolean_query_and_outcome()
     {
         var store = new InMemoryDecisionStore();
-        var alpha = Decision("it-filter alpha approved", DecisionOutcome.Permit);
-        var beta = Decision("it-filter beta approved", DecisionOutcome.Permit);
-        var blocked = Decision("it-filter beta blocked", DecisionOutcome.Permit);
+        var alpha = Decision("it-filter alpha approved", DecisionOutcome.ActionAuthorized);
+        var beta = Decision("it-filter beta approved", DecisionOutcome.ActionAuthorized);
+        var blocked = Decision("it-filter beta blocked", DecisionOutcome.ActionAuthorized);
         var dryRun = Decision("it-filter alpha dry-run", DecisionOutcome.DryRun);
         foreach (var item in new[] { dryRun, blocked, beta, alpha })
         {
@@ -162,7 +162,7 @@ public sealed class ListFilterTests
         var page = await store.ListPageAsync(
             beforeId: null,
             pageSize: 10,
-            filter: new DecisionListFilter("alpha OR beta -blocked", DecisionOutcome.Permit),
+            filter: new DecisionListFilter("alpha OR beta -blocked", DecisionOutcome.ActionAuthorized),
             sort: new ListSort<DecisionSortColumn>(DecisionSortColumn.Created, SortDirection.Asc));
 
         Assert.Equal([alpha.Id, beta.Id], page.Items.Select(d => d.Id));

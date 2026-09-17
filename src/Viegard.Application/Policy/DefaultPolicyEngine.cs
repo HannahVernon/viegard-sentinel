@@ -42,7 +42,7 @@ public sealed class DefaultPolicyEngine(
         var policyOptions = options.Value;
         var guardrails = new List<GuardrailEvaluation>();
         var rationale = new List<string>();
-        var outcome = DecisionOutcome.Permit;
+        var outcome = DecisionOutcome.ActionAuthorized;
         var denied = false;
         string? targetIp = null;
         Incident? targetIncident = null;
@@ -52,8 +52,8 @@ public sealed class DefaultPolicyEngine(
         if (context.EmergencyStop)
         {
             guardrails.Add(Fail(PolicyGuardrailNames.EmergencyStop, "Emergency stop is engaged."));
-            rationale.Add("Emergency stop engaged; automated action denied.");
-            outcome = DecisionOutcome.Deny;
+            rationale.Add("Emergency stop engaged; decision is record-only.");
+            outcome = DecisionOutcome.RecordOnly;
             denied = true;
         }
         else
@@ -63,7 +63,7 @@ public sealed class DefaultPolicyEngine(
 
         if (denied)
         {
-            guardrails.Add(Skipped(PolicyGuardrailNames.ProtectedAddress, "Skipped because emergency stop already denied action."));
+            guardrails.Add(Skipped(PolicyGuardrailNames.ProtectedAddress, "Skipped because emergency stop already made the decision record-only."));
         }
         else
         {
@@ -82,8 +82,8 @@ public sealed class DefaultPolicyEngine(
                     targetIp is null
                         ? $"{target.Detail}  Treating target as protected fail-closed."
                         : $"Target IP {targetIp} is protected or unparseable."));
-                rationale.Add("Protected-address guardrail denied automated action.");
-                outcome = DecisionOutcome.Deny;
+                rationale.Add("Protected-address guardrail made the decision record-only.");
+                outcome = DecisionOutcome.RecordOnly;
                 denied = true;
             }
             else
@@ -94,7 +94,7 @@ public sealed class DefaultPolicyEngine(
 
         if (denied)
         {
-            guardrails.Add(Skipped(PolicyGuardrailNames.Allowlist, "Skipped because action is already denied."));
+            guardrails.Add(Skipped(PolicyGuardrailNames.Allowlist, "Skipped because the decision is already record-only."));
         }
         else
         {
@@ -102,8 +102,8 @@ public sealed class DefaultPolicyEngine(
             if (allowlistMatched)
             {
                 guardrails.Add(Fail(PolicyGuardrailNames.Allowlist, allowlistDetail));
-                rationale.Add("Allowlist guardrail denied automated action.");
-                outcome = DecisionOutcome.Deny;
+                rationale.Add("Allowlist guardrail made the decision record-only.");
+                outcome = DecisionOutcome.RecordOnly;
                 denied = true;
             }
             else
@@ -114,7 +114,7 @@ public sealed class DefaultPolicyEngine(
 
         if (denied)
         {
-            guardrails.Add(Skipped(PolicyGuardrailNames.Thresholds, "Skipped because action is already denied."));
+            guardrails.Add(Skipped(PolicyGuardrailNames.Thresholds, "Skipped because the decision is already record-only."));
         }
         else
         {
@@ -130,16 +130,16 @@ public sealed class DefaultPolicyEngine(
                 Detail = threshold.Detail,
             });
             rationale.Add(threshold.Rationale);
-            denied = outcome == DecisionOutcome.Deny;
+            denied = outcome == DecisionOutcome.RecordOnly;
         }
 
-        if (denied || outcome != DecisionOutcome.Permit || targetIp is null)
+        if (denied || outcome != DecisionOutcome.ActionAuthorized || targetIp is null)
         {
             guardrails.Add(Skipped(
                 PolicyGuardrailNames.RepeatOffender,
                 denied
-                    ? "Skipped because action is denied."
-                    : "Skipped because no automatic IP action is currently permitted."));
+                    ? "Skipped because the decision is record-only."
+                    : "Skipped because no automatic IP action is currently authorized."));
         }
         else
         {
@@ -173,13 +173,13 @@ public sealed class DefaultPolicyEngine(
         }
 
         var rateCapBreached = false;
-        if (denied || outcome != DecisionOutcome.Permit)
+        if (denied || outcome != DecisionOutcome.ActionAuthorized)
         {
             guardrails.Add(Skipped(
                 PolicyGuardrailNames.RateCaps,
                 denied
-                    ? "Skipped because action is denied."
-                    : "Skipped because no automatic action is currently permitted."));
+                    ? "Skipped because the decision is record-only."
+                    : "Skipped because no automatic action is currently authorized."));
         }
         else
         {
@@ -205,7 +205,7 @@ public sealed class DefaultPolicyEngine(
 
         if (denied)
         {
-            guardrails.Add(Skipped(PolicyGuardrailNames.CircuitBreaker, "Skipped because action is denied."));
+            guardrails.Add(Skipped(PolicyGuardrailNames.CircuitBreaker, "Skipped because the decision is record-only."));
         }
         else
         {
@@ -237,9 +237,9 @@ public sealed class DefaultPolicyEngine(
             }
         }
 
-        if (outcome == DecisionOutcome.Deny)
+        if (outcome == DecisionOutcome.RecordOnly)
         {
-            guardrails.Add(Pass(PolicyGuardrailNames.PostureOverlay, "No posture overlay applied because action is denied."));
+            guardrails.Add(Pass(PolicyGuardrailNames.PostureOverlay, "No posture overlay applied because the decision is record-only."));
         }
         else
         {
@@ -262,12 +262,12 @@ public sealed class DefaultPolicyEngine(
             {
                 guardrails.Add(Fail(
                     PolicyGuardrailNames.PostureOverlay,
-                    $"Posture overlay changed {beforeOverlay} to {outcome}.  ManualApprovalMode={context.ManualApprovalMode}; DryRun={context.DryRun}."));
-                rationale.Add($"Posture overlay changed decision from {beforeOverlay} to {outcome}.");
+                    $"Posture overlay changed {OutcomeLabel(beforeOverlay)} to {OutcomeLabel(outcome)}.  ManualApprovalMode={context.ManualApprovalMode}; DryRun={context.DryRun}."));
+                rationale.Add($"Posture overlay changed decision from {OutcomeLabel(beforeOverlay)} to {OutcomeLabel(outcome)}.");
             }
         }
 
-        if (outcome is DecisionOutcome.Permit or DecisionOutcome.DryRun)
+        if (outcome is DecisionOutcome.ActionAuthorized or DecisionOutcome.DryRun)
         {
             rationale.Add($"Recommended action duration: {FormatDuration(recommendedDuration)}.");
         }
@@ -306,7 +306,7 @@ public sealed class DefaultPolicyEngine(
                 && classification.Severity >= thresholds.ActionMinSeverity)
             {
                 return new ThresholdDecision(
-                    DecisionOutcome.Permit,
+                    DecisionOutcome.ActionAuthorized,
                     true,
                     $"AI gate passed: confidence {classification.Confidence:0.###} >= {thresholds.ActionConfidence:0.###} and severity {classification.Severity} >= {thresholds.ActionMinSeverity}.",
                     "AI classification met the automatic-action band.");
@@ -323,7 +323,7 @@ public sealed class DefaultPolicyEngine(
             }
 
             return new ThresholdDecision(
-                DecisionOutcome.Deny,
+                DecisionOutcome.RecordOnly,
                 false,
                 $"AI gate is below the review band: confidence {classification.Confidence:0.###}, severity {classification.Severity}; review requires confidence >= {thresholds.ReviewConfidence:0.###} and severity >= {thresholds.ActionMinSeverity}.",
                 "AI classification is record-only.");
@@ -332,7 +332,7 @@ public sealed class DefaultPolicyEngine(
         if (classification.Confidence >= thresholds.ActionConfidence)
         {
             return new ThresholdDecision(
-                DecisionOutcome.Permit,
+                DecisionOutcome.ActionAuthorized,
                 true,
                 $"Deterministic gate passed: normalized evidence confidence {classification.Confidence:0.###} >= {thresholds.ActionConfidence:0.###}.  Raw evidence threshold {options.EvidenceScoreBlockThreshold:0.###} is applied upstream by detection.",
                 $"Deterministic classification met the automatic-action band; raw evidence threshold {options.EvidenceScoreBlockThreshold:0.###} is applied upstream.");
@@ -348,7 +348,7 @@ public sealed class DefaultPolicyEngine(
         }
 
         return new ThresholdDecision(
-            DecisionOutcome.Deny,
+            DecisionOutcome.RecordOnly,
             false,
             $"Deterministic gate is below the review band: normalized evidence confidence {classification.Confidence:0.###}; review requires confidence >= {thresholds.ReviewConfidence:0.###}.",
             "Deterministic classification is record-only.");
@@ -441,6 +441,15 @@ public sealed class DefaultPolicyEngine(
 
     private static string FormatDuration(TimeSpan value) =>
         value.ToString(value.TotalDays >= 1 ? @"d\.hh\:mm\:ss" : @"hh\:mm\:ss");
+
+    private static string OutcomeLabel(DecisionOutcome outcome) => outcome switch
+    {
+        DecisionOutcome.ActionAuthorized => "Action authorized",
+        DecisionOutcome.RecordOnly => "Record only",
+        DecisionOutcome.RequireApproval => "Require approval",
+        DecisionOutcome.DryRun => "Dry run",
+        _ => outcome.ToString(),
+    };
 
     private sealed record TargetIpResult(IncidentTargetIpKind Kind, string? Ip, Incident? Incident, string Detail)
     {

@@ -73,7 +73,7 @@ public sealed class PolicyWorker(
                     Id = ViegardId.New(),
                     Timestamp = DateTimeOffset.UtcNow,
                     Stage = PipelineStage.Policy,
-                    Summary = $"Policy produced {decision.Outcome} for classification {classification.Id}.",
+                    Summary = $"Policy produced {OutcomeLabel(decision.Outcome)} for classification {classification.Id}.",
                     IncidentId = classification.SubjectKind == ClassificationSubjectKind.Incident
                         ? classification.SubjectId
                         : null,
@@ -150,11 +150,20 @@ public sealed class PolicyWorker(
         {
             decision.PolicyId,
             decision.PolicyVersion,
-            decision.Outcome,
+            Outcome = OutcomeLabel(decision.Outcome),
             GuardrailCount = decision.Guardrails.Count,
             FailedGuardrails = decision.Guardrails
                 .Where(g => !g.Passed)
                 .Select(g => g.GuardrailName)
                 .ToList(),
         });
+
+    private static string OutcomeLabel(Viegard.Domain.Decisions.DecisionOutcome outcome) => outcome switch
+    {
+        Viegard.Domain.Decisions.DecisionOutcome.ActionAuthorized => "Action authorized",
+        Viegard.Domain.Decisions.DecisionOutcome.RecordOnly => "Record only",
+        Viegard.Domain.Decisions.DecisionOutcome.RequireApproval => "Require approval",
+        Viegard.Domain.Decisions.DecisionOutcome.DryRun => "Dry run",
+        _ => outcome.ToString(),
+    };
 }

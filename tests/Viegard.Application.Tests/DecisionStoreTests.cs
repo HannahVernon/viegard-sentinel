@@ -11,7 +11,7 @@ public sealed class DecisionStoreTests
     {
         var store = new InMemoryDecisionStore();
         var now = DateTimeOffset.UtcNow;
-        var permit = Decision(DecisionOutcome.Permit);
+        var permit = Decision(DecisionOutcome.ActionAuthorized);
         var reviewed = Decision(DecisionOutcome.RequireApproval) with
         {
             ReviewedBy = "hannah",

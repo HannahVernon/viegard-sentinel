@@ -582,7 +582,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         var decisionB = Decision(classificationB.Id, $"{prefix}-policy-b", DecisionOutcome.RequireApproval, prefix, now.AddMinutes(2));
         var decisionA = Decision(classificationA.Id, $"{prefix}-policy-a", DecisionOutcome.DryRun, prefix, now.AddMinutes(1));
-        var decisionC = Decision(classificationC.Id, $"{prefix}-policy-c", DecisionOutcome.Permit, prefix, now.AddMinutes(3));
+        var decisionC = Decision(classificationC.Id, $"{prefix}-policy-c", DecisionOutcome.ActionAuthorized, prefix, now.AddMinutes(3));
         foreach (var item in new[] { decisionB, decisionA, decisionC })
         {
             await decisionStore.AddAsync(item);
@@ -707,9 +707,9 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             await classificationStore.AddAsync(item);
         }
 
-        var decisionAlpha = Decision(classificationAlpha.Id, $"{prefix}-policy-alpha", DecisionOutcome.Permit, $"{prefix} alpha approved", now.AddMinutes(1));
-        var decisionBeta = Decision(classificationBeta.Id, $"{prefix}-policy-beta", DecisionOutcome.Permit, $"{prefix} beta approved", now.AddMinutes(2));
-        var decisionBlocked = Decision(classificationBlocked.Id, $"{prefix}-policy-blocked", DecisionOutcome.Permit, $"{prefix} beta blocked", now.AddMinutes(3));
+        var decisionAlpha = Decision(classificationAlpha.Id, $"{prefix}-policy-alpha", DecisionOutcome.ActionAuthorized, $"{prefix} alpha approved", now.AddMinutes(1));
+        var decisionBeta = Decision(classificationBeta.Id, $"{prefix}-policy-beta", DecisionOutcome.ActionAuthorized, $"{prefix} beta approved", now.AddMinutes(2));
+        var decisionBlocked = Decision(classificationBlocked.Id, $"{prefix}-policy-blocked", DecisionOutcome.ActionAuthorized, $"{prefix} beta blocked", now.AddMinutes(3));
         var decisionDryRun = Decision(classificationDryRun.Id, $"{prefix}-policy-dry-run", DecisionOutcome.DryRun, $"{prefix} alpha dry-run", now.AddMinutes(4));
         foreach (var item in new[] { decisionDryRun, decisionBlocked, decisionBeta, decisionAlpha })
         {
@@ -719,7 +719,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var decisionMatches = await decisionStore.ListPageAsync(
             beforeId: null,
             pageSize: 10,
-            filter: new DecisionListFilter(filterText, DecisionOutcome.Permit),
+            filter: new DecisionListFilter(filterText, DecisionOutcome.ActionAuthorized),
             sort: new ListSort<DecisionSortColumn>(DecisionSortColumn.Created, SortDirection.Asc));
         Assert.Equal([decisionAlpha.Id, decisionBeta.Id], decisionMatches.Items.Select(d => d.Id));
 
@@ -1427,7 +1427,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var resolver = new ReferenceResolver(factory);
         var store = new PostgresDecisionStore(factory, resolver);
         var now = DateTimeOffset.UtcNow;
-        var permit = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-permit", DecisionOutcome.Permit, "review", now);
+        var permit = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-permit", DecisionOutcome.ActionAuthorized, "review", now);
         var pending = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-pending", DecisionOutcome.RequireApproval, "review", now);
         var alreadyReviewed = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-reviewed", DecisionOutcome.RequireApproval, "review", now) with
         {

@@ -217,7 +217,37 @@ public sealed class AdminDecisionEndpointsTests
         context.Response.Body = new MemoryStream();
         await result.ExecuteAsync(context);
         Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
-        return context.Response.Headers.Location.ToString();
+        var location = context.Response.Headers.Location.ToString();
+
+        // Banner messages travel in the protected flash cookie instead of the
+        // query string.  Re-synthesize the legacy query form so assertions
+        // keep verifying the exact user-visible message text.
+        var flash = ReadFlashMessage(context);
+        if (flash is null)
+        {
+            return location;
+        }
+
+        var key = flash.IsError ? "error" : "status";
+        var fragmentStart = location.IndexOf('#', StringComparison.Ordinal);
+        var basePath = fragmentStart < 0 ? location : location[..fragmentStart];
+        var fragment = fragmentStart < 0 ? string.Empty : location[fragmentStart..];
+        var separator = basePath.Contains('?', StringComparison.Ordinal) ? '&' : '?';
+        return $"{basePath}{separator}{key}={Uri.EscapeDataString(flash.Message)}{fragment}";
+    }
+
+    private static AdminFlashMessage? ReadFlashMessage(HttpContext context)
+    {
+        var setCookie = context.Response.Headers.SetCookie
+            .FirstOrDefault(value => value?.StartsWith(AdminFlashMessages.CookieName + "=", StringComparison.Ordinal) == true);
+        if (setCookie is null)
+        {
+            return null;
+        }
+
+        var reader = new DefaultHttpContext { RequestServices = context.RequestServices };
+        reader.Request.Headers.Cookie = setCookie.Split(';')[0];
+        return AdminFlashMessages.Consume(reader);
     }
 
     private static FormCollection ReviewForm(Guid id, string verdict, string? duration) =>
@@ -301,6 +331,7 @@ public sealed class AdminDecisionEndpointsTests
             var services = new ServiceCollection()
                 .AddLogging()
                 .AddSingleton<IOptions<AdminAuthOptions>>(Options.Create(new AdminAuthOptions()))
+                .AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider())
                 .BuildServiceProvider();
 
             var context = new DefaultHttpContext

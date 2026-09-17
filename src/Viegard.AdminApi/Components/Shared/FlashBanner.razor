@@ -1,0 +1,16 @@
+@inject IHttpContextAccessor HttpContextAccessorService
+
+@if (_flash is not null)
+{
+    <p class="@(_flash.IsError ? "message error" : "message")">@_flash.Message</p>
+}
+
+@code {
+    private AdminFlashMessage? _flash;
+
+    protected override void OnInitialized()
+    {
+        var context = HttpContextAccessorService.HttpContext;
+        _flash = context is null ? null : AdminFlashMessages.Consume(context);
+    }
+}

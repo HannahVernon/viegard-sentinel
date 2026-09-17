@@ -20,11 +20,4 @@ public sealed class SafeReturnPathTests
     [InlineData("/x\r\nSet-Cookie: a=b", "/account")]
     public void Return_paths_are_constrained_to_local_relative_paths(string? candidate, string expected) =>
         Assert.Equal(expected, AdminAuthEndpoints.SafeReturnPath(candidate));
-
-    [Theory]
-    [InlineData("/account", "done", "/account?status=done")]
-    [InlineData("/account#totp", "done", "/account?status=done#totp")]
-    [InlineData("/account#totp", null, "/account#totp")]
-    public void Redirect_paths_place_the_query_before_any_fragment(string path, string? status, string expected) =>
-        Assert.Equal(expected, AdminAuthEndpoints.BuildRedirectPath(path, status: status));
 }

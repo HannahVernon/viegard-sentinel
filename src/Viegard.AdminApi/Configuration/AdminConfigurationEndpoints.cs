@@ -1023,7 +1023,7 @@ public static class AdminConfigurationEndpoints
     }
 
     private static IResult Redirect(string path, string? status = null, string? error = null) =>
-        Results.Redirect(AdminAuthEndpoints.BuildRedirectPath(path, status, error));
+        Results.Redirect(path).WithFlash(status: status, error: error);
 
     private static string HostUpgradeRejectionMessage(HostUpgradeCommandRejectedException exception) =>
         exception.Reason switch

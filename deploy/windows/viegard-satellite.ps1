@@ -2632,6 +2632,61 @@ function Get-AutoUpgradeTaskArgumentList {
     ) -join " "
 }
 
+function Get-ServiceAccountIdentity {
+    $service = Get-CimInstance -ClassName Win32_Service -Filter ("Name='" + $script:ServiceName.Replace("'", "''") + "'") -ErrorAction SilentlyContinue
+    $accountName = $null
+    if ($null -ne $service -and -not [string]::IsNullOrWhiteSpace([string]$service.StartName)) {
+        $accountName = [string]$service.StartName
+    }
+    else {
+        $accountName = "NT SERVICE\" + $script:ServiceName
+    }
+
+    if ($accountName.StartsWith(".\", [StringComparison]::Ordinal)) {
+        $accountName = $env:COMPUTERNAME + "\" + $accountName.Substring(2)
+    }
+
+    return $accountName
+}
+
+function Set-AutoUpgradeTaskPermissions {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$TaskName
+    )
+
+    # Task Scheduler's default security descriptor lets only Administrators
+    # and SYSTEM start a task.  The satellite service runs as a non-admin
+    # account and triggers the auto-upgrade task on demand for UI-driven
+    # upgrades, so grant that account read and execute on the task.
+    $accountName = Get-ServiceAccountIdentity
+    $accountSid = $null
+    try {
+        $account = New-Object System.Security.Principal.NTAccount($accountName)
+        $accountSid = ($account.Translate([System.Security.Principal.SecurityIdentifier])).Value
+    }
+    catch {
+        Write-WarnLine ("Could not resolve a SID for service account " + $accountName + ".  UI-driven upgrades will fail with access denied until the service account is granted permission to start scheduled task " + $TaskName + ".")
+        return
+    }
+
+    try {
+        $scheduler = New-Object -ComObject "Schedule.Service"
+        $scheduler.Connect()
+        $task = $scheduler.GetFolder("\").GetTask($TaskName)
+        $sddl = [string]$task.GetSecurityDescriptor(7)
+        if ($sddl -like ("*" + $accountSid + "*")) {
+            return
+        }
+
+        $task.SetSecurityDescriptor(($sddl + "(A;;GRGX;;;" + $accountSid + ")"), 0)
+        Write-InfoLine ("Granted " + $accountName + " permission to read and start scheduled task " + $TaskName + ".")
+    }
+    catch {
+        Write-WarnLine ("Could not grant " + $accountName + " permission to start scheduled task " + $TaskName + ": " + $_.Exception.Message)
+    }
+}
+
 function Update-AutoUpgradeTaskAction {
     param(
         [Parameter(Mandatory = $true)]
@@ -2643,6 +2698,8 @@ function Update-AutoUpgradeTaskAction {
     if ($null -eq $task) {
         return
     }
+
+    Set-AutoUpgradeTaskPermissions -TaskName $taskName
 
     $expectedScriptPath = Get-SatelliteScriptPath -RepositoryRoot $RepositoryRoot
     $needsUpdate = $false
@@ -2692,6 +2749,7 @@ function Register-AutoUpgradeTask {
         -Description ("Runs Viegard satellite upgrade for " + $script:ClientProfile.Name + " as SYSTEM.") `
         -Force | Out-Null
 
+    Set-AutoUpgradeTaskPermissions -TaskName $taskName
     Write-InfoLine ("Registered scheduled task " + $taskName + " to run " + $scheduleText + " at " + $Time + " local time.")
     Write-InfoLine ("Task action: powershell.exe " + $argumentList)
 }

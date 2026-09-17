@@ -30,6 +30,9 @@ internal sealed record HostUpgradeAgentProcessResult(int ExitCode, string Output
 
 internal sealed class ProcessHostUpgradeAgentLauncher : IHostUpgradeAgentLauncher
 {
+    internal static readonly TimeSpan DetachedTranscriptTimeout = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan DetachedTranscriptPollInterval = TimeSpan.FromSeconds(1);
+
     public bool IsWindows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 
     public string AppBaseDirectory => AppContext.BaseDirectory;
@@ -80,11 +83,60 @@ internal sealed class ProcessHostUpgradeAgentLauncher : IHostUpgradeAgentLaunche
         }
 
         var command = BuildElevatedLaunchCommand(satelliteScriptPath, clientName, transcriptPath);
-        return await RunProcessAsync(
+        var result = await RunProcessAsync(
             "powershell.exe",
             ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
             workingDirectory: Path.GetDirectoryName(Path.GetFullPath(satelliteScriptPath)),
             cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return result;
+        }
+
+        // Start-Process -Verb RunAs can report success while the elevated
+        // process never starts: a non-admin service account in session 0 has
+        // no elevation path, and the failure does not propagate to the outer
+        // process's exit code.  Trust only the transcript the inner process
+        // writes; if it never appears, the fallback did not actually run.
+        var transcriptAppeared = await WaitForFileAsync(
+            transcriptPath,
+            DetachedTranscriptTimeout,
+            DetachedTranscriptPollInterval,
+            cancellationToken).ConfigureAwait(false);
+        if (!transcriptAppeared)
+        {
+            return new HostUpgradeAgentProcessResult(
+                -1,
+                "The detached upgrade launch reported success, but no transcript appeared at "
+                    + transcriptPath
+                    + $" within {DetachedTranscriptTimeout.TotalSeconds:0} seconds.  The service account most likely cannot elevate.  "
+                    + "Run the satellite installer upgrade from an elevated session so it grants the service account permission to start the auto-upgrade scheduled task.");
+        }
+
+        return result;
+    }
+
+    internal static async ValueTask<bool> WaitForFileAsync(
+        string path,
+        TimeSpan timeout,
+        TimeSpan pollInterval,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (true)
+        {
+            if (File.Exists(path))
+            {
+                return true;
+            }
+
+            if (stopwatch.Elapsed >= timeout)
+            {
+                return false;
+            }
+
+            await Task.Delay(pollInterval, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private static string BuildElevatedLaunchCommand(

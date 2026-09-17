@@ -139,6 +139,7 @@ $dbPassword = Read-Host -Prompt "PostgreSQL password" -AsSecureString
     -PostgresPassword $dbPassword `
     -PostgresSchema viegard `
     -InstanceId mdaemon-mail01 `
+    -HostUpgradeTarget mail01 `
     -MDaemonLogKinds SmtpIn,SmtpOut,Imap,Pop3,Screening,DynamicScreening
 ```
 
@@ -159,6 +160,7 @@ The installer asks for:
 - PostgreSQL password as a `SecureString`.  Existing secret files are kept and not overwritten.
 - PostgreSQL schema.  Default: `viegard`.
 - Instance ID.  This is required and has no default because instance IDs must be unique across every host that runs a satellite.  The prompt suggests `mdaemon-<hostname>`.
+- Admin UI upgrade target.  Default: the lowercase Windows computer name.  It must use lowercase letters, digits, dash, and underscore, and it must not be `vm`.
 - MDaemon log kinds.  Valid values are `SmtpIn`, `SmtpOut`, `Imap`, `Pop3`, `Screening`, and `DynamicScreening`.  The default is all supported kinds.
 
 Before changing files or services, the installer checks that the log directory is readable and that the PostgreSQL host and port accept TCP connections.  If PostgreSQL is unreachable, the installer continues only after explicit confirmation.
@@ -174,7 +176,7 @@ Choice | Account | Trade-off
 ### What the installer creates
 
 - A self-contained win-x64 publish of `src\Viegard.PipelineHost` under `C:\Program Files\Viegard Satellite\MDaemon\app`.
-- `appsettings.Production.json` in the publish output.  It sets `Viegard:WindowsService:ServiceName` to `ViegardSatelliteMDaemon`, sets `Viegard:Host:Roles` to `["sources"]`, configures PostgreSQL persistence, points the file secret provider at the local secrets directory, enables the MDaemon source, and sets `Viegard:Database:AutoMigrate` to `false`.
+- `appsettings.Production.json` in the publish output.  It sets `Viegard:WindowsService:ServiceName` to `ViegardSatelliteMDaemon`, sets `Viegard:Host:Roles` to `["sources"]`, configures `Viegard:HostUpgradeAgent` for this satellite target, configures PostgreSQL persistence, points the file secret provider at the local secrets directory, enables the MDaemon source, and sets `Viegard:Database:AutoMigrate` to `false`.
 - `C:\Program Files\Viegard Satellite\MDaemon\secrets\viegard-db-password`, never printed and never stored in JSON.
 - Windows service `ViegardSatelliteMDaemon`, display name `Viegard Satellite Pipeline (MDaemon)`, delayed automatic start, and restart recovery at 1, 5, and 15 minutes.
 - Registry environment value `DOTNET_ENVIRONMENT=Production` for the service.
@@ -194,6 +196,8 @@ Set-Location C:\Viegard
 ```
 
 The upgrade command detects the repository root from the script path, refuses to run with local git changes, fetches origin, reports incoming commits, and runs `git pull --ff-only`.  It then compares the current clone HEAD with `app\.deployed-commit` under the resolved install directory.  It stops the service, republishes the app, preserves `appsettings.Production.json` and `secrets\viegard-db-password`, restarts the service, and verifies startup when the marker is missing, differs from clone HEAD, or `-Force` is supplied.  It exits without republishing only when the marker exists and matches clone HEAD.  Every successful publish writes the clone's full HEAD SHA to `app\.deployed-commit`.
+
+Upgrade also performs a non-destructive configuration merge after the preserved JSON is restored.  Missing `Viegard:Database:MaxPoolSize` is added with value `8`, and missing `Viegard:HostUpgradeAgent` keys are added from the current client profile, script path, scheduled-task name, and prompted upgrade target.  Existing values are not overwritten.  If the binaries are already current but the merge adds defaults, the script restarts the service so the new settings take effect.  With `-Yes`, the upgrade target prompt accepts the lowercase machine-name default.
 
 ## Scheduled auto-upgrade
 
@@ -221,13 +225,30 @@ The task action runs from the clone directory and invokes:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File <clone>\deploy\windows\viegard-satellite.ps1 upgrade -Client MDaemon -Yes
 ```
 
+The task name for the MDaemon profile is `ViegardSatelliteMDaemonAutoUpgrade`.  The installer writes the same name into `Viegard:HostUpgradeAgent:ScheduledTaskName`, so the service-side upgrade agent and the registered scheduled task stay aligned.
+
 The upgrade command exits quickly when the deployed marker matches clone HEAD, so the scheduled task is safe to leave in place.  Remove it with:
 
 ```powershell
 .\deploy\windows\viegard-satellite.ps1 unregister-autoupgrade -Client MDaemon
 ```
 
-Database-commanded satellite upgrades are future work.  This version keeps satellite auto-upgrades local to each Windows host and based on the clone's configured git upstream.
+## UI-driven satellite upgrades
+
+The Admin UI can request a satellite upgrade from **Configuration** -> **Upgrades** by selecting a known target or typing a new one.  Known targets come from prior upgrade command history plus `vm`; typing a new target is valid as long as it follows the same lowercase target character set.  A request only queues a fixed-verb row in `host_upgrade_commands`; it does not give the Admin UI Windows execution rights.
+
+Each Windows satellite claims only the target written in its local `Viegard:HostUpgradeAgent:Target` setting.  The MDaemon installer writes this section during install, and upgrades merge it into older preserved configurations without changing existing values.  The default target is the lowercase Windows computer name, so each host naturally has a distinct target unless the operator chooses another valid value.
+
+When the service claims a command, it writes a state file beside the published app, records the clone HEAD before the upgrade, and tries to run the scheduled task first.  The scheduled task runs as `SYSTEM` with highest privileges and executes the same git-based `upgrade -Client MDaemon -Yes` command documented above.  If the task cannot be started, the worker falls back to a detached elevated PowerShell launch and writes transcript output beside the state file.
+
+Completion is reported by the service after it restarts.  On startup, the worker reads the state file, reads `app\.deployed-commit`, reads the clone HEAD from the script's repository, and marks the command succeeded only when the marker and clone HEAD match.  The command detail contains the before-and-after short commits and a bounded transcript tail when one exists.
+
+Status meanings in the Admin UI:
+
+- `Pending`: the command has been queued but no agent for that target has claimed it yet.  This is expected if the target is mistyped or the satellite is offline.
+- `Running`: an agent claimed the command and launched the upgrade path.  If the upgrade never brings the service back, it remains Running until the agent starts again and reconciles the local state.
+- `Succeeded`: the restarted service verified that `.deployed-commit` matches clone HEAD.
+- `Failed`: the agent could not launch the upgrade, the restarted service found a marker mismatch, or startup reconciliation found a Running command for its target with no local state file.
 
 ## Status
 

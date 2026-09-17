@@ -231,6 +231,20 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Request_host_upgrade_checks_step_up_before_target_validation()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        fixture.Context.Request.Form = HostUpgradeForm(newTarget: "Invalid Target");
+
+        var result = await fixture.InvokeRequestHostUpgradeAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.DoesNotContain("Target%20must%20use", location, StringComparison.Ordinal);
+        Assert.Empty(await fixture.HostUpgrades.ListRecentAsync());
+    }
+
+    [Fact]
     public async Task Save_ingestion_filters_requires_step_up_before_mutating()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
@@ -355,6 +369,37 @@ public sealed class AdminConfigurationEndpointsTests
         Assert.Contains("\"target\":\"vm\"", audit.DetailJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("hannah", audit.DetailJson, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("parameter", audit.DetailJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Request_host_upgrade_accepts_freeform_new_target()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        fixture.Context.Request.Form = HostUpgradeForm(newTarget: "mdaemon-mail01");
+
+        var result = await fixture.InvokeRequestHostUpgradeAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("mdaemon-mail01", Uri.UnescapeDataString(location), StringComparison.Ordinal);
+        var command = Assert.Single(await fixture.HostUpgrades.ListRecentAsync());
+        Assert.Equal("mdaemon-mail01", command.Target);
+
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("\"target\":\"mdaemon-mail01\"", audit.DetailJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Request_host_upgrade_rejects_invalid_target_charset()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        fixture.Context.Request.Form = HostUpgradeForm(newTarget: "MDaemon Mail01");
+
+        var result = await fixture.InvokeRequestHostUpgradeAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Target%20must%20use", location, StringComparison.Ordinal);
+        Assert.Empty(await fixture.HostUpgrades.ListRecentAsync());
+        Assert.Empty(fixture.AuditLedger.Records);
     }
 
     [Fact]
@@ -498,11 +543,21 @@ public sealed class AdminConfigurationEndpointsTests
         return new FormCollection(values);
     }
 
-    private static FormCollection HostUpgradeForm() => new(
-        new Dictionary<string, StringValues>(StringComparer.Ordinal)
+    private static FormCollection HostUpgradeForm(
+        string target = HostUpgradeCommandPolicy.DefaultTarget,
+        string? newTarget = null)
+    {
+        var values = new Dictionary<string, StringValues>(StringComparer.Ordinal)
         {
-            ["target"] = HostUpgradeCommandPolicy.DefaultTarget,
-        });
+            ["target"] = target,
+        };
+        if (newTarget is not null)
+        {
+            values["newTarget"] = newTarget;
+        }
+
+        return new FormCollection(values);
+    }
 
     private static FormCollection ThresholdForm(int rowVersion, double reviewConfidence, double actionConfidence, int severity) => new(
         new Dictionary<string, StringValues>(StringComparer.Ordinal)

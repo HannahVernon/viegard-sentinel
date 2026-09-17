@@ -45,6 +45,31 @@ public sealed class HostUpgradeCommandStoreTests
     }
 
     [Fact]
+    public async Task In_memory_store_lists_default_target_then_distinct_recent_targets()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 9, 16, 22, 0, 0, TimeSpan.Zero));
+        var store = new InMemoryHostUpgradeCommandStore(time);
+
+        var firstSatellite = await store.RequestAsync("sat-a", "hannah");
+        var firstClaim = await store.ClaimNextPendingAsync("sat-a");
+        Assert.NotNull(firstClaim);
+        await store.CompleteAsync(firstSatellite.Id, succeeded: true, detail: "ok");
+
+        time.Advance(HostUpgradeCommandPolicy.Cooldown.Add(TimeSpan.FromSeconds(1)));
+        var secondSatellite = await store.RequestAsync("sat-b", "hannah");
+        var secondClaim = await store.ClaimNextPendingAsync("sat-b");
+        Assert.NotNull(secondClaim);
+        await store.CompleteAsync(secondSatellite.Id, succeeded: true, detail: "ok");
+
+        time.Advance(HostUpgradeCommandPolicy.Cooldown.Add(TimeSpan.FromSeconds(1)));
+        await store.RequestAsync("sat-a", "hannah");
+
+        var targets = await store.ListTargetsAsync();
+
+        Assert.Equal(["vm", "sat-a", "sat-b"], targets);
+    }
+
+    [Fact]
     public void Pending_stale_helper_flags_only_old_pending_commands()
     {
         var requestedAt = new DateTimeOffset(2026, 9, 15, 17, 0, 0, TimeSpan.Zero);

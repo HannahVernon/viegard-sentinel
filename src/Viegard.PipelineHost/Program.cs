@@ -74,6 +74,13 @@ builder.Services
 builder.Services.AddSingleton<IValidateOptions<ActionWorkerOptions>, ActionWorkerOptionsValidator>();
 
 builder.Services
+    .AddOptions<HostUpgradeAgentOptions>()
+    .Bind(builder.Configuration.GetSection(HostUpgradeAgentOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<HostUpgradeAgentOptions>, HostUpgradeAgentOptionsValidator>();
+builder.Services.AddSingleton<IHostUpgradeAgentLauncher, ProcessHostUpgradeAgentLauncher>();
+
+builder.Services
     .AddOptions<ClassifierOptions>()
     .Bind(builder.Configuration.GetSection(ClassifierOptions.SectionName))
     .ValidateOnStart();
@@ -226,6 +233,14 @@ if (mdaemonOptions?.Enabled == true)
         new MDaemonEventNormalizer(sp.GetRequiredService<IOptions<MDaemonSourceOptions>>().Value));
 }
 builder.Services.AddHostedService<QueueTelemetryPublisher>();
+
+var hostUpgradeAgentOptions = builder.Configuration
+    .GetSection(HostUpgradeAgentOptions.SectionName)
+    .Get<HostUpgradeAgentOptions>();
+if (hostUpgradeAgentOptions?.Enabled == true)
+{
+    builder.Services.AddHostedService<HostUpgradeAgentWorker>();
+}
 
 // The ingestion worker runs only in instances configured for the sources role (D-0011).
 var configuredRoles = builder.Configuration.GetSection($"{ViegardHostOptions.SectionName}:Roles").Get<string[]>() ?? [];

@@ -1,5 +1,8 @@
 using Viegard.AdminApi;
 using Viegard.Application.Configuration;
+using Viegard.Persistence.InMemory;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Viegard.AdminApi.Tests;
 
@@ -91,6 +94,24 @@ public sealed class HostUpgradeStatusPayloadTests
         var payload = HostUpgradeStatusPayload.Build([stale], Now, Format);
 
         Assert.True(payload.StalePending);
+    }
+
+    [Fact]
+    public async Task Status_endpoint_payload_includes_commands_for_all_targets()
+    {
+        var store = new InMemoryHostUpgradeCommandStore();
+        var vm = await store.RequestAsync("vm", "hannah");
+        var satellite = await store.RequestAsync("sat-a", "hannah");
+        var display = new UserDisplay(
+            new HttpContextAccessor { HttpContext = new DefaultHttpContext() },
+            new InMemoryAdminUserStore(),
+            NullLogger<UserDisplay>.Instance);
+
+        var payload = await HostUpgradeStatusEndpoint.BuildPayloadAsync(store, display, CancellationToken.None);
+
+        Assert.Equal(2, payload.Commands.Count);
+        Assert.Contains(payload.Commands, row => row.Key == vm.Id.ToString("N"));
+        Assert.Contains(payload.Commands, row => row.Key == satellite.Id.ToString("N"));
     }
 
     [Theory]

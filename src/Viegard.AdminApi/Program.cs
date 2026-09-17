@@ -364,11 +364,9 @@ app.MapGet("/status/upgrades", async (
     UserDisplay display,
     CancellationToken cancellationToken) =>
 {
-    await display.InitializeAsync().ConfigureAwait(false);
-    var commands = await hostUpgrades
-        .ListRecentAsync(HostUpgradeCommandPolicy.DefaultTarget, cancellationToken: cancellationToken)
+    var payload = await HostUpgradeStatusEndpoint
+        .BuildPayloadAsync(hostUpgrades, display, cancellationToken)
         .ConfigureAwait(false);
-    var payload = HostUpgradeStatusPayload.Build(commands, DateTimeOffset.UtcNow, display.Format);
     return Results.Json(payload);
 }).RequireAuthorization();
 app.MapAdminAuthEndpoints();

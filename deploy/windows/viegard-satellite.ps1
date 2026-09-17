@@ -41,6 +41,9 @@ The PostgreSQL schema containing Viegard objects.
 .PARAMETER InstanceId
 The required unique Viegard host instance id for this MDaemon host.
 
+.PARAMETER HostUpgradeTarget
+The Admin UI upgrade target claimed by this satellite.  Defaults to the lowercase Windows computer name and must not be vm.
+
 .PARAMETER MDaemonLogKinds
 The MDaemon log kinds to enable.  Valid values are SmtpIn, SmtpOut, Imap, Pop3, Screening, and DynamicScreening.  Omit for an interactive prompt defaulting to all supported kinds.
 
@@ -94,6 +97,8 @@ param(
 
     [string]$InstanceId,
 
+    [string]$HostUpgradeTarget,
+
     [string[]]$MDaemonLogKinds,
 
     [string]$ServiceAccount,
@@ -121,6 +126,8 @@ $script:ServiceName = $null
 $script:ServiceDisplayName = $null
 $script:ServiceDescription = $null
 $script:DeployedCommitFileName = ".deployed-commit"
+$script:AutoUpgradeTaskNamePrefix = "ViegardSatellite"
+$script:AutoUpgradeTaskNameSuffix = "AutoUpgrade"
 
 foreach ($providedName in $PSBoundParameters.Keys) {
     $script:ProvidedParameters[$providedName] = $true
@@ -197,7 +204,7 @@ function Write-Usage {
         "  .\deploy\windows\viegard-satellite.ps1 install -Client MDaemon -InstanceId mdaemon-MAIL01",
         "",
         "Automation example:",
-        "  .\deploy\windows\viegard-satellite.ps1 install -Yes -Client MDaemon -ServiceAccount VirtualAccount -MDaemonRoot C:\MDaemon -PostgresHost 192.0.2.10 -PostgresUsername viegard_sat_mail01 -PostgresPassword (Read-Host -AsSecureString) -InstanceId mdaemon-MAIL01",
+        "  .\deploy\windows\viegard-satellite.ps1 install -Yes -Client MDaemon -ServiceAccount VirtualAccount -MDaemonRoot C:\MDaemon -PostgresHost 192.0.2.10 -PostgresUsername viegard_sat_mail01 -PostgresPassword (Read-Host -AsSecureString) -InstanceId mdaemon-MAIL01 -HostUpgradeTarget mail01",
         "",
         "Auto-upgrade example:",
         "  .\deploy\windows\viegard-satellite.ps1 register-autoupgrade -Client MDaemon -Time 03:30",
@@ -710,6 +717,73 @@ function Get-SchemaValue {
     }
 }
 
+function Get-DefaultHostUpgradeTarget {
+    if ([string]::IsNullOrWhiteSpace($env:COMPUTERNAME)) {
+        return "windows-satellite"
+    }
+
+    $candidate = $env:COMPUTERNAME.Trim().ToLowerInvariant()
+    if ((Test-HostUpgradeTarget -Target $candidate) -and (-not $candidate.Equals("vm", [StringComparison]::Ordinal))) {
+        return $candidate
+    }
+
+    return "windows-satellite"
+}
+
+function Test-HostUpgradeTarget {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Target
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Target)) {
+        return $false
+    }
+
+    if ($Target.Length -gt 64) {
+        return $false
+    }
+
+    for ($index = 0; $index -lt $Target.Length; $index++) {
+        $character = $Target[$index]
+        if (($character -ge [char]'a' -and $character -le [char]'z') `
+            -or ($character -ge [char]'0' -and $character -le [char]'9') `
+            -or $character -eq [char]'-' `
+            -or $character -eq [char]'_') {
+            continue
+        }
+
+        return $false
+    }
+
+    return $true
+}
+
+function Get-HostUpgradeTargetValue {
+    if (Test-ParameterProvided -Name "HostUpgradeTarget") {
+        $candidate = $HostUpgradeTarget.Trim()
+        if ((Test-HostUpgradeTarget -Target $candidate) -and (-not $candidate.Equals("vm", [StringComparison]::Ordinal))) {
+            return $candidate
+        }
+
+        Stop-WithMessage "HostUpgradeTarget must use only lowercase letters, digits, dash, and underscore, must be 1-64 characters, and must not be vm."
+    }
+
+    $defaultTarget = Get-DefaultHostUpgradeTarget
+    if ($Yes.IsPresent) {
+        return $defaultTarget
+    }
+
+    while ($true) {
+        $candidate = Read-TextValue -Prompt "Admin UI upgrade target for this satellite" -DefaultValue $defaultTarget
+        if ((Test-HostUpgradeTarget -Target $candidate) -and (-not $candidate.Equals("vm", [StringComparison]::Ordinal))) {
+            return $candidate
+        }
+
+        Write-WarnLine "The upgrade target must use only lowercase letters, digits, dash, and underscore, must be 1-64 characters, and must not be vm."
+    }
+}
+
 function Read-SecureValue {
     while ($true) {
         $secureValue = Read-Host -Prompt "PostgreSQL password" -AsSecureString
@@ -1017,6 +1091,19 @@ function Get-RepositoryRoot {
     Stop-WithMessage "Could not find the repository root from script path $PSScriptRoot."
 }
 
+function Get-SatelliteScriptPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        return [System.IO.Path]::GetFullPath($PSCommandPath)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot "deploy\windows\viegard-satellite.ps1"))
+}
+
 function Get-GitOutput {
     param(
         [Parameter(Mandatory = $true)]
@@ -1216,6 +1303,12 @@ function New-SatelliteConfigurationJson {
                 InstanceId = $InstallerConfig.InstanceId
                 Roles = @("sources")
             }
+            HostUpgradeAgent = [ordered]@{
+                Target = $InstallerConfig.HostUpgradeTarget
+                SatelliteScriptPath = $InstallerConfig.SatelliteScriptPath
+                ClientName = $InstallerConfig.Client
+                ScheduledTaskName = $InstallerConfig.AutoUpgradeTaskName
+            }
             Secrets = [ordered]@{
                 Provider = "file"
                 Directory = $InstallerConfig.SecretsDirectory
@@ -1241,6 +1334,148 @@ function New-SatelliteConfigurationJson {
     }
 
     return ($configuration | ConvertTo-Json -Depth 20)
+}
+
+function Test-ConfigurationObject {
+    param(
+        [object]$Value
+    )
+
+    return ($null -ne $Value -and $Value -is [System.Management.Automation.PSCustomObject])
+}
+
+function Get-OrAddConfigurationSection {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Parent,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        [ref]$Changed
+    )
+
+    $property = $Parent.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        $section = [pscustomobject][ordered]@{}
+        Add-Member -InputObject $Parent -MemberType NoteProperty -Name $Name -Value $section
+        $Changed.Value = $true
+        return $section
+    }
+
+    if (Test-ConfigurationObject -Value $property.Value) {
+        return $property.Value
+    }
+
+    Write-WarnLine "Configuration key '$Name' exists but is not an object; leaving it unchanged."
+    return $null
+}
+
+function Add-MissingConfigurationValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Parent,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [AllowNull()]
+        [object]$Value,
+
+        [Parameter(Mandatory = $true)]
+        [ref]$Changed
+    )
+
+    if ($null -ne $Parent.PSObject.Properties[$Name]) {
+        return
+    }
+
+    Add-Member -InputObject $Parent -MemberType NoteProperty -Name $Name -Value $Value
+    $Changed.Value = $true
+}
+
+function New-HostUpgradeAgentConfiguration {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot
+    )
+
+    return [pscustomobject][ordered]@{
+        Target = Get-HostUpgradeTargetValue
+        SatelliteScriptPath = Get-SatelliteScriptPath -RepositoryRoot $RepositoryRoot
+        ClientName = $script:ClientProfile.Name
+        ScheduledTaskName = Get-AutoUpgradeTaskName
+    }
+}
+
+function Merge-SatelliteConfiguration {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AppDirectory,
+
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot
+    )
+
+    $configurationPath = Join-Path $AppDirectory "appsettings.Production.json"
+    if (-not (Test-Path -LiteralPath $configurationPath -PathType Leaf)) {
+        Write-WarnLine "Cannot merge appsettings.Production.json because it was not found."
+        return $false
+    }
+
+    try {
+        $rawJson = [System.IO.File]::ReadAllText($configurationPath)
+        $configuration = $rawJson | ConvertFrom-Json
+    }
+    catch {
+        Write-WarnLine ("Cannot merge appsettings.Production.json because it could not be read: " + $_.Exception.Message)
+        return $false
+    }
+
+    if (-not (Test-ConfigurationObject -Value $configuration)) {
+        Write-WarnLine "Cannot merge appsettings.Production.json because the root JSON value is not an object."
+        return $false
+    }
+
+    $changed = $false
+    $viegardSection = Get-OrAddConfigurationSection -Parent $configuration -Name "Viegard" -Changed ([ref]$changed)
+    if ($null -eq $viegardSection) {
+        return $false
+    }
+
+    $databaseSection = Get-OrAddConfigurationSection -Parent $viegardSection -Name "Database" -Changed ([ref]$changed)
+    if ($null -ne $databaseSection) {
+        Add-MissingConfigurationValue -Parent $databaseSection -Name "MaxPoolSize" -Value 8 -Changed ([ref]$changed)
+    }
+
+    $agentProperty = $viegardSection.PSObject.Properties["HostUpgradeAgent"]
+    if ($null -eq $agentProperty) {
+        Add-Member -InputObject $viegardSection -MemberType NoteProperty -Name "HostUpgradeAgent" -Value (New-HostUpgradeAgentConfiguration -RepositoryRoot $RepositoryRoot)
+        $changed = $true
+    }
+    elseif (Test-ConfigurationObject -Value $agentProperty.Value) {
+        if ($null -eq $agentProperty.Value.PSObject.Properties["Target"]) {
+            Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "Target" -Value (Get-HostUpgradeTargetValue) -Changed ([ref]$changed)
+        }
+
+        Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "SatelliteScriptPath" -Value (Get-SatelliteScriptPath -RepositoryRoot $RepositoryRoot) -Changed ([ref]$changed)
+        Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "ClientName" -Value $script:ClientProfile.Name -Changed ([ref]$changed)
+        Add-MissingConfigurationValue -Parent $agentProperty.Value -Name "ScheduledTaskName" -Value (Get-AutoUpgradeTaskName) -Changed ([ref]$changed)
+    }
+    else {
+        Write-WarnLine "Configuration key 'HostUpgradeAgent' exists but is not an object; leaving it unchanged."
+    }
+
+    if (-not $changed) {
+        Write-InfoLine "appsettings.Production.json already contains the current satellite defaults."
+        return $false
+    }
+
+    $json = $configuration | ConvertTo-Json -Depth 20
+    Write-TextFile -Path $configurationPath -Content $json
+    Write-InfoLine "Merged missing satellite defaults into appsettings.Production.json without changing existing values."
+    return $true
 }
 
 function Write-SatelliteConfiguration {
@@ -1749,6 +1984,11 @@ function Get-InstallConfiguration {
         }
     }
 
+    $upgradeTarget = Get-HostUpgradeTargetValue
+    $repositoryRoot = Get-RepositoryRoot
+    $satelliteScriptPath = Get-SatelliteScriptPath -RepositoryRoot $repositoryRoot
+    $autoUpgradeTaskName = Get-AutoUpgradeTaskName
+
     Write-InfoLine "Testing TCP connectivity to ${databaseHostName}:$databasePort ..."
     if (-not (Test-TcpConnect -ServerName $databaseHostName -PortNumber $databasePort)) {
         Write-WarnLine "Could not connect to PostgreSQL at ${databaseHostName}:$databasePort from this host."
@@ -1775,6 +2015,9 @@ function Get-InstallConfiguration {
         PostgresSchema = $databaseSchema
         PostgresPassword = $databasePassword
         InstanceId = $hostInstanceId
+        HostUpgradeTarget = $upgradeTarget
+        SatelliteScriptPath = $satelliteScriptPath
+        AutoUpgradeTaskName = $autoUpgradeTaskName
     }
 }
 
@@ -1790,6 +2033,7 @@ function Write-InstallSummary {
     [Console]::Out.WriteLine("  Account:      " + $InstallerConfig.ServiceAccount.AccountName + " (" + $InstallerConfig.ServiceAccount.Choice + ")")
     [Console]::Out.WriteLine("  Install dir:  " + $InstallerConfig.InstallDir)
     [Console]::Out.WriteLine("  Instance ID:  " + $InstallerConfig.InstanceId)
+    [Console]::Out.WriteLine("  Upgrade target: " + $InstallerConfig.HostUpgradeTarget)
     $summaryLines = & $script:ClientProfile.GetSummaryLines $InstallerConfig.ProfileSettings
     foreach ($summaryLine in $summaryLines) {
         [Console]::Out.WriteLine($summaryLine)
@@ -1823,6 +2067,9 @@ function Invoke-Install {
 
     Invoke-PipelinePublish -RepositoryRoot $repositoryRoot -AppDirectory $installerConfig.AppDirectory
     $configurationWritten = Write-SatelliteConfiguration -InstallerConfig $installerConfig
+    if (-not $configurationWritten) {
+        Merge-SatelliteConfiguration -AppDirectory $installerConfig.AppDirectory -RepositoryRoot $repositoryRoot | Out-Null
+    }
 
     Set-InitialSecretsAcl -SecretsDirectory $installerConfig.SecretsDirectory
     if ($null -ne $installerConfig.PostgresPassword) {
@@ -1886,8 +2133,17 @@ function Invoke-Upgrade {
     $appDirectory = Join-Path $effectiveInstallDir "app"
     $deployedCommit = Get-DeployedCommitMarker -AppDirectory $appDirectory
     $deployedMatchesClone = (-not [string]::IsNullOrWhiteSpace($deployedCommit)) -and $deployedCommit.Equals($afterCommit, [StringComparison]::OrdinalIgnoreCase)
+    $configurationMerged = Merge-SatelliteConfiguration -AppDirectory $appDirectory -RepositoryRoot $repositoryRoot
 
     if ($deployedMatchesClone -and (-not $Force.IsPresent)) {
+        if ($configurationMerged) {
+            Write-InfoLine "Configuration defaults were added; restarting the satellite service to apply them."
+            Stop-SatelliteService -AlreadyConfirmed
+            Start-SatelliteService
+            Write-InfoLine "Upgrade complete."
+            return
+        }
+
         Write-InfoLine ("Already up to date; clone at " + (Get-ShortCommit -Commit $afterCommit) + ", deployed binary at " + (Get-DeployedCommitLabel -Commit $deployedCommit) + "; nothing to do.  Use -Force to republish anyway.")
         return
     }
@@ -1921,6 +2177,7 @@ function Invoke-Upgrade {
 
     Stop-SatelliteService -AlreadyConfirmed
     Invoke-PipelinePublish -RepositoryRoot $repositoryRoot -AppDirectory $appDirectory -PreserveConfiguration $true
+    Merge-SatelliteConfiguration -AppDirectory $appDirectory -RepositoryRoot $repositoryRoot | Out-Null
 
     $executablePath = Join-Path $appDirectory "Viegard.PipelineHost.exe"
     Set-ServiceRegistration -ExecutablePath $executablePath -ServiceAccountConfig $serviceAccountConfig
@@ -1996,8 +2253,21 @@ function Write-Status {
         $databasePort = [int]$configuration.Viegard.Database.Port
         $databaseName = [string]$configuration.Viegard.Database.Name
         $databaseSchema = [string]$configuration.Viegard.Database.Schema
+        $upgradeTarget = $null
+        $agentSection = $null
+        if ($null -ne $configuration.Viegard.PSObject.Properties["HostUpgradeAgent"]) {
+            $agentSection = $configuration.Viegard.HostUpgradeAgent
+        }
+
+        if ($null -ne $agentSection -and $null -ne $agentSection.PSObject.Properties["Target"]) {
+            $upgradeTarget = [string]$agentSection.Target
+        }
 
         Write-InfoLine "Instance ID: $configuredInstanceId"
+        if (-not [string]::IsNullOrWhiteSpace($upgradeTarget)) {
+            Write-InfoLine "Admin UI upgrade target: $upgradeTarget"
+        }
+
         Write-InfoLine "Postgres target: ${databaseHostName}:$databasePort/$databaseName schema $databaseSchema"
         if (Test-TcpConnect -ServerName $databaseHostName -PortNumber $databasePort) {
             Write-InfoLine "Postgres TCP check: reachable."
@@ -2012,7 +2282,7 @@ function Write-Status {
 }
 
 function Get-AutoUpgradeTaskName {
-    return "ViegardSatellite" + $script:ClientProfile.Name + "AutoUpgrade"
+    return $script:AutoUpgradeTaskNamePrefix + $script:ClientProfile.Name + $script:AutoUpgradeTaskNameSuffix
 }
 
 function Get-AutoUpgradeStartTime {

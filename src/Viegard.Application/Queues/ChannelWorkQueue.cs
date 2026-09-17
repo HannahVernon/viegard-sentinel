@@ -88,11 +88,21 @@ public sealed class ChannelWorkQueue<T> : IWorkQueue<T>
         _pending[item.Sequence] = item.EnqueuedAt;
     }
 
-    private async ValueTask AbandonCoreAsync(WorkItem item, CancellationToken cancellationToken)
+    private async ValueTask AbandonCoreAsync(WorkItem item, bool chargeAttempt, CancellationToken cancellationToken)
     {
         Interlocked.Decrement(ref _inFlight);
-        Interlocked.Increment(ref _totalAbandoned);
 
+        if (!chargeAttempt)
+        {
+            var release = item with
+            {
+                Sequence = Interlocked.Increment(ref _sequence),
+            };
+            await WriteAsync(release, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        Interlocked.Increment(ref _totalAbandoned);
         if (item.DeliveryCount >= _maxDeliveryCount)
         {
             _deadLetters.Enqueue(item.Message);
@@ -134,7 +144,13 @@ public sealed class ChannelWorkQueue<T> : IWorkQueue<T>
         public ValueTask AbandonAsync(CancellationToken cancellationToken = default)
         {
             EnsureUnsettled();
-            return queue.AbandonCoreAsync(item, cancellationToken);
+            return queue.AbandonCoreAsync(item, chargeAttempt: true, cancellationToken);
+        }
+
+        public ValueTask AbandonAsync(bool chargeAttempt, CancellationToken cancellationToken = default)
+        {
+            EnsureUnsettled();
+            return queue.AbandonCoreAsync(item, chargeAttempt, cancellationToken);
         }
 
         private void EnsureUnsettled()

@@ -270,6 +270,8 @@ public sealed class InstanceRegistrationRow
 
     public string Roles { get; set; } = string.Empty;
 
+    public string? UpgradeTarget { get; set; }
+
     public string HostName { get; set; } = string.Empty;
 
     public DateTimeOffset StartedAt { get; set; }

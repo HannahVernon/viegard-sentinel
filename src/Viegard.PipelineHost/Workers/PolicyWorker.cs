@@ -86,6 +86,11 @@ public sealed class PolicyWorker(
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
+                if (lease is not null)
+                {
+                    await AbandonLeaseAsync(lease, chargeAttempt: false).ConfigureAwait(false);
+                }
+
                 break;
             }
             catch (Exception ex)
@@ -93,19 +98,28 @@ public sealed class PolicyWorker(
                 logger.LogError(ex, "Policy worker failed while processing a classification lease.");
                 if (lease is not null)
                 {
-                    try
-                    {
-                        await lease.AbandonAsync(CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch (Exception abandonEx)
-                    {
-                        logger.LogError(abandonEx, "Policy worker failed to abandon a classification lease.");
-                    }
+                    await AbandonLeaseAsync(lease, chargeAttempt: true).ConfigureAwait(false);
                 }
             }
         }
 
         logger.LogInformation("Policy worker stopping.");
+    }
+
+    private async Task AbandonLeaseAsync(IWorkLease<ClassificationWorkItem> lease, bool chargeAttempt)
+    {
+        try
+        {
+            await lease.AbandonAsync(chargeAttempt, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception abandonEx)
+        {
+            logger.LogError(
+                abandonEx,
+                chargeAttempt
+                    ? "Policy worker failed to abandon a classification lease."
+                    : "Policy worker failed to release a classification lease during shutdown.");
+        }
     }
 
     private async Task MarkIncidentDecidedAsync(

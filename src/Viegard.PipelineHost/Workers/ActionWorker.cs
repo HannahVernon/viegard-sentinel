@@ -61,14 +61,8 @@ public sealed class ActionWorker(
         {
             if (lease is not null)
             {
-                try
-                {
-                    await lease.AbandonAsync(CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception abandonEx)
-                {
-                    logger.LogError(abandonEx, "Action worker failed to abandon an action lease.");
-                }
+                await AbandonLeaseAsync(lease, chargeAttempt: !cancellationToken.IsCancellationRequested)
+                    .ConfigureAwait(false);
             }
 
             throw;
@@ -200,6 +194,22 @@ public sealed class ActionWorker(
             OperationId = current.OperationId,
             RequestedAt = current.RequestedAt,
         };
+
+    private async Task AbandonLeaseAsync(IWorkLease<ActionWorkItem> lease, bool chargeAttempt)
+    {
+        try
+        {
+            await lease.AbandonAsync(chargeAttempt, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception abandonEx)
+        {
+            logger.LogError(
+                abandonEx,
+                chargeAttempt
+                    ? "Action worker failed to abandon an action lease."
+                    : "Action worker failed to release an action lease during shutdown.");
+        }
+    }
 
     private static string OneLine(string? value, int maxChars)
     {

@@ -138,6 +138,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.CorrelationKey, e.State });
             entity.HasIndex(e => new { e.WindowStart, e.State });
+            entity.HasIndex(e => new { e.State, e.Id }).IsDescending(false, true);
             entity.Property(e => e.EventIdsJson).HasColumnType("jsonb");
             entity.Property(e => e.EvidenceJson).HasColumnType("jsonb");
         });
@@ -161,6 +162,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasIndex(e => e.ClassificationId);
             entity.HasIndex(e => e.CreatedAt);
             entity.HasIndex(e => e.PolicyId);
+            entity.HasIndex(e => new { e.Outcome, e.Id }).IsDescending(false, true);
             entity.HasOne<PolicyRow>().WithMany().HasForeignKey(e => e.PolicyId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.GuardrailsJson).HasColumnType("jsonb");
             entity.Property(e => e.ReviewedBy).HasColumnType("text");
@@ -199,6 +201,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.Timestamp);
             entity.HasIndex(e => e.SourceId);
+            entity.HasIndex(e => new { e.Stage, e.Id }).IsDescending(false, true);
             entity.HasOne<SourceRow>().WithMany().HasForeignKey(e => e.SourceId).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.DetailJson).HasColumnType("jsonb");
         });
@@ -220,6 +223,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
         {
             entity.ToTable("instance_registry");
             entity.HasKey(e => e.InstanceId);
+            entity.Property(e => e.UpgradeTarget)
+                .HasMaxLength(Viegard.Application.Configuration.HostUpgradeCommandPolicy.MaxTargetLength);
         });
 
         modelBuilder.Entity<SourceOffsetRow>(entity =>

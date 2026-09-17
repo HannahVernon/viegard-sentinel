@@ -119,6 +119,11 @@ public sealed class ClassificationWorker(
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
+                if (lease is not null)
+                {
+                    await AbandonLeaseAsync(lease, chargeAttempt: false).ConfigureAwait(false);
+                }
+
                 break;
             }
             catch (Exception ex)
@@ -126,19 +131,28 @@ public sealed class ClassificationWorker(
                 logger.LogError(ex, "Classification worker failed while processing an incident lease.");
                 if (lease is not null)
                 {
-                    try
-                    {
-                        await lease.AbandonAsync(CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch (Exception abandonEx)
-                    {
-                        logger.LogError(abandonEx, "Classification worker failed to abandon an incident lease.");
-                    }
+                    await AbandonLeaseAsync(lease, chargeAttempt: true).ConfigureAwait(false);
                 }
             }
         }
 
         logger.LogInformation("Classification worker stopping.");
+    }
+
+    private async Task AbandonLeaseAsync(IWorkLease<IncidentWorkItem> lease, bool chargeAttempt)
+    {
+        try
+        {
+            await lease.AbandonAsync(chargeAttempt, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception abandonEx)
+        {
+            logger.LogError(
+                abandonEx,
+                chargeAttempt
+                    ? "Classification worker failed to abandon an incident lease."
+                    : "Classification worker failed to release an incident lease during shutdown.");
+        }
     }
 
     private static string ClassificationDetailJson(Classification classification) =>

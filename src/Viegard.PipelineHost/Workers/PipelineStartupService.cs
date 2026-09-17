@@ -1,5 +1,6 @@
 using System.Reflection;
 using Microsoft.Extensions.Options;
+using Viegard.Application.Configuration;
 using Viegard.Application.Telemetry;
 using Viegard.Domain.Health;
 using Viegard.PipelineHost.Configuration;
@@ -11,6 +12,7 @@ namespace Viegard.PipelineHost.Workers;
 /// </summary>
 public sealed class PipelineStartupService(
     IOptions<ViegardHostOptions> options,
+    IOptions<HostUpgradeAgentOptions> upgradeAgentOptions,
     IInstanceRegistryStore registryStore,
     ILogger<PipelineStartupService> logger) : BackgroundService
 {
@@ -48,6 +50,10 @@ public sealed class PipelineStartupService(
 
     private async Task UpsertRegistrationAsync(ViegardHostOptions host, CancellationToken cancellationToken)
     {
+        var upgradeTarget = upgradeAgentOptions.Value.Enabled
+            ? HostUpgradeCommandPolicy.NormalizeTarget(upgradeAgentOptions.Value.Target)
+            : null;
+
         try
         {
             await registryStore.UpsertAsync(
@@ -57,6 +63,7 @@ public sealed class PipelineStartupService(
                     Version = _buildVersion.InformationalVersion,
                     CommitSha = _buildVersion.CommitSha,
                     Roles = string.Join(",", host.Roles),
+                    UpgradeTarget = upgradeTarget,
                     HostName = Environment.MachineName,
                     StartedAt = _startedAt,
                     ReportedAt = DateTimeOffset.UtcNow,

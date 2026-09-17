@@ -209,23 +209,39 @@ public sealed partial class PostgresWorkQueue<T> : IWorkQueue<T>
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task AbandonAsync(long id, int deliveryCount, CancellationToken cancellationToken)
+    private async Task AbandonAsync(long id, int deliveryCount, bool chargeAttempt, CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = deliveryCount >= _maxDeliveryCount
-            ? """
-              UPDATE queue_messages SET dead_lettered = true, leased_until = NULL WHERE id = @id;
-              UPDATE queue_counters SET abandoned = abandoned + 1 WHERE queue_name = @queue;
-              """
-            : """
-              UPDATE queue_messages SET leased_until = NULL WHERE id = @id;
-              UPDATE queue_counters SET abandoned = abandoned + 1 WHERE queue_name = @queue;
-              SELECT pg_notify(@channel, '');
-              """;
+        if (!chargeAttempt)
+        {
+            command.CommandText = """
+                UPDATE queue_messages
+                SET leased_until = NULL,
+                    delivery_count = GREATEST(delivery_count - 1, 0)
+                WHERE id = @id
+                  AND queue_name = @queue
+                  AND NOT dead_lettered;
+                SELECT pg_notify(@channel, '');
+                """;
+        }
+        else
+        {
+            command.CommandText = deliveryCount >= _maxDeliveryCount
+                ? """
+                  UPDATE queue_messages SET dead_lettered = true, leased_until = NULL WHERE id = @id;
+                  UPDATE queue_counters SET abandoned = abandoned + 1 WHERE queue_name = @queue;
+                  """
+                : """
+                  UPDATE queue_messages SET leased_until = NULL WHERE id = @id;
+                  UPDATE queue_counters SET abandoned = abandoned + 1 WHERE queue_name = @queue;
+                  SELECT pg_notify(@channel, '');
+                  """;
+        }
+
         command.Parameters.AddWithValue("id", id);
         command.Parameters.AddWithValue("queue", QueueName);
-        if (deliveryCount < _maxDeliveryCount)
+        if (!chargeAttempt || deliveryCount < _maxDeliveryCount)
         {
             command.Parameters.AddWithValue("channel", _channelName);
         }
@@ -253,7 +269,13 @@ public sealed partial class PostgresWorkQueue<T> : IWorkQueue<T>
         public async ValueTask AbandonAsync(CancellationToken cancellationToken = default)
         {
             EnsureUnsettled();
-            await queue.AbandonAsync(id, deliveryCount, cancellationToken).ConfigureAwait(false);
+            await queue.AbandonAsync(id, deliveryCount, chargeAttempt: true, cancellationToken).ConfigureAwait(false);
+        }
+
+        public async ValueTask AbandonAsync(bool chargeAttempt, CancellationToken cancellationToken = default)
+        {
+            EnsureUnsettled();
+            await queue.AbandonAsync(id, deliveryCount, chargeAttempt, cancellationToken).ConfigureAwait(false);
         }
 
         private void EnsureUnsettled()

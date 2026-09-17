@@ -29,20 +29,27 @@ public sealed class PostgresRawObservationStore(IDbContextFactory<ViegardDbConte
         ArgumentNullException.ThrowIfNull(observation);
         var sourceRef = await resolver.ResolveSourceAsync(observation.SourceId, observation.SourceType, cancellationToken).ConfigureAwait(false);
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-        db.RawObservations.Add(observation.ToRow(rawPayload, sourceRef));
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            return true;
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
-        {
-            // At-least-once redelivery: an unclean stop between storing the
-            // observation and committing the source offset makes the source
-            // re-read the same data.  The payload-reference unique index
-            // makes the replay detectable; report it instead of throwing.
-            return false;
-        }
+        var row = observation.ToRow(rawPayload, sourceRef);
+        var affected = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO raw_observations (
+                id,
+                source_id,
+                observed_at,
+                payload_reference,
+                ingest_offset,
+                raw_payload
+            )
+            VALUES (
+                {row.Id},
+                {row.SourceId},
+                {row.ObservedAt},
+                {row.PayloadReference},
+                {row.IngestOffset},
+                {row.RawPayload}
+            )
+            ON CONFLICT (payload_reference) DO NOTHING;
+            """, cancellationToken).ConfigureAwait(false);
+        return affected > 0;
     }
 
     public async ValueTask<RawObservation?> GetAsync(Guid id, CancellationToken cancellationToken = default)

@@ -111,6 +111,7 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Rationale:** the project owner requires immediate visibility of queue processing health as part of inter-service communication monitoring.
 - **Consequences:** Pipeline hosts publish per-queue telemetry and heartbeats to shared persistence; the queue port must expose depth/oldest-age/ack statistics; amber/red thresholds become configuration values (defaults need the project owner's input).
 - **Approval:** Requirement stated by the project owner; derivation design proposed by the agent within the pending ARCHITECTURE.md proposal.
+- **Amendment (2026-09-16, graceful shutdown lease release):** Graceful shutdown is not a delivery failure.  A worker that has leased a queue message and then observes host cancellation releases the lease without charging the delivery budget or incrementing abandoned counters; genuine processing failures continue to use charged abandon and still dead-letter at the configured delivery limit.  A process exit with no explicit release is unchanged: the expired lease is charged when the message is next leased, preserving crash-recovery poison protection.
 
 ## D-0013: MDaemon log ingestion added to initial data-source scope
 

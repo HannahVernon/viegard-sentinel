@@ -6,6 +6,7 @@
 @inject ISatelliteRoleStore SatelliteRoles
 @inject IMikroTikRouterStore Routers
 @inject IHostUpgradeCommandStore HostUpgrades
+@inject IInstanceRegistryStore InstanceRegistry
 @inject IAdminUserStore Users
 @inject IAdminSessionStore Sessions
 @inject IHttpContextAccessor HttpContextAccessor
@@ -726,7 +727,9 @@
             .ToDictionary(group => group.Key, group => group.OrderByDescending(filter => filter.UpdatedAt).First(), StringComparer.Ordinal);
         _satelliteRoles = await SatelliteRoles.ListAsync().ConfigureAwait(false);
         _routers = await Routers.ListAsync().ConfigureAwait(false);
-        _hostUpgradeTargets = await HostUpgrades.ListTargetsAsync().ConfigureAwait(false);
+        var commandTargets = await HostUpgrades.ListTargetsAsync().ConfigureAwait(false);
+        var registrations = await InstanceRegistry.ListAsync().ConfigureAwait(false);
+        _hostUpgradeTargets = HostUpgradeTargetList.BuildKnownTargets(commandTargets, registrations);
         _hostUpgradeCommands = await HostUpgrades.ListRecentAsync().ConfigureAwait(false);
         _now = DateTimeOffset.UtcNow;
 

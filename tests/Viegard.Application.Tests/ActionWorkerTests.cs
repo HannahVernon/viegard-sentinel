@@ -146,6 +146,28 @@ public sealed class ActionWorkerTests
         Assert.Equal(2, results[1].Attempts);
     }
 
+    [Fact]
+    public async Task Cancelled_processing_releases_lease_without_charging_attempt()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var store = new InMemoryActionStore();
+        var queue = new ChannelWorkQueue<ActionWorkItem>("actions", maxDeliveryCount: 2);
+        var action = PendingAction(providerId: "cancel");
+        await store.UpsertAsync(action);
+        await queue.EnqueueAsync(new ActionWorkItem(action.Id));
+        var worker = Worker(queue, store, [new CancellingProvider(cancellation)]);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await worker.ProcessNextAsync(cancellation.Token));
+
+        var redelivery = await queue.LeaseAsync();
+        Assert.Equal(action.Id, redelivery.Message.ActionId);
+        Assert.Equal(1, redelivery.DeliveryCount);
+        var stats = await queue.GetStatsAsync();
+        Assert.Equal(0, stats.TotalAbandoned);
+        Assert.Equal(0, stats.DeadLetterCount);
+    }
+
     private static ActionWorker Worker(
         ChannelWorkQueue<ActionWorkItem> queue,
         InMemoryActionStore store,
@@ -170,4 +192,18 @@ public sealed class ActionWorkerTests
         Status = ActionStatus.Pending,
         RequestedAt = DateTimeOffset.UtcNow,
     };
+
+    private sealed class CancellingProvider(CancellationTokenSource cancellation) : IActionProvider
+    {
+        public string ProviderId => "cancel";
+
+        public IReadOnlyList<ActionOperationDescriptor> SupportedOperations => [];
+
+        public Task<ActionRecord> ExecuteAsync(ActionRequest request, CancellationToken cancellationToken = default)
+        {
+            cancellation.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new OperationCanceledException(cancellationToken);
+        }
+    }
 }

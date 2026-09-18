@@ -39,6 +39,13 @@ The mobile profile additionally captures the opened navigation menu, and
 both profiles capture the `/configuration#upgrades` section with the
 sticky section index.
 
+`thumb-probe.mjs` is a touch-interaction diagnostic for the mobile chip
+strip: it lands on first and last sections checking active-chip
+visibility, fires synthesized touch flicks (CDP scroll gestures), and
+prints computed-style plus JS-scroll discriminators.  Note that CDP
+gesture synthesis is unreliable against overflow containers; trust the
+case6 discriminator over the flick cases when they disagree.
+
 ## Environment variables
 
 Variable | Default | Meaning

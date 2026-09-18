@@ -424,6 +424,11 @@
                 <button type="submit">Request upgrade</button>
                 <span class="small">Targets use lowercase letters, digits, dash, and underscore.  Requests are single-flight per target and have a @HostUpgradeCommandPolicy.CooldownMinutes-minute cooldown after completion.</span>
             </form>
+            <form method="post" action="/configuration/upgrades/request-all" class="secondary-form">
+                <AntiforgeryToken />
+                <button type="submit" class="secondary-button">Upgrade all known targets (@_hostUpgradeTargets.Count)</button>
+                <span class="small">Queues one request per known target: @string.Join(", ", _hostUpgradeTargets).  Targets already pending, running, or cooling down are skipped and reported.</span>
+            </form>
         }
         else
         {

@@ -341,8 +341,23 @@ app.Use(async (context, next) =>
         else
         {
             // An explicitly presented token that fails answers 401 rather
-            // than a login-page redirect: honest API semantics.
-            await context.ChallengeAsync(AppPasswordDefaults.SchemeName).ConfigureAwait(false);
+            // than a login-page redirect: honest API semantics.  The body
+            // is written directly (with status-code pages disabled for
+            // this response) because an empty 401 would be re-executed by
+            // UseStatusCodePagesWithReExecute into /not-found, whose
+            // cookie challenge turns the answer back into a login
+            // redirect (found by external review of PR #97).
+            var statusCodePages = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IStatusCodePagesFeature>();
+            if (statusCodePages is not null)
+            {
+                statusCodePages.Enabled = false;
+            }
+
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(
+                """{"error":"App password was not accepted.  It may be malformed, revoked, or expired."}""",
+                context.RequestAborted).ConfigureAwait(false);
             return;
         }
     }

@@ -171,6 +171,30 @@ public sealed class DeterministicIncidentClassifierTests
     }
 
     [Fact]
+    public async Task High_weight_signature_evidence_reaches_the_automatic_action_band()
+    {
+        // The armed-signature math (D-0029 EventKind amendment): a single
+        // matched event with weight 4.0 plus the builtin 0.6 must reach
+        // confidence 0.92 and severity 9.  A pre-existing 1.0 clamp in the
+        // evidence factory silently flattened this to confidence 0.32 and
+        // severity 3 in live operation; this pins the corrected math.
+        var store = new InMemoryIncidentStore();
+        var incident = Incident(
+            "ip=198.51.100.20",
+            [
+                Evidence("Rule custom.signature.test: armed signature matched.", 4.0),
+                Evidence("Rule mdaemon.security-event: MDaemon screening blocked the connection.", 0.6),
+            ]);
+        await store.UpsertAsync(incident);
+
+        var classification = Assert.IsType<Classification>(
+            (await Classifier(store).ClassifyAsync(Subject(incident.Id))).Classification);
+
+        Assert.Equal(0.92, classification.Confidence, precision: 10);
+        Assert.Equal(9, classification.Severity);
+    }
+
+    [Fact]
     public void Options_validator_rejects_non_positive_values()
     {
         var result = new ClassifierOptionsValidator().Validate(

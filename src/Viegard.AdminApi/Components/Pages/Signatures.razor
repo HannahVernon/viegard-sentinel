@@ -160,7 +160,7 @@
             <label>
                 Evidence weight
                 <input name="evidenceWeight" type="number" min="0" max="@CustomSignature.MaxEvidenceWeight" step="0.01" required value="@EvidenceWeightValue" />
-                <span class="small">Incident evidence sums across matches and rules; confidence is the sum divided by 5.  A weight of 3.0 or more lets a single matched event reach the 0.7 review gate on its own.</span>
+                <span class="small">Incident evidence sums across matches and rules; confidence is the sum divided by 5 and severity is twice the sum (each clamped).  A single matched event contributes this full weight, so high weights can reach the configured review or automatic-action gates on their own.</span>
             </label>
             <label class="inline-checkbox">
                 <input name="enabled" type="checkbox" value="true" checked="@EnabledValue" />

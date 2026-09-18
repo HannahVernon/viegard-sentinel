@@ -1,3 +1,4 @@
+using Viegard.Domain.Configuration;
 using Viegard.Domain.Incidents;
 
 namespace Viegard.Application.Detection;
@@ -48,7 +49,12 @@ internal static class DetectionText
     public static EvidenceItem Evidence(string ruleId, string description, double score, Guid eventId) => new()
     {
         Description = $"Rule {ruleId}: {description}",
-        Score = Math.Clamp(score, 0.0, 1.0),
+        // The ceiling matches the maximum signature evidence weight.  It was
+        // 1.0 until the D-0029 weight cap rose to 5.0; the old ceiling here
+        // silently flattened every high-weight signature back to 1.0, which
+        // kept single-event matches out of the review and action bands
+        // (found live: weight-4 and weight-5 signatures both scored 1.0).
+        Score = Math.Clamp(score, 0.0, CustomSignature.MaxEvidenceWeight),
         EventId = eventId,
     };
 

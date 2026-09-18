@@ -124,6 +124,18 @@ a:hover {
     background: var(--bg-raised);
 }
 
+/* Current page (or its detail pages): server-rendered aria-current. */
+.admin-nav a[aria-current="page"] {
+    color: var(--accent-strong);
+    background: var(--bg-raised);
+    font-weight: 600;
+}
+
+/* The in-menu sign-out only exists for the collapsed mobile menu. */
+.nav-signout {
+    display: none;
+}
+
 /* Mobile navigation disclosure.  The checkbox stays focusable off-screen so
    keyboard toggling works; the label is the visible button. */
 .nav-toggle {
@@ -139,8 +151,24 @@ a:hover {
 
 @media (max-width: 900px) {
     .admin-header {
-        gap: 0.75rem;
+        gap: 0.6rem;
         padding: 0.55rem 1rem;
+    }
+
+    .brand {
+        font-size: 0.95rem;
+        letter-spacing: 0.08em;
+        gap: 0.45rem;
+    }
+
+    .brand-mark {
+        width: 1.6rem;
+        height: 1.6rem;
+    }
+
+    /* Icon-only toggle; the aria-label carries the name. */
+    .nav-toggle-text {
+        display: none;
     }
 
     .nav-toggle-button {
@@ -184,8 +212,41 @@ a:hover {
         padding: 0.55rem 0.65rem;
     }
 
+    .nav-toggle:checked ~ .admin-nav .nav-signout {
+        display: block;
+        margin-top: 0.35rem;
+        border-top: 1px solid var(--panel-border);
+        padding-top: 0.55rem;
+    }
+
     .header-side {
+        /* Zero flex basis keeps the indicators on the first header row no
+           matter how narrow the screen; the age text ellipsizes instead of
+           wrapping the whole block to a second row. */
+        flex: 1 1 0;
+        min-width: 0;
+        justify-content: flex-end;
         margin-left: auto;
+        gap: 0.5rem;
+    }
+
+    .refresh-indicator {
+        font-size: 0.78rem;
+        min-width: 0;
+    }
+
+    .refresh-indicator [data-refresh-age] {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* Keep the header to a single row: the health dot stays (it links to
+       /queues), its text label and the standalone sign-out move into the
+       menu's territory. */
+    .status-dot-text,
+    .header-signout {
+        display: none;
     }
 }
 
@@ -322,6 +383,7 @@ a:hover {
         top: 3.4rem;
         z-index: 90;
         flex-direction: row;
+        flex-wrap: nowrap;
         overflow-x: auto;
         gap: 0.35rem;
         padding: 0.45rem 0;
@@ -388,22 +450,6 @@ a:hover {
     content: ">";
     position: absolute;
     left: 0.15rem;
-}
-
-@media (max-width: 56rem) {
-    .page-layout {
-        grid-template-columns: 1fr;
-    }
-
-    .page-index {
-        position: static;
-        flex-direction: row;
-        flex-wrap: wrap;
-        gap: 0.75rem;
-        border-right: none;
-        border-bottom: 1px solid var(--panel-border);
-        padding: 0 0 0.75rem;
-    }
 }
 
 /* Right side of the header: live status dot and sign-out */

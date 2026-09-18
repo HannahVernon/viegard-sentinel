@@ -31,6 +31,63 @@ public sealed class SyslogEnvelopeParserTests
     }
 
     [Fact]
+    public void Rfc3164_timestamps_are_flagged_zoneless()
+    {
+        var envelope = SyslogEnvelopeParser.Parse(
+            "<38>Aug  9 03:02:01 router sshd[1234]: Failed password for root",
+            ReceivedAt);
+
+        Assert.NotNull(envelope.Timestamp);
+        Assert.True(envelope.TimestampIsZoneless);
+    }
+
+    [Fact]
+    public void Parses_iso_hybrid_from_routeros()
+    {
+        // RouterOS remote-log-format=syslog with ISO 8601 timestamps
+        // (observed live from gr1 on 2026-09-18).
+        var envelope = SyslogEnvelopeParser.Parse(
+            "<30>2026-09-18T11:33:52.759-05:00 GR1 ssh new connection: 172.16.0.2:55234 (4)",
+            ReceivedAt);
+
+        Assert.Equal(3, envelope.Facility);
+        Assert.Equal(6, envelope.Severity);
+        Assert.Equal("GR1", envelope.ClaimedHostname);
+        Assert.Null(envelope.Tag);
+        Assert.Equal("ssh new connection: 172.16.0.2:55234 (4)", envelope.Message);
+        Assert.Equal(
+            new DateTimeOffset(2026, 9, 18, 11, 33, 52, 759, TimeSpan.FromHours(-5)),
+            envelope.Timestamp);
+        Assert.False(envelope.TimestampIsZoneless);
+    }
+
+    [Fact]
+    public void Parses_iso_hybrid_with_tag_and_pid()
+    {
+        var envelope = SyslogEnvelopeParser.Parse(
+            "<86>2026-09-18T16:33:52Z host sshd[321]: session opened",
+            ReceivedAt);
+
+        Assert.Equal("host", envelope.ClaimedHostname);
+        Assert.Equal("sshd", envelope.Tag);
+        Assert.Equal("session opened", envelope.Message);
+        Assert.Equal(new DateTimeOffset(2026, 9, 18, 16, 33, 52, TimeSpan.Zero), envelope.Timestamp);
+        Assert.False(envelope.TimestampIsZoneless);
+    }
+
+    [Fact]
+    public void Iso_hybrid_without_offset_is_flagged_zoneless()
+    {
+        var envelope = SyslogEnvelopeParser.Parse(
+            "<30>2026-09-18T11:33:52 GR1 ssh new connection: 172.16.0.2:55234 (4)",
+            ReceivedAt);
+
+        Assert.Equal("GR1", envelope.ClaimedHostname);
+        Assert.NotNull(envelope.Timestamp);
+        Assert.True(envelope.TimestampIsZoneless);
+    }
+
+    [Fact]
     public void Parses_rfc5424()
     {
         var envelope = SyslogEnvelopeParser.Parse(

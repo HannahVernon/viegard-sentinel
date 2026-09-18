@@ -151,6 +151,40 @@ public sealed class CustomSignatureTests
     }
 
     [Fact]
+    public async Task Rule_source_preserves_high_evidence_weights()
+    {
+        // Regression net for the live find: the evidence factory clamped
+        // every score to 1.0, so weight-4 and weight-5 signatures could
+        // never reach the review or automatic-action bands from a single
+        // matched event despite the 5.0 weight cap.
+        var store = new FakeSignatureStore(
+        [
+            Signature(name: "armed", target: CustomSignatureTarget.HttpQuery, pattern: "ref=aftership", evidenceWeight: 4.0),
+        ]);
+        var source = new CustomSignatureRuleSource(store, new DetectionOptions(), new RecordingDiagnostics());
+        await source.RefreshAsync();
+
+        var evidence = source.Evaluate(HttpEvent("/track?ref=aftership"));
+
+        Assert.Equal(4.0, Assert.Single(evidence).Score);
+    }
+
+    [Fact]
+    public async Task Rule_source_preserves_the_maximum_evidence_weight()
+    {
+        var store = new FakeSignatureStore(
+        [
+            Signature(name: "maxed", target: CustomSignatureTarget.HttpQuery, pattern: "ref=aftership", evidenceWeight: CustomSignature.MaxEvidenceWeight),
+        ]);
+        var source = new CustomSignatureRuleSource(store, new DetectionOptions(), new RecordingDiagnostics());
+        await source.RefreshAsync();
+
+        var evidence = source.Evaluate(HttpEvent("/track?ref=aftership"));
+
+        Assert.Equal(CustomSignature.MaxEvidenceWeight, Assert.Single(evidence).Score);
+    }
+
+    [Fact]
     public void Matcher_contains_all_requires_every_literal_term_case_insensitively()
     {
         var signature = Signature(
@@ -351,7 +385,8 @@ public sealed class CustomSignatureTests
         string pattern = "needle",
         IReadOnlyList<string>? additionalPatterns = null,
         string category = "test",
-        int severity = 3) => new()
+        int severity = 3,
+        double evidenceWeight = 1.0) => new()
     {
         Id = ViegardId.New(),
         Name = name,
@@ -362,7 +397,7 @@ public sealed class CustomSignatureTests
         AdditionalPatterns = additionalPatterns ?? [],
         Category = category,
         Severity = severity,
-        EvidenceWeight = 1.0,
+        EvidenceWeight = evidenceWeight,
         CreatedAt = DateTimeOffset.UtcNow,
         UpdatedAt = DateTimeOffset.UtcNow,
         UpdatedBy = "test",

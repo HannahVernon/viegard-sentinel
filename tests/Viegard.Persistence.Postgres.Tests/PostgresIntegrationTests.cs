@@ -56,9 +56,12 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         await using var db = new ViegardDbContext(builder.Options);
         await db.Database.MigrateAsync(CancellationToken.None);
 
-        // Clean slate for queue tables between runs.
+        // Clean slate between runs.  Includes the pipeline data tables:
+        // retention-test rows seeded just inside a cutoff (e.g. -179d of a
+        // 180d window) age into purge eligibility ~24h after the run that
+        // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE actions, active_bans, queue_messages, queue_counters, retention_settings, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()

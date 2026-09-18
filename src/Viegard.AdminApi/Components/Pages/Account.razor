@@ -5,6 +5,8 @@
 @inject IAdminSessionStore Sessions
 @inject TotpService Totp
 @inject RecoveryCodesCookie RecoveryCodesCookie
+@inject NewAppPasswordCookie NewAppPasswordCookie
+@inject IAppPasswordStore AppPasswords
 @inject IOptions<AdminAuthOptions> AuthOptions
 @inject UserDisplay Display
 
@@ -18,6 +20,7 @@
         <a href="/account#totp">TOTP</a>
         <a href="/account#security-keys">Security keys</a>
         <a href="/account#recovery-codes">Recovery codes</a>
+        <a href="/account#app-passwords">App passwords</a>
         <a href="/account#preferences">Preferences</a>
         <a href="/account#sessions">Active sessions</a>
     </nav>
@@ -219,6 +222,89 @@
             }
         </section>
 
+        <section id="app-passwords" class="indexed">
+            <h2>App passwords</h2>
+            <p class="small">Read-only API tokens for trusted automation.  A token can read status and list data but can never change anything, never satisfies step-up, and only works from the allowed source networks.</p>
+            @if (_newAppPasswordToken is not null)
+            {
+                <p class="message">Copy this token now.  It is shown once and never again.</p>
+                <pre class="secret-block">@_newAppPasswordToken</pre>
+            }
+            @if (_appPasswords.Count > 0)
+            {
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Created</th>
+                            <th>Expires</th>
+                            <th>Last used</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var appPassword in _appPasswords)
+                        {
+                            <tr>
+                                <td>@appPassword.Name</td>
+                                <td>@Display.Format(appPassword.CreatedAt)</td>
+                                <td>@(appPassword.ExpiresAt is null ? "never" : Display.Format(appPassword.ExpiresAt.Value))</td>
+                                <td>@(appPassword.LastUsedAt is null ? "never" : Display.Format(appPassword.LastUsedAt.Value))</td>
+                                <td>
+                                    @if (appPassword.RevokedAt is not null)
+                                    {
+                                        <span class="badge badge-red">Revoked</span>
+                                    }
+                                    else if (appPassword.ExpiresAt <= DateTimeOffset.UtcNow)
+                                    {
+                                        <span class="badge badge-amber">Expired</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge badge-green">Active</span>
+                                    }
+                                </td>
+                                <td class="actions-cell">
+                                    @if (appPassword.RevokedAt is null && _stepUpFresh)
+                                    {
+                                        <form method="post" action="/account/app-passwords/revoke">
+                                            <AntiforgeryToken />
+                                            <input type="hidden" name="id" value="@appPassword.Id" />
+                                            <button type="submit" class="secondary-button">Revoke</button>
+                                        </form>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            else
+            {
+                <p>No app passwords have been created.</p>
+            }
+
+            @if (_stepUpFresh)
+            {
+                <form method="post" action="/account/app-passwords/create" class="edit-form">
+                    <AntiforgeryToken />
+                    <label>
+                        Name
+                        <input name="name" autocomplete="off" required maxlength="@AdminAppPasswordEndpoints.MaxNameLength" placeholder="copilot-cli" />
+                    </label>
+                    <button type="submit">Create app password</button>
+                </form>
+            }
+            else
+            {
+                <div class="step-up-strip">
+                    <span>Creating or revoking app passwords requires step-up verification.</span>
+                    <StepUpPrompt ReturnTo="/account#app-passwords" ShowSecurityKey="_webAuthnCredentials.Count > 0" PopoverId="step-up-popover-app-passwords" />
+                </div>
+            }
+        </section>
+
         <section id="preferences" class="indexed">
             <h2>Preferences</h2>
             <form method="post" action="/account/preferences" class="edit-form">
@@ -301,6 +387,8 @@
     private IReadOnlyList<AdminSession> _sessions = [];
     private IReadOnlyList<AdminWebAuthnCredential> _webAuthnCredentials = [];
     private IReadOnlyList<string> _newRecoveryCodes = [];
+    private IReadOnlyList<AppPassword> _appPasswords = [];
+    private string? _newAppPasswordToken;
     private AdminUserPreferences _preferences = new() { UserId = Guid.Empty, UpdatedAt = DateTimeOffset.UtcNow };
     private IReadOnlyList<TimeZoneOption> _timeZones = BuildTimeZoneOptions("UTC");
     private string _setupSecret = string.Empty;
@@ -347,6 +435,8 @@
 
         _stepUpFresh = _currentSession?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
         _newRecoveryCodes = RecoveryCodesCookie.ReadAndClear(context);
+        _appPasswords = await AppPasswords.ListForUserAsync(userId, context.RequestAborted).ConfigureAwait(false);
+        _newAppPasswordToken = NewAppPasswordCookie.ReadAndClear(context);
         if (!_user.TotpEnrolled || _stepUpFresh)
         {
             _setupSecret = Totp.GenerateSecret();

@@ -289,6 +289,15 @@ public sealed class DefaultPolicyEngine(
             Rationale = string.Join(' ', rationale),
             Guardrails = guardrails,
             CreatedAt = now,
+            // Carried structurally so the automatic dispatcher acts on the
+            // exact target and duration the engine evaluated; approval-flow
+            // outcomes re-derive at review time as before.
+            AuthorizedTargetIp = outcome is DecisionOutcome.ActionAuthorized or DecisionOutcome.DryRun
+                ? targetIp
+                : null,
+            RecommendedActionDuration = outcome is DecisionOutcome.ActionAuthorized or DecisionOutcome.DryRun
+                ? recommendedDuration
+                : null,
         };
     }
 

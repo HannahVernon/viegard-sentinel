@@ -1,10 +1,13 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Viegard.Actions.MikroTik;
+using Viegard.Application.Actions;
 using Viegard.Application.Audit;
 using Viegard.Application.Policy;
 using Viegard.Application.Queues;
 using Viegard.Application.Stores;
 using Viegard.Domain;
+using Viegard.Domain.Actions;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Classifications;
 using Viegard.Domain.Incidents;
@@ -17,11 +20,15 @@ public sealed class PolicyWorker(
     IDecisionStore decisionStore,
     IIncidentStore incidentStore,
     IPolicyEngine policyEngine,
+    IActionStore actionStore,
+    IWorkQueue<ActionWorkItem> actionQueue,
+    IGuardrailStateStore guardrailState,
     IAuditLedger auditLedger,
     IOptions<PolicyOptions> options,
     PolicyPostureSource postureSource,
     ILogger<PolicyWorker> logger) : BackgroundService
 {
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var policyOptions = options.Value;
@@ -84,6 +91,8 @@ public sealed class PolicyWorker(
                     DetailJson = DecisionDetailJson(decision),
                 }, stoppingToken).ConfigureAwait(false);
 
+                await DispatchAuthorizedActionAsync(decision, stoppingToken).ConfigureAwait(false);
+
                 await lease.CompleteAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -107,6 +116,76 @@ public sealed class PolicyWorker(
 
         logger.LogInformation("Policy worker stopping.");
     }
+
+    /// <summary>
+    /// The missing last mile of the unattended tier (found live: the first
+    /// ActionAuthorized decision passed every guardrail and then nothing
+    /// happened, because only the manual-approval endpoint dispatched
+    /// actions).  Mirrors the approval flow's construction; the MikroTik
+    /// provider still re-checks the dry-run posture at execution time.
+    /// </summary>
+    private async Task DispatchAuthorizedActionAsync(
+        Viegard.Domain.Decisions.Decision decision,
+        CancellationToken cancellationToken)
+    {
+        if (decision.Outcome != Viegard.Domain.Decisions.DecisionOutcome.ActionAuthorized)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(decision.AuthorizedTargetIp))
+        {
+            logger.LogError(
+                "Decision {DecisionId} is ActionAuthorized but carries no target IP; nothing dispatched.",
+                decision.Id);
+            return;
+        }
+
+        var duration = decision.RecommendedActionDuration ?? options.Value.TempBanDuration;
+        var timeout = MikroTikBanActionProvider.FormatRouterOsDuration(duration);
+        var action = new ActionRecord
+        {
+            Id = ViegardId.New(),
+            DecisionId = decision.Id,
+            ProviderId = MikroTikBanActionProvider.MikroTikProviderId,
+            OperationId = MikroTikBanActionProvider.BanIpOperationId,
+            ParametersJson = JsonSerializer.Serialize(
+                new BanParameters(decision.AuthorizedTargetIp, timeout), Json),
+            Status = ActionStatus.Pending,
+            RequestedAt = DateTimeOffset.UtcNow,
+        };
+
+        await actionStore.AddAsync(action, cancellationToken).ConfigureAwait(false);
+        await actionQueue.EnqueueAsync(new ActionWorkItem(action.Id), cancellationToken).ConfigureAwait(false);
+        // Feed the rate-cap counters the engine's rate-caps guardrail reads;
+        // without this the hourly/daily caps count nothing.
+        await guardrailState.RecordAutoActionAsync(action.RequestedAt, cancellationToken).ConfigureAwait(false);
+        await auditLedger.AppendAsync(new AuditRecord
+        {
+            Id = ViegardId.New(),
+            Timestamp = DateTimeOffset.UtcNow,
+            Stage = PipelineStage.Policy,
+            Summary = $"Automatic ban action {action.Id:N} queued for {decision.AuthorizedTargetIp} ({timeout}).",
+            DecisionId = decision.Id,
+            ActionId = action.Id,
+            DetailJson = JsonSerializer.Serialize(new
+            {
+                Kind = "AutomaticActionDispatched",
+                decision.AuthorizedTargetIp,
+                Timeout = timeout,
+                ProviderId = MikroTikBanActionProvider.MikroTikProviderId,
+                OperationId = MikroTikBanActionProvider.BanIpOperationId,
+            }, Json),
+        }, cancellationToken).ConfigureAwait(false);
+        logger.LogInformation(
+            "Automatic ban action {ActionId} queued for {TargetIp} ({Timeout}) from decision {DecisionId}.",
+            action.Id,
+            decision.AuthorizedTargetIp,
+            timeout,
+            decision.Id);
+    }
+
+    private sealed record BanParameters(string Ip, string Timeout);
 
     private async Task AbandonLeaseAsync(IWorkLease<ClassificationWorkItem> lease, bool chargeAttempt)
     {

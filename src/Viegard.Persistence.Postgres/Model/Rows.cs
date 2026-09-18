@@ -148,6 +148,10 @@ public sealed class DecisionRow
 
     public DateTimeOffset CreatedAt { get; set; }
 
+    public string? AuthorizedTargetIp { get; set; }
+
+    public TimeSpan? RecommendedActionDuration { get; set; }
+
     public string? ReviewedBy { get; set; }
 
     public DateTimeOffset? ReviewedAt { get; set; }

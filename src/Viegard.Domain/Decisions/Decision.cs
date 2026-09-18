@@ -56,6 +56,16 @@ public sealed record Decision
 
     public required DateTimeOffset CreatedAt { get; init; }
 
+    /// <summary>
+    /// The IP the policy engine authorized an automatic action against, set
+    /// only for ActionAuthorized and DryRun outcomes so the dispatcher acts
+    /// on exactly what the engine evaluated rather than re-deriving it.
+    /// </summary>
+    public string? AuthorizedTargetIp { get; init; }
+
+    /// <summary>Engine-recommended action duration for automatic outcomes.</summary>
+    public TimeSpan? RecommendedActionDuration { get; init; }
+
     public string? ReviewedBy { get; init; }
 
     public DateTimeOffset? ReviewedAt { get; init; }

@@ -1679,7 +1679,11 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var resolver = new ReferenceResolver(factory);
         var store = new PostgresDecisionStore(factory, resolver);
         var now = DateTimeOffset.UtcNow;
-        var permit = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-permit", DecisionOutcome.ActionAuthorized, "review", now);
+        var permit = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-permit", DecisionOutcome.ActionAuthorized, "review", now) with
+        {
+            AuthorizedTargetIp = "203.0.113.9",
+            RecommendedActionDuration = TimeSpan.FromDays(1),
+        };
         var pending = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-pending", DecisionOutcome.RequireApproval, "review", now);
         var alreadyReviewed = Decision(ViegardId.New(), $"it-review-{ViegardId.New():N}-reviewed", DecisionOutcome.RequireApproval, "review", now) with
         {
@@ -1693,6 +1697,10 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         Assert.Null(await store.TryReviewAsync(permit.Id, DecisionReviewOutcome.Approved, "operator", now));
         Assert.Null(await store.TryReviewAsync(alreadyReviewed.Id, DecisionReviewOutcome.Rejected, "operator", now));
+
+        var storedPermit = await store.GetAsync(permit.Id);
+        Assert.Equal("203.0.113.9", storedPermit!.AuthorizedTargetIp);
+        Assert.Equal(TimeSpan.FromDays(1), storedPermit.RecommendedActionDuration);
 
         var reviewed = await store.TryReviewAsync(pending.Id, DecisionReviewOutcome.Rejected, "operator", now);
 

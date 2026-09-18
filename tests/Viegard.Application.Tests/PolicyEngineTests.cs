@@ -193,6 +193,45 @@ public sealed class PolicyEngineTests
     }
 
     [Fact]
+    public async Task Authorized_decisions_carry_target_ip_and_duration_for_the_dispatcher()
+    {
+        // The unattended dispatcher acts on these structured fields; the
+        // first live ActionAuthorized decision carried neither and nothing
+        // happened, so this pins the contract.
+        var fixture = await CreateFixtureAsync("198.51.100.44");
+
+        var authorized = await fixture.Engine.EvaluateAsync(
+            AiClassification(fixture.IncidentId, confidence: 0.95, severity: 8),
+            ActiveContext);
+        var dryRun = await fixture.Engine.EvaluateAsync(
+            AiClassification(fixture.IncidentId, confidence: 0.95, severity: 8),
+            ActiveContext with { DryRun = true });
+        var review = await fixture.Engine.EvaluateAsync(
+            AiClassification(fixture.IncidentId, confidence: 0.95, severity: 8),
+            ActiveContext with { ManualApprovalMode = true });
+        var recordOnly = await fixture.Engine.EvaluateAsync(
+            AiClassification(fixture.IncidentId, confidence: 0.5, severity: 8),
+            ActiveContext);
+
+        Assert.Equal(DecisionOutcome.ActionAuthorized, authorized.Outcome);
+        Assert.Equal("198.51.100.44", authorized.AuthorizedTargetIp);
+        Assert.NotNull(authorized.RecommendedActionDuration);
+        Assert.True(authorized.RecommendedActionDuration > TimeSpan.Zero);
+
+        Assert.Equal(DecisionOutcome.DryRun, dryRun.Outcome);
+        Assert.Equal("198.51.100.44", dryRun.AuthorizedTargetIp);
+        Assert.NotNull(dryRun.RecommendedActionDuration);
+
+        Assert.Equal(DecisionOutcome.RequireApproval, review.Outcome);
+        Assert.Null(review.AuthorizedTargetIp);
+        Assert.Null(review.RecommendedActionDuration);
+
+        Assert.Equal(DecisionOutcome.RecordOnly, recordOnly.Outcome);
+        Assert.Null(recordOnly.AuthorizedTargetIp);
+        Assert.Null(recordOnly.RecommendedActionDuration);
+    }
+
+    [Fact]
     public async Task Rate_cap_exceeded_requires_approval()
     {
         var fixture = await CreateFixtureAsync();

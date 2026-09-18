@@ -140,8 +140,18 @@ builder.Services
         options.AccessDeniedPath = "/login";
         options.EventsType = typeof(AdminCookieAuthenticationEvents);
         options.SlidingExpiration = false;
-    });
-builder.Services.AddAuthorization();
+    })
+    .AddScheme<AuthenticationSchemeOptions, AppPasswordAuthenticationHandler>(AppPasswordDefaults.SchemeName, null);
+builder.Services.AddAuthorization(options =>
+{
+    // Read-only API endpoints accept either an interactive cookie session or
+    // a read-only app password.  Every other endpoint keeps the default
+    // policy, which authenticates via the cookie scheme only, so tokens are
+    // fail-closed outside the opted-in surface.
+    options.AddPolicy(AppPasswordDefaults.ReadOnlyApiPolicy, policy => policy
+        .AddAuthenticationSchemes(CookieAuthenticationDefaults.AuthenticationScheme, AppPasswordDefaults.SchemeName)
+        .RequireAuthenticatedUser());
+});
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -213,6 +223,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IAdminUserStore, InMemoryAdminUserStore>();
         builder.Services.AddSingleton<IAdminSessionStore, InMemoryAdminSessionStore>();
         builder.Services.AddSingleton<IAdminErrorStore, InMemoryAdminErrorStore>();
+        builder.Services.AddSingleton<IAppPasswordStore, InMemoryAppPasswordStore>();
         builder.Services.AddSingleton<IAuditLedger, InMemoryAuditLedger>();
         builder.Services.AddSingleton<IActiveBanStore, InMemoryActiveBanStore>();
         builder.Services.AddSingleton<IQueueTelemetryStore, InMemoryQueueTelemetryStore>();
@@ -363,7 +374,7 @@ app.MapGet("/status/queues", async (
     var settings = await retentionSettings.GetAsync(cancellationToken).ConfigureAwait(false);
     var payload = QueueStatusPayload.Build(snapshots, registrations, DateTimeOffset.UtcNow, display.Format, settings);
     return Results.Json(payload);
-}).RequireAuthorization();
+}).RequireAuthorization(AppPasswordDefaults.ReadOnlyApiPolicy);
 app.MapGet("/status/upgrades", async (
     IHostUpgradeCommandStore hostUpgrades,
     UserDisplay display,
@@ -373,7 +384,7 @@ app.MapGet("/status/upgrades", async (
         .BuildPayloadAsync(hostUpgrades, display, cancellationToken)
         .ConfigureAwait(false);
     return Results.Json(payload);
-}).RequireAuthorization();
+}).RequireAuthorization(AppPasswordDefaults.ReadOnlyApiPolicy);
 app.MapGet("/status/bans", async (
     IActiveBanStore activeBans,
     IActionStore actionStore,
@@ -387,7 +398,7 @@ app.MapGet("/status/bans", async (
         .ListRecentByProviderAsync(MikroTikBanActionProvider.MikroTikProviderId, 50, cancellationToken)
         .ConfigureAwait(false);
     return Results.Json(BanStatusPayload.Build(bans, recent, now, display.Format));
-}).RequireAuthorization();
+}).RequireAuthorization(AppPasswordDefaults.ReadOnlyApiPolicy);
 app.MapAdminAuthEndpoints();
 app.MapAdminSignatureEndpoints();
 app.MapAdminConfigurationEndpoints();

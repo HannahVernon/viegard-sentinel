@@ -13,6 +13,7 @@ using Viegard.AdminApi.Configuration;
 using Viegard.AdminApi.Decisions;
 using Viegard.AdminApi.Errors;
 using Viegard.AdminApi.Signatures;
+using Viegard.Actions.MikroTik;
 using Viegard.Application.Actions;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
@@ -372,6 +373,20 @@ app.MapGet("/status/upgrades", async (
         .BuildPayloadAsync(hostUpgrades, display, cancellationToken)
         .ConfigureAwait(false);
     return Results.Json(payload);
+}).RequireAuthorization();
+app.MapGet("/status/bans", async (
+    IActiveBanStore activeBans,
+    IActionStore actionStore,
+    UserDisplay display,
+    CancellationToken cancellationToken) =>
+{
+    await display.InitializeAsync().ConfigureAwait(false);
+    var now = DateTimeOffset.UtcNow;
+    var bans = await activeBans.ListUnexpiredAsync(now, cancellationToken).ConfigureAwait(false);
+    var recent = await actionStore
+        .ListRecentByProviderAsync(MikroTikBanActionProvider.MikroTikProviderId, 50, cancellationToken)
+        .ConfigureAwait(false);
+    return Results.Json(BanStatusPayload.Build(bans, recent, now, display.Format));
 }).RequireAuthorization();
 app.MapAdminAuthEndpoints();
 app.MapAdminSignatureEndpoints();

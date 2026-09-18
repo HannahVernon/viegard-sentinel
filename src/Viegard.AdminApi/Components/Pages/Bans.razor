@@ -25,85 +25,106 @@
 
     <section>
         <h2>Active bans</h2>
-        @if (_activeBans.Count == 0)
-        {
-            <p>No active bans.</p>
-        }
-        else
-        {
-            <table class="data-table">
-                <thead>
+        <p data-bans-empty hidden="@(_activeBans.Count > 0 ? true : null)">No active bans.</p>
+        <table class="data-table" data-live-bans hidden="@(_activeBans.Count == 0 ? true : null)">
+            <thead>
+                <tr>
+                    <th>IP</th>
+                    <th>Expires in</th>
+                    <th>Created</th>
+                    <th>Origin decision</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var ban in _activeBans)
+                {
                     <tr>
-                        <th>IP</th>
-                        <th>Expires in</th>
-                        <th>Created</th>
-                        <th>Origin decision</th>
-                        <th>Action</th>
+                        <td><code>@ban.Ip</code></td>
+                        <td>@AdminText.Age(ban.ExpiresAt - _now)</td>
+                        <td>@Display.Format(ban.CreatedAt)</td>
+                        <td><a href="/decisions/@ban.DecisionId">@AdminText.ShortId(ban.DecisionId)</a></td>
+                        <td class="actions-cell">
+                            @if (_hasFreshStepUp)
+                            {
+                                <form method="post" action="/bans/unban">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="ip" value="@ban.Ip" />
+                                    <button type="submit" class="secondary-button">Unban</button>
+                                </form>
+                            }
+                            else
+                            {
+                                <span class="small">Verify step-up first.</span>
+                            }
+                        </td>
                     </tr>
-                </thead>
-                <tbody>
-                    @foreach (var ban in _activeBans)
+                }
+            </tbody>
+        </table>
+        <template data-ban-row-template>
+            <tr>
+                <td><code data-cell="ip"></code></td>
+                <td data-cell="expires"></td>
+                <td data-cell="created"></td>
+                <td><a data-cell="decision"></a></td>
+                <td class="actions-cell">
+                    @if (_hasFreshStepUp)
                     {
-                        <tr>
-                            <td><code>@ban.Ip</code></td>
-                            <td>@AdminText.Age(ban.ExpiresAt - _now)</td>
-                            <td>@Display.Format(ban.CreatedAt)</td>
-                            <td><a href="/decisions/@ban.DecisionId">@AdminText.ShortId(ban.DecisionId)</a></td>
-                            <td class="actions-cell">
-                                @if (_hasFreshStepUp)
-                                {
-                                    <form method="post" action="/bans/unban">
-                                        <AntiforgeryToken />
-                                        <input type="hidden" name="ip" value="@ban.Ip" />
-                                        <button type="submit" class="secondary-button">Unban</button>
-                                    </form>
-                                }
-                                else
-                                {
-                                    <span class="small">Verify step-up first.</span>
-                                }
-                            </td>
-                        </tr>
+                        <form method="post" action="/bans/unban">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="ip" value="" />
+                            <button type="submit" class="secondary-button">Unban</button>
+                        </form>
                     }
-                </tbody>
-            </table>
-        }
+                    else
+                    {
+                        <span class="small">Verify step-up first.</span>
+                    }
+                </td>
+            </tr>
+        </template>
     </section>
 
     <section>
         <h2>Recent ban actions</h2>
-        @if (_recentActions.Count == 0)
-        {
-            <p>No ban actions have been recorded.</p>
-        }
-        else
-        {
-            <table class="data-table">
-                <thead>
+        <p data-ban-actions-empty hidden="@(_recentActions.Count > 0 ? true : null)">No ban actions have been recorded.</p>
+        <table class="data-table" data-live-ban-actions hidden="@(_recentActions.Count == 0 ? true : null)">
+            <thead>
+                <tr>
+                    <th>Operation</th>
+                    <th>Status</th>
+                    <th>Requested</th>
+                    <th>Completed</th>
+                    <th>Router summary</th>
+                    <th>Decision</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var action in _recentActions)
+                {
                     <tr>
-                        <th>Operation</th>
-                        <th>Status</th>
-                        <th>Requested</th>
-                        <th>Completed</th>
-                        <th>Router summary</th>
-                        <th>Decision</th>
+                        <td>@action.OperationId</td>
+                        <td><span class="@BanStatusPayload.StatusCss(action.Status)">@action.Status</span></td>
+                        <td>@Display.Format(action.RequestedAt)</td>
+                        <td>@(action.CompletedAt is null ? "-" : Display.Format(action.CompletedAt.Value))</td>
+                        <td>@BanActionSummary.Summarize(action)</td>
+                        <td><a href="/decisions/@action.DecisionId">@AdminText.ShortId(action.DecisionId)</a></td>
                     </tr>
-                </thead>
-                <tbody>
-                    @foreach (var action in _recentActions)
-                    {
-                        <tr>
-                            <td>@action.OperationId</td>
-                            <td><span class="@ActionStatusCss(action.Status)">@action.Status</span></td>
-                            <td>@Display.Format(action.RequestedAt)</td>
-                            <td>@(action.CompletedAt is null ? "-" : Display.Format(action.CompletedAt.Value))</td>
-                            <td>@BanActionSummary.Summarize(action)</td>
-                            <td><a href="/decisions/@action.DecisionId">@AdminText.ShortId(action.DecisionId)</a></td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        }
+                }
+            </tbody>
+        </table>
+        <template data-ban-action-row-template>
+            <tr>
+                <td data-cell="operation"></td>
+                <td><span data-cell="status"></span></td>
+                <td data-cell="requested"></td>
+                <td data-cell="completed"></td>
+                <td data-cell="summary"></td>
+                <td><a data-cell="decision"></a></td>
+            </tr>
+        </template>
+        <p class="refresh-caption" data-refresh-host="bans"><span data-refresh-age></span></p>
     </section>
 </main>
 
@@ -136,14 +157,4 @@
         return Guid.TryParse(userId, out var parsed)
             && (await Users.ListWebAuthnCredentialsAsync(parsed).ConfigureAwait(false)).Count > 0;
     }
-
-    private static string ActionStatusCss(ActionStatus status) => status switch
-    {
-        ActionStatus.Succeeded => "badge badge-green",
-        ActionStatus.DryRun => "badge badge-blue",
-        ActionStatus.Pending => "badge badge-amber",
-        ActionStatus.Failed => "badge badge-red",
-        ActionStatus.RolledBack => "badge",
-        _ => "badge",
-    };
 }

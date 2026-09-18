@@ -1,0 +1,12 @@
+{
+  "name": "viegard-ui-check",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Screenshot harness for the Viegard admin UI at phone and desktop viewports.",
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "otplib": "13.5.0",
+    "playwright": "1.63.0"
+  }
+}

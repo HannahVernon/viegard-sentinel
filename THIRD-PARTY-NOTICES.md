@@ -33,3 +33,5 @@ Microsoft.IdentityModel.Abstractions (transitive) | 8.2.0 | Microsoft Corporatio
 Microsoft.IdentityModel.JsonWebTokens (transitive) | 8.2.0 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT
 Microsoft.IdentityModel.Logging (transitive) | 8.2.0 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT
 Microsoft.IdentityModel.Tokens (transitive) | 8.2.0 | Microsoft Corporation | MIT | https://licenses.nuget.org/MIT
+playwright (npm, tools/ui-check only) | 1.63.0 | Microsoft Corporation | Apache-2.0 | https://github.com/microsoft/playwright/blob/main/LICENSE
+otplib (npm, tools/ui-check only) | 13.5.0 | Gerald Yeo and contributors | MIT | https://github.com/yeojz/otplib/blob/master/LICENSE

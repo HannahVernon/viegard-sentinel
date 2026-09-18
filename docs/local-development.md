@@ -36,6 +36,13 @@ dotnet run --project .\src\Viegard.AdminApi --no-launch-profile
 
 Open `http://127.0.0.1:8080` or the URL printed by Kestrel.  The admin pages should load after bootstrap login, password change, and TOTP enrollment.
 
+### UI screenshot harness
+
+With the in-memory instance above running, `tools/ui-check` can walk every
+admin page at phone and desktop viewports and save screenshots - use it to
+verify layout changes by looking at rendered pages.  See
+`tools/ui-check/README.md` for setup and usage.
+
 ## Shared local PostgreSQL for end-to-end data
 
 Start the existing WSL Docker PostgreSQL container **and keep a WSL session alive**: the WSL VM idles out shortly after the last session exits, taking Docker's port forward with it.  Leave this running in its own window:

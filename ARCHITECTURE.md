@@ -164,6 +164,10 @@ deploy/                        Dockerfiles, sanitized compose examples, Linux de
                                script with deployed-commit tracking, host upgrade
                                agent unit/script, and Windows MDaemon satellite
                                installer
+tools/
+  ui-check/                    Playwright screenshot harness: walks every admin page
+                               at phone and desktop viewports against a local
+                               throwaway instance (see tools/ui-check/README.md)
 ```
 
 Adapters are separate projects so integrations stay optional, independently testable, and additive: new sources/actions never modify the core.  Project count is higher, but each project is small.

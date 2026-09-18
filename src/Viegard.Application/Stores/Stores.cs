@@ -133,6 +133,15 @@ public interface IDecisionStore
         string reviewedBy,
         DateTimeOffset reviewedAt,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Counts the unreviewed RequireApproval decisions whose classification
+    /// severity is at or below <paramref name="maxSeverity"/>: the set a
+    /// bulk reject at that severity would claim.
+    /// </summary>
+    ValueTask<int> CountUnreviewedAtOrBelowAsync(
+        int maxSeverity,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Persistence port for action records (Roost).</summary>

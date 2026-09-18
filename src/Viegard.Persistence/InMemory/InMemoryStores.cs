@@ -230,10 +230,26 @@ public sealed class InMemoryDecisionStore : IDecisionStore
     private int SeverityOf(Decision decision) =>
         _classifications?.TryGetSeverity(decision.ClassificationId) ?? 0;
 
-    private IEnumerable<Decision> ApplySeverityFilter(IEnumerable<Decision> source, DecisionListFilter? filter) =>
-        filter?.MinSeverity is { } minSeverity
-            ? source.Where(d => _classifications?.TryGetSeverity(d.ClassificationId) is { } severity && severity >= minSeverity)
-            : source;
+    private IEnumerable<Decision> ApplySeverityFilter(IEnumerable<Decision> source, DecisionListFilter? filter)
+    {
+        var query = source;
+        if (filter?.MinSeverity is { } minSeverity)
+        {
+            query = query.Where(d => _classifications?.TryGetSeverity(d.ClassificationId) is { } severity && severity >= minSeverity);
+        }
+
+        if (filter?.MaxSeverity is { } maxSeverity)
+        {
+            query = query.Where(d => _classifications?.TryGetSeverity(d.ClassificationId) is { } severity && severity <= maxSeverity);
+        }
+
+        if (filter?.UnreviewedOnly == true)
+        {
+            query = query.Where(d => d.ReviewedAt is null);
+        }
+
+        return query;
+    }
 
     private Comparison<Decision>? Comparison(ListSort<DecisionSortColumn>? sort) =>
         sort is { Column: DecisionSortColumn.Severity, Direction: SortDirection.Asc or SortDirection.Desc } severitySort
@@ -298,6 +314,15 @@ public sealed class InMemoryDecisionStore : IDecisionStore
             return ValueTask.FromResult(rejected);
         }
     }
+
+    public ValueTask<int> CountUnreviewedAtOrBelowAsync(
+        int maxSeverity,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(_decisions.Values.Count(decision =>
+            decision.Outcome == DecisionOutcome.RequireApproval
+            && decision.ReviewedAt is null
+            && _classifications?.TryGetSeverity(decision.ClassificationId) is { } severity
+            && severity <= maxSeverity));
 }
 
 public sealed class InMemoryActionStore : IActionStore

@@ -621,6 +621,18 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal([decisionC.Id, decisionB.Id], minSeverityPage.Items.Select(d => d.Id));
         Assert.Equal(2, minSeverityPage.TotalCount);
 
+        var maxSeverityFilter = new DecisionListFilter(prefix, null, MaxSeverity: 5);
+        var maxSeverityPage = await decisionStore.ListPageAsync(beforeId: null, pageSize: 10, filter: maxSeverityFilter, sort: severitySort);
+        Assert.Equal([decisionB.Id, decisionA.Id], maxSeverityPage.Items.Select(d => d.Id));
+        Assert.Equal(2, maxSeverityPage.TotalCount);
+
+        var unreviewedFilter = new DecisionListFilter(prefix, DecisionOutcome.RequireApproval, MaxSeverity: 5, UnreviewedOnly: true);
+        var unreviewedPage = await decisionStore.ListPageAsync(beforeId: null, pageSize: 10, filter: unreviewedFilter, sort: severitySort);
+        Assert.Equal(decisionB.Id, Assert.Single(unreviewedPage.Items).Id);
+        await decisionStore.TryReviewAsync(decisionB.Id, DecisionReviewOutcome.Rejected, "operator", now);
+        var afterReviewPage = await decisionStore.ListPageAsync(beforeId: null, pageSize: 10, filter: unreviewedFilter, sort: severitySort);
+        Assert.Empty(afterReviewPage.Items);
+
         var auditLedger = new PostgresAuditLedger(factory, resolver);
         var auditNone = AuditRecord($"{prefix} audit none", null, now.AddMinutes(1));
         var auditA = AuditRecord($"{prefix} audit a", $"{prefix}-audit-a", now.AddMinutes(2));
@@ -1621,6 +1633,8 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var store = new PostgresDecisionStore(factory, resolver);
         var now = DateTimeOffset.UtcNow;
         var prefix = $"it-bulkreject-{ViegardId.New():N}";
+        var countAtThreeBaseline = await store.CountUnreviewedAtOrBelowAsync(3);
+        var countAtTenBaseline = await store.CountUnreviewedAtOrBelowAsync(10);
 
         var lowClassification = CreateClassification($"{prefix}-low", "scanner", 2, now);
         var highClassification = CreateClassification($"{prefix}-high", "scanner", 8, now);
@@ -1641,9 +1655,13 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             await store.AddAsync(item);
         }
 
+        Assert.Equal(2, await store.CountUnreviewedAtOrBelowAsync(10) - countAtTenBaseline);
+        Assert.Equal(1, await store.CountUnreviewedAtOrBelowAsync(3) - countAtThreeBaseline);
+
         var rejected = await store.BulkRejectUnreviewedAsync(3, "operator", now);
 
         Assert.Equal(1, rejected);
+        Assert.Equal(0, await store.CountUnreviewedAtOrBelowAsync(3));
         var updated = await store.GetAsync(lowPending.Id);
         Assert.Equal(DecisionReviewOutcome.Rejected, updated!.ReviewOutcome);
         Assert.Equal("operator", updated.ReviewedBy);

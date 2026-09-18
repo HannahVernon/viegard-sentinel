@@ -528,6 +528,18 @@ button:hover {
     margin-top: 0;
 }
 
+.filter-bar .filter-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.55rem;
+}
+
+.filter-bar .filter-checkbox input[type="checkbox"] {
+    width: auto;
+    margin-top: 0;
+}
+
 .filter-clear {
     color: var(--muted);
     font-size: 0.9rem;

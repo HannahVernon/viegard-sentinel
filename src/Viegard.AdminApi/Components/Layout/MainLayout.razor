@@ -6,6 +6,11 @@
     <Authorized>
         <header class="admin-header">
             <a class="brand" href="/"><img class="brand-mark" src="img/raven.png" alt="" />Viegard</a>
+            @* Mobile nav disclosure: a checkbox toggle needs no JavaScript,
+               and every navigation is a full page load, so the menu closes
+               itself.  Desktop hides the toggle and shows the inline nav. *@
+            <input type="checkbox" id="nav-toggle" class="nav-toggle" />
+            <label class="nav-toggle-button" for="nav-toggle" aria-label="Toggle navigation menu">&#9776; Menu</label>
             <nav class="admin-nav" aria-label="Admin navigation">
                 <a href="/queues">Dashboard/Queues</a>
                 <a href="/events">Events</a>

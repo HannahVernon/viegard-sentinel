@@ -25,6 +25,13 @@ html {
     scroll-padding-top: 5rem;
 }
 
+@media (max-width: 900px) {
+    html {
+        /* Collapsed header plus the sticky section-index chip row. */
+        scroll-padding-top: 6.5rem;
+    }
+}
+
 .valid.modified:not([type=checkbox]) {
     outline: 1px solid var(--ok);
 }
@@ -115,6 +122,71 @@ a:hover {
 .admin-nav a:hover {
     color: var(--ink);
     background: var(--bg-raised);
+}
+
+/* Mobile navigation disclosure.  The checkbox stays focusable off-screen so
+   keyboard toggling works; the label is the visible button. */
+.nav-toggle {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+
+.nav-toggle-button {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    .admin-header {
+        gap: 0.75rem;
+        padding: 0.55rem 1rem;
+    }
+
+    .nav-toggle-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.35rem 0.65rem;
+        border: 1px solid var(--panel-border);
+        border-radius: 0.4rem;
+        color: var(--muted);
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .nav-toggle:checked ~ .nav-toggle-button,
+    .nav-toggle-button:hover {
+        color: var(--ink);
+        background: var(--bg-raised);
+    }
+
+    .nav-toggle:focus-visible ~ .nav-toggle-button {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+    }
+
+    .admin-nav {
+        display: none;
+    }
+
+    .nav-toggle:checked ~ .admin-nav {
+        display: flex;
+        flex-direction: column;
+        flex-basis: 100%;
+        order: 10;
+        gap: 0.15rem;
+        padding-bottom: 0.4rem;
+    }
+
+    /* Larger touch targets in the opened menu. */
+    .nav-toggle:checked ~ .admin-nav a {
+        padding: 0.55rem 0.65rem;
+    }
+
+    .header-side {
+        margin-left: auto;
+    }
 }
 
 /* Refresh-activity indicator (header) and per-table age captions */
@@ -233,6 +305,44 @@ a:hover {
 
 .page-index a:hover {
     color: var(--accent-strong);
+}
+
+/* On narrow screens the index column would stack above the content and
+   consume half the viewport (same failure mode as the wrapped nav bar).
+   Collapse it to a single horizontally scrollable chip row pinned just
+   below the sticky header, so section jumping stays one flick away. */
+@media (max-width: 900px) {
+    .page-layout {
+        display: block;
+    }
+
+    .page-index {
+        position: sticky;
+        /* Just below the single-row collapsed header. */
+        top: 3.4rem;
+        z-index: 90;
+        flex-direction: row;
+        overflow-x: auto;
+        gap: 0.35rem;
+        padding: 0.45rem 0;
+        margin-bottom: 0.75rem;
+        border-right: none;
+        border-bottom: 1px solid var(--panel-border);
+        background: var(--bg);
+        white-space: nowrap;
+        scrollbar-width: thin;
+    }
+
+    .page-index a {
+        flex: 0 0 auto;
+        padding: 0.3rem 0.6rem;
+        border: 1px solid var(--panel-border);
+        border-radius: 1rem;
+    }
+
+    .page-index a[aria-current="location"] {
+        border-color: var(--accent);
+    }
 }
 
 .page-content section {

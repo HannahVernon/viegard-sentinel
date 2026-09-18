@@ -32,8 +32,42 @@ public sealed class BanStatusPayloadTests
         Assert.Equal(Format(ban.CreatedAt), row.Created);
         Assert.Equal("0123456789abcdef0123456789abcdef", row.DecisionId);
         Assert.Equal(AdminText.ShortId(decisionId), row.DecisionShort);
+        Assert.Equal(ban.CreatedAt.ToUnixTimeMilliseconds(), row.CreatedUnixMs);
+        Assert.Equal(ban.ExpiresAt.ToUnixTimeMilliseconds(), row.ExpiresUnixMs);
+        Assert.Equal("cb00710a", row.IpSortKey);
         Assert.Empty(payload.RecentActions);
     }
+
+    [Fact]
+    public void Build_orders_active_bans_newest_first()
+    {
+        var older = Ban("203.0.113.10", Now.AddHours(-3));
+        var newest = Ban("203.0.113.11", Now.AddMinutes(-5));
+        var middle = Ban("10.0.0.1", Now.AddHours(-1));
+
+        var payload = BanStatusPayload.Build([older, newest, middle], [], Now, Format);
+
+        Assert.Equal(
+            ["203.0.113.11", "10.0.0.1", "203.0.113.10"],
+            payload.ActiveBans.Select(b => b.Ip).ToArray());
+    }
+
+    [Theory]
+    [InlineData("10.2.0.1", "0a020001")]
+    [InlineData("10.10.0.1", "0a0a0001")]
+    [InlineData("not-an-ip", "not-an-ip")]
+    public void IpSortKey_orders_octets_numerically(string ip, string expected) =>
+        Assert.Equal(expected, BanStatusPayload.IpSortKey(ip));
+
+    private static ActiveBan Ban(string ip, DateTimeOffset createdAt) => new()
+    {
+        Id = ViegardId.New(),
+        Ip = ip,
+        CreatedAt = createdAt,
+        ExpiresAt = Now.AddDays(1),
+        DecisionId = ViegardId.New(),
+        ActionId = ViegardId.New(),
+    };
 
     [Fact]
     public void Build_maps_actions_display_ready_with_status_css()

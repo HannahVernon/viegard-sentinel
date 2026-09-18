@@ -29,17 +29,17 @@
         <table class="data-table" data-live-bans hidden="@(_activeBans.Count == 0 ? true : null)">
             <thead>
                 <tr>
-                    <th>IP</th>
-                    <th>Expires in</th>
-                    <th>Created</th>
+                    <th aria-sort="none"><button type="button" class="client-sort" data-ban-sort="ip">IP</button></th>
+                    <th aria-sort="none"><button type="button" class="client-sort" data-ban-sort="expires">Expires in</button></th>
+                    <th aria-sort="descending"><button type="button" class="client-sort" data-ban-sort="created">Created</button></th>
                     <th>Origin decision</th>
                     <th>Action</th>
                 </tr>
             </thead>
             <tbody>
-                @foreach (var ban in _activeBans)
+                @foreach (var ban in _activeBans.OrderByDescending(b => b.CreatedAt))
                 {
-                    <tr>
+                    <tr data-sort-ip="@BanStatusPayload.IpSortKey(ban.Ip)" data-sort-expires="@ban.ExpiresAt.ToUnixTimeMilliseconds()" data-sort-created="@ban.CreatedAt.ToUnixTimeMilliseconds()">
                         <td><code>@ban.Ip</code></td>
                         <td>@AdminText.Age(ban.ExpiresAt - _now)</td>
                         <td>@Display.Format(ban.CreatedAt)</td>

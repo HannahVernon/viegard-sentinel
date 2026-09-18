@@ -46,6 +46,56 @@
         }
     }
 
+    // Client-side sort state for the active-bans table.  The server renders
+    // and the payload arrives newest-first; header clicks re-order the rows
+    // by the data-sort-* keys, and the current order is re-applied after
+    // every poll rebuild so refreshes never undo the operator's choice.
+    let banSortColumn = "created";
+    let banSortDescending = true;
+
+    function applyBanSort() {
+        const body = bansTable.querySelector("tbody");
+        if (!body) {
+            return;
+        }
+
+        const attribute = "data-sort-" + banSortColumn;
+        const numeric = banSortColumn !== "ip";
+        const rows = Array.from(body.querySelectorAll("tr"));
+        rows.sort((left, right) => {
+            const a = left.getAttribute(attribute) ?? "";
+            const b = right.getAttribute(attribute) ?? "";
+            const comparison = numeric
+                ? (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0)
+                : (a < b ? -1 : a > b ? 1 : 0);
+            return banSortDescending ? -comparison : comparison;
+        });
+        body.replaceChildren(...rows);
+
+        bansTable.querySelectorAll("th[aria-sort]").forEach(th => {
+            const button = th.querySelector("[data-ban-sort]");
+            const isActive = button && button.dataset.banSort === banSortColumn;
+            th.setAttribute("aria-sort", isActive ? (banSortDescending ? "descending" : "ascending") : "none");
+        });
+    }
+
+    bansTable.querySelectorAll("[data-ban-sort]").forEach(button => {
+        button.addEventListener("click", () => {
+            const column = button.dataset.banSort;
+            if (banSortColumn === column) {
+                banSortDescending = !banSortDescending;
+            }
+            else {
+                banSortColumn = column;
+                // Time columns start newest/soonest-last-seen first; the IP
+                // column starts ascending.
+                banSortDescending = column !== "ip";
+            }
+
+            applyBanSort();
+        });
+    });
+
     function rebuildBans(bans) {
         if (!Array.isArray(bans) || !banTemplate) {
             return;
@@ -66,6 +116,9 @@
             setCell(row, "ip", ban.ip);
             setCell(row, "expires", ban.expiresIn);
             setCell(row, "created", ban.created);
+            row.setAttribute("data-sort-ip", typeof ban.ipSortKey === "string" ? ban.ipSortKey : ban.ip);
+            row.setAttribute("data-sort-expires", String(ban.expiresUnixMs ?? 0));
+            row.setAttribute("data-sort-created", String(ban.createdUnixMs ?? 0));
             setDecisionLink(row, ban.decisionId, ban.decisionShort);
             const ipInput = row.querySelector('input[name="ip"]');
             if (ipInput) {
@@ -80,6 +133,8 @@
         if (bansEmpty) {
             bansEmpty.hidden = rows.length > 0;
         }
+
+        applyBanSort();
     }
 
     function rebuildActions(actions) {

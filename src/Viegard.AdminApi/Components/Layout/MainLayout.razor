@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject IQueueTelemetryStore QueueTelemetry
+@inject NavigationManager Navigation
 @inject UserDisplay Display
 
 <AuthorizeView>
@@ -10,27 +11,31 @@
                and every navigation is a full page load, so the menu closes
                itself.  Desktop hides the toggle and shows the inline nav. *@
             <input type="checkbox" id="nav-toggle" class="nav-toggle" />
-            <label class="nav-toggle-button" for="nav-toggle" aria-label="Toggle navigation menu">&#9776; Menu</label>
+            <label class="nav-toggle-button" for="nav-toggle" aria-label="Toggle navigation menu">&#9776;<span class="nav-toggle-text">&nbsp;Menu</span></label>
             <nav class="admin-nav" aria-label="Admin navigation">
-                <a href="/queues">Dashboard/Queues</a>
-                <a href="/events">Events</a>
-                <a href="/incidents">Incidents</a>
-                <a href="/decisions">Decisions</a>
-                <a href="/bans">Bans</a>
-                <a href="/audit">Audit</a>
-                <a href="/errors">Errors</a>
-                <a href="/signatures">Signatures</a>
-                <a href="/configuration">Configuration</a>
-                <a href="/account">Account</a>
+                <a href="/queues" aria-current="@AriaCurrent("/queues")">Dashboard/Queues</a>
+                <a href="/events" aria-current="@AriaCurrent("/events")">Events</a>
+                <a href="/incidents" aria-current="@AriaCurrent("/incidents")">Incidents</a>
+                <a href="/decisions" aria-current="@AriaCurrent("/decisions")">Decisions</a>
+                <a href="/bans" aria-current="@AriaCurrent("/bans")">Bans</a>
+                <a href="/audit" aria-current="@AriaCurrent("/audit")">Audit</a>
+                <a href="/errors" aria-current="@AriaCurrent("/errors")">Errors</a>
+                <a href="/signatures" aria-current="@AriaCurrent("/signatures")">Signatures</a>
+                <a href="/configuration" aria-current="@AriaCurrent("/configuration")">Configuration</a>
+                <a href="/account" aria-current="@AriaCurrent("/account")">Account</a>
+                <form method="post" action="/auth/logout" class="logout-form nav-signout">
+                    <AntiforgeryToken />
+                    <button type="submit" class="button-quiet">Sign out</button>
+                </form>
             </nav>
             <div class="header-side">
                 <span class="refresh-indicator" data-refresh-indicator data-refresh-host="nav" title="Live values refresh automatically." hidden>
                     <span class="refresh-arrow" aria-hidden="true"></span><span data-refresh-age></span>
                 </span>
                 <a class="status-dot-link" href="/queues" title="Worst queue or instance telemetry light; refreshes every @_refreshSeconds seconds.">
-                    <span class="status-dot @_statusCss" data-status-dot data-refresh-ms="@(_refreshSeconds * 1000)"></span><span data-status-label>@_statusLabel</span>
+                    <span class="status-dot @_statusCss" data-status-dot data-refresh-ms="@(_refreshSeconds * 1000)"></span><span class="status-dot-text" data-status-label>@_statusLabel</span>
                 </a>
-                <form method="post" action="/auth/logout" class="logout-form">
+                <form method="post" action="/auth/logout" class="logout-form header-signout">
                     <AntiforgeryToken />
                     <button type="submit" class="button-quiet">Sign out</button>
                 </form>
@@ -52,5 +57,19 @@
         _refreshSeconds = Display.StatusRefreshSeconds;
         var snapshots = await QueueTelemetry.GetLatestAsync().ConfigureAwait(false);
         (_statusCss, _statusLabel) = QueueStatusBadge.Summarize(snapshots, DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
+    /// "page" for the nav item covering the current path (detail pages
+    /// highlight their list's item), otherwise null so the attribute is
+    /// omitted entirely.
+    /// </summary>
+    private string? AriaCurrent(string href)
+    {
+        var path = new Uri(Navigation.Uri).AbsolutePath;
+        return path.Equals(href, StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(href + "/", StringComparison.OrdinalIgnoreCase)
+            ? "page"
+            : null;
     }
 }

@@ -188,7 +188,11 @@ public sealed class DefaultPolicyEngine(
                 || counts.LastDay >= policyOptions.MaxAutoActionsPerDay;
             if (rateCapBreached)
             {
-                await guardrailStateStore.SetCircuitBreakerOpenAsync(true, cancellationToken).ConfigureAwait(false);
+                // The cap is a rolling-window throttle: it demotes to
+                // RequireApproval while over the cap and self-recovers as
+                // the window rolls off.  It deliberately does NOT latch the
+                // circuit breaker (operator decision 2026-09-18); the
+                // breaker remains reserved for consecutive action failures.
                 guardrails.Add(Fail(
                     PolicyGuardrailNames.RateCaps,
                     $"Auto-action cap reached: {counts.LastHour}/{policyOptions.MaxAutoActionsPerHour} in the last hour, {counts.LastDay}/{policyOptions.MaxAutoActionsPerDay} in the last day."));
@@ -223,9 +227,7 @@ public sealed class DefaultPolicyEngine(
             {
                 guardrails.Add(Fail(
                     PolicyGuardrailNames.CircuitBreaker,
-                    rateCapBreached
-                        ? "Circuit breaker is open after a rate-cap breach."
-                        : $"Circuit breaker is open; consecutive action failures: {consecutiveFailures}."));
+                    $"Circuit breaker is open; consecutive action failures: {consecutiveFailures}."));
                 rationale.Add("Circuit breaker open; manual approval required.");
                 outcome = DecisionOutcome.RequireApproval;
             }

@@ -232,13 +232,13 @@ public sealed class PolicyEngineTests
     }
 
     [Fact]
-    public async Task Rate_cap_exceeded_requires_approval()
+    public async Task Rate_cap_exceeded_requires_approval_without_latching_the_breaker()
     {
         var fixture = await CreateFixtureAsync();
         var now = DateTimeOffset.UtcNow;
-        for (var i = 0; i < 20; i++)
+        for (var i = 0; i < 200; i++)
         {
-            await fixture.GuardrailState.RecordAutoActionAsync(now.AddMinutes(-i));
+            await fixture.GuardrailState.RecordAutoActionAsync(now.AddSeconds(-i));
         }
 
         var decision = await fixture.Engine.EvaluateAsync(
@@ -247,6 +247,10 @@ public sealed class PolicyEngineTests
 
         Assert.Equal(DecisionOutcome.RequireApproval, decision.Outcome);
         Assert.Contains(decision.Guardrails, g => g.GuardrailName == PolicyGuardrailNames.RateCaps && !g.Passed);
+        // The cap is a rolling-window throttle and must self-recover; it no
+        // longer latches the circuit breaker (which would have required a
+        // pipeline restart to clear).
+        Assert.False(await fixture.GuardrailState.IsCircuitBreakerOpenAsync());
     }
 
     [Fact]

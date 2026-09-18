@@ -26,9 +26,9 @@ public sealed class PolicyOptions
 
     public TimeSpan MaxAutoBanDuration { get; set; } = TimeSpan.FromDays(30);
 
-    public int MaxAutoActionsPerHour { get; set; } = 20;
+    public int MaxAutoActionsPerHour { get; set; } = 200;
 
-    public int MaxAutoActionsPerDay { get; set; } = 100;
+    public int MaxAutoActionsPerDay { get; set; } = 1000;
 
     public int CircuitBreakerFailureThreshold { get; set; } = 5;
 

@@ -20,6 +20,7 @@ using Viegard.Domain;
 using Viegard.Domain.Admin;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Events;
+using Viegard.Domain.Health;
 using Viegard.Persistence.InMemory;
 
 namespace Viegard.AdminApi.Tests;
@@ -605,6 +606,94 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Request_all_host_upgrades_requires_step_up()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        fixture.Context.Request.Form = EmptyForm();
+
+        var result = await fixture.InvokeRequestAllHostUpgradesAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.Empty(await fixture.HostUpgrades.ListRecentAsync());
+    }
+
+    [Fact]
+    public async Task Request_all_host_upgrades_queues_every_known_target_and_audits_each()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.InstanceRegistry.UpsertAsync(Registration("mdaemon-MVCTMS01", "mvctms01"));
+        await fixture.InstanceRegistry.UpsertAsync(Registration("mdaemon-MVCTMS02", "mvctms02"));
+        fixture.Context.Request.Form = EmptyForm();
+
+        var result = await fixture.InvokeRequestAllHostUpgradesAsync();
+        var location = Uri.UnescapeDataString(await ExecuteRedirectAsync(result, fixture.Context));
+
+        Assert.Contains("Queued 3 upgrade requests", location, StringComparison.Ordinal);
+        Assert.Contains("vm", location, StringComparison.Ordinal);
+        Assert.Contains("mvctms01", location, StringComparison.Ordinal);
+        Assert.Contains("mvctms02", location, StringComparison.Ordinal);
+        Assert.DoesNotContain("Skipped", location, StringComparison.Ordinal);
+
+        var commands = await fixture.HostUpgrades.ListRecentAsync();
+        Assert.Equal(3, commands.Count);
+        Assert.Equal(
+            ["mvctms01", "mvctms02", "vm"],
+            commands.Select(c => c.Target).OrderBy(t => t, StringComparer.Ordinal).ToArray());
+        Assert.All(commands, c => Assert.Equal("hannah", c.RequestedBy));
+        Assert.Equal(3, fixture.AuditLedger.Records.Count(r =>
+            r.Summary.Contains("HostUpgradeRequested", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task Request_all_host_upgrades_skips_in_flight_targets_and_reports_them()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.InstanceRegistry.UpsertAsync(Registration("mdaemon-MVCTMS01", "mvctms01"));
+        await fixture.HostUpgrades.RequestAsync(HostUpgradeCommandPolicy.DefaultTarget, "hannah");
+        fixture.Context.Request.Form = EmptyForm();
+
+        var result = await fixture.InvokeRequestAllHostUpgradesAsync();
+        var location = Uri.UnescapeDataString(await ExecuteRedirectAsync(result, fixture.Context));
+
+        Assert.Contains("Queued 1 upgrade request", location, StringComparison.Ordinal);
+        Assert.Contains("mvctms01", location, StringComparison.Ordinal);
+        Assert.Contains("Skipped 1: vm (already pending or running)", location, StringComparison.Ordinal);
+
+        var commands = await fixture.HostUpgrades.ListRecentAsync();
+        Assert.Equal(2, commands.Count);
+    }
+
+    [Fact]
+    public async Task Request_all_host_upgrades_with_everything_in_flight_reports_error()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.HostUpgrades.RequestAsync(HostUpgradeCommandPolicy.DefaultTarget, "hannah");
+        fixture.Context.Request.Form = EmptyForm();
+
+        var result = await fixture.InvokeRequestAllHostUpgradesAsync();
+        var location = Uri.UnescapeDataString(await ExecuteRedirectAsync(result, fixture.Context));
+
+        Assert.Contains("No upgrade requests were queued", location, StringComparison.Ordinal);
+        Assert.Contains("Skipped 1: vm", location, StringComparison.Ordinal);
+        Assert.Single(await fixture.HostUpgrades.ListRecentAsync());
+    }
+
+    private static InstanceRegistration Registration(string instanceId, string upgradeTarget) => new()
+    {
+        InstanceId = instanceId,
+        Version = "test",
+        Roles = "sources",
+        UpgradeTarget = upgradeTarget,
+        HostName = instanceId,
+        StartedAt = DateTimeOffset.UtcNow.AddHours(-1),
+        ReportedAt = DateTimeOffset.UtcNow,
+    };
+
+    private static FormCollection EmptyForm() =>
+        new(new Dictionary<string, StringValues>(StringComparer.Ordinal));
+
+    [Fact]
     public async Task Save_ingestion_filters_rejects_locked_kind()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
@@ -904,6 +993,7 @@ public sealed class AdminConfigurationEndpointsTests
         InMemoryMikroTikRouterStore Routers,
         IRouterCredentialProtector RouterProtector,
         InMemoryHostUpgradeCommandStore HostUpgrades,
+        InMemoryInstanceRegistryStore InstanceRegistry,
         InMemoryIngestionFilterStore IngestionFilters,
         InMemoryAdminErrorStore AdminErrors,
         SatelliteRoleCredentialCookie SatelliteCredentialCookie)
@@ -993,6 +1083,7 @@ public sealed class AdminConfigurationEndpointsTests
                 routers,
                 routerProtector,
                 hostUpgrades,
+                new InMemoryInstanceRegistryStore(),
                 ingestionFilters,
                 new InMemoryAdminErrorStore(),
                 satelliteCredentialCookie);
@@ -1046,6 +1137,17 @@ public sealed class AdminConfigurationEndpointsTests
                 Context,
                 Antiforgery,
                 HostUpgrades,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeRequestAllHostUpgradesAsync() =>
+            AdminConfigurationEndpoints.RequestAllHostUpgradesAsync(
+                Context,
+                Antiforgery,
+                HostUpgrades,
+                InstanceRegistry,
                 Users,
                 Sessions,
                 AuthAuditor,

@@ -8,6 +8,7 @@ using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
 using Viegard.Application.Retention;
 using Viegard.Application.Stores;
+using Viegard.Application.Telemetry;
 using Viegard.Domain.Events;
 
 namespace Viegard.AdminApi.Configuration;
@@ -56,6 +57,9 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/upgrades/request", RequestHostUpgradeAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/upgrades/request-all", RequestAllHostUpgradesAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/thresholds", SavePolicyThresholdsAsync)
@@ -599,6 +603,84 @@ public static class AdminConfigurationEndpoints
             return Redirect(UpgradesConfigurationPath, error: HostUpgradeRejectionMessage(ex));
         }
     }
+
+    internal static async Task<IResult> RequestAllHostUpgradesAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IHostUpgradeCommandStore hostUpgrades,
+        IInstanceRegistryStore instanceRegistry,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(UpgradesConfigurationPath, error: "Step-up verification is required before requesting host upgrades.");
+        }
+
+        // The same known-target list the dropdown offers: instance-registry
+        // upgrade targets plus command history plus the default target.
+        var commandTargets = await hostUpgrades.ListTargetsAsync(cancellationToken: context.RequestAborted).ConfigureAwait(false);
+        var registrations = await instanceRegistry.ListAsync(context.RequestAborted).ConfigureAwait(false);
+        var targets = HostUpgradeTargetList.BuildKnownTargets(commandTargets, registrations);
+
+        var queued = new List<string>();
+        var skipped = new List<string>();
+        foreach (var target in targets)
+        {
+            try
+            {
+                var command = await hostUpgrades.RequestAsync(target, user.Username, context.RequestAborted)
+                    .ConfigureAwait(false);
+                await configAuditor.RecordHostUpgradeRequestedAsync(
+                    user.Username,
+                    command.Target,
+                    command.Id,
+                    context.RequestAborted).ConfigureAwait(false);
+                queued.Add(command.Target);
+            }
+            catch (HostUpgradeCommandRejectedException ex)
+            {
+                // Single-flight and cooldown rejections are expected when
+                // some targets already have work in flight; the fleet
+                // request skips them rather than failing outright.
+                skipped.Add($"{ex.Target} ({SkipReason(ex.Reason)})");
+            }
+        }
+
+        var summary = queued.Count > 0
+            ? $"Queued {queued.Count} upgrade request{(queued.Count == 1 ? "" : "s")}: {string.Join(", ", queued)}."
+            : "No upgrade requests were queued.";
+        if (skipped.Count > 0)
+        {
+            summary += $"  Skipped {skipped.Count}: {string.Join(", ", skipped)}.";
+        }
+
+        return queued.Count > 0
+            ? Redirect(UpgradesConfigurationPath, status: summary)
+            : Redirect(UpgradesConfigurationPath, error: summary);
+    }
+
+    private static string SkipReason(HostUpgradeCommandRejectionReason reason) => reason switch
+    {
+        HostUpgradeCommandRejectionReason.SingleFlight => "already pending or running",
+        HostUpgradeCommandRejectionReason.Cooldown => "cooling down",
+        _ => "rejected",
+    };
 
     internal static async Task<IResult> SaveIngestionFiltersAsync(
         HttpContext context,

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Viegard.Application.Auth;
 using Viegard.Application.Configuration;
 using Viegard.Application.Detection;
 using Viegard.Application.Policy;
@@ -57,7 +58,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         // Clean slate for queue tables between runs.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE actions, active_bans, queue_messages, queue_counters, retention_settings, policy_threshold_settings, policy_posture_settings, admin_errors, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE actions, active_bans, queue_messages, queue_counters, retention_settings, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -782,6 +783,62 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             filter: new SignatureListFilter(filterText),
             sort: new ListSort<SignatureSortColumn>(SignatureSortColumn.Name, SortDirection.Asc));
         Assert.Equal([signatureAlpha.Id, signatureBeta.Id], signatureMatches.Items.Select(s => s.Id));
+    }
+
+    [PostgresFact]
+    public async Task App_password_store_roundtrips_revokes_and_enforces_unique_lookup()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var userStore = new PostgresAdminUserStore(factory);
+        var store = new PostgresAppPasswordStore(factory);
+        var now = DateTimeOffset.UtcNow;
+        var user = new AdminUser
+        {
+            Id = ViegardId.New(),
+            Username = $"apppw-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordChangedAt = now,
+            FailedLoginCount = 0,
+            LockedUntil = null,
+            MustChangePassword = false,
+            TotpEnrolled = true,
+            CreatedAt = now,
+        };
+        await userStore.CreateAsync(user);
+
+        var generated = AppPasswordTokenFormat.Generate();
+        var appPassword = new AppPassword
+        {
+            Id = ViegardId.New(),
+            UserId = user.Id,
+            Name = "copilot-cli",
+            LookupKey = generated.LookupKey,
+            SecretHash = generated.SecretHash,
+            CreatedAt = now,
+            ExpiresAt = now.AddDays(90),
+        };
+        await store.CreateAsync(appPassword);
+
+        var found = await store.GetByLookupKeyAsync(generated.LookupKey);
+        Assert.NotNull(found);
+        Assert.Equal(appPassword.Id, found!.Id);
+        Assert.Equal(generated.SecretHash, found.SecretHash);
+        Assert.Null(found.LastUsedAt);
+        Assert.Null(await store.GetByLookupKeyAsync("ffffffffffffffff"));
+
+        var listed = await store.ListForUserAsync(user.Id);
+        Assert.Equal(appPassword.Id, Assert.Single(listed).Id);
+
+        await Assert.ThrowsAsync<DbUpdateException>(async () =>
+            await store.CreateAsync(appPassword with { Id = ViegardId.New() }));
+
+        await store.UpdateLastUsedAsync(appPassword.Id, now);
+        Assert.NotNull((await store.GetByLookupKeyAsync(generated.LookupKey))!.LastUsedAt);
+
+        Assert.False(await store.RevokeAsync(appPassword.Id, ViegardId.New(), now));
+        Assert.True(await store.RevokeAsync(appPassword.Id, user.Id, now));
+        Assert.False(await store.RevokeAsync(appPassword.Id, user.Id, now));
+        Assert.NotNull((await store.GetByLookupKeyAsync(generated.LookupKey))!.RevokedAt);
     }
 
     [PostgresFact]

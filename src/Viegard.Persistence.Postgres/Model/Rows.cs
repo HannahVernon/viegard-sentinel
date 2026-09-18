@@ -577,6 +577,27 @@ public sealed class AdminUserPreferencesRow
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
+public sealed class AppPasswordRow
+{
+    public Guid Id { get; set; }
+
+    public Guid UserId { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public string LookupKey { get; set; } = string.Empty;
+
+    public string SecretHash { get; set; } = string.Empty;
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset? ExpiresAt { get; set; }
+
+    public DateTimeOffset? LastUsedAt { get; set; }
+
+    public DateTimeOffset? RevokedAt { get; set; }
+}
+
 public sealed class AdminSessionRow
 {
     public Guid Id { get; set; }

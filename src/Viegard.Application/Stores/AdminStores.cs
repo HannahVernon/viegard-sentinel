@@ -56,6 +56,21 @@ public interface IAdminUserStore
     ValueTask SavePreferencesAsync(AdminUserPreferences preferences, CancellationToken cancellationToken = default);
 }
 
+/// <summary>Persistence port for revocable read-only app-password tokens.</summary>
+public interface IAppPasswordStore
+{
+    ValueTask CreateAsync(AppPassword appPassword, CancellationToken cancellationToken = default);
+
+    ValueTask<IReadOnlyList<AppPassword>> ListForUserAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    ValueTask<AppPassword?> GetByLookupKeyAsync(string lookupKey, CancellationToken cancellationToken = default);
+
+    /// <summary>Revokes the token only when it belongs to <paramref name="userId"/>; returns whether a row changed.</summary>
+    ValueTask<bool> RevokeAsync(Guid id, Guid userId, DateTimeOffset revokedAt, CancellationToken cancellationToken = default);
+
+    ValueTask UpdateLastUsedAsync(Guid id, DateTimeOffset lastUsedAt, CancellationToken cancellationToken = default);
+}
+
 /// <summary>Persistence port for captured unhandled admin-request errors.</summary>
 public interface IAdminErrorStore
 {

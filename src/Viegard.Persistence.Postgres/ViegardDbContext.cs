@@ -77,6 +77,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<AdminSessionRow> AdminSessions => Set<AdminSessionRow>();
 
+    public DbSet<AppPasswordRow> AppPasswords => Set<AppPasswordRow>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Insert-only reference tables (D-0031): rows are never deleted and
@@ -392,6 +394,18 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasIndex(e => e.AbsoluteExpiresAt);
             entity.HasIndex(e => e.IdleExpiresAt);
             entity.HasIndex(e => e.RevokedAt);
+            entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AppPasswordRow>(entity =>
+        {
+            entity.ToTable("app_passwords");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.LookupKey).IsUnique();
+            entity.Property(e => e.Name).HasMaxLength(128);
+            entity.Property(e => e.LookupKey).HasMaxLength(16);
+            entity.Property(e => e.SecretHash).HasMaxLength(64);
             entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

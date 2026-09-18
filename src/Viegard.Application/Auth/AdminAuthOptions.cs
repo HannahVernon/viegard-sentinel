@@ -30,6 +30,9 @@ public sealed class AdminAuthOptions
     // Provisional default from D-0032.  Sensitive-operation coverage expands
     // as Phase 8 adds runtime configuration editors.
     public TimeSpan StepUpValidity { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Default lifetime for read-only app-password tokens (D-0040).</summary>
+    public TimeSpan AppPasswordLifetime { get; set; } = TimeSpan.FromDays(90);
 }
 
 public sealed class AdminAuthOptionsValidator : IValidateOptions<AdminAuthOptions>
@@ -55,6 +58,11 @@ public sealed class AdminAuthOptionsValidator : IValidateOptions<AdminAuthOption
         if (options.StepUpValidity <= TimeSpan.Zero)
         {
             failures.Add("Admin Auth: StepUpValidity must be positive.");
+        }
+
+        if (options.AppPasswordLifetime <= TimeSpan.Zero)
+        {
+            failures.Add("Admin Auth: AppPasswordLifetime must be positive.");
         }
 
         if (!AdminIpBindingModes.IsKnown(options.IpBindingMode))

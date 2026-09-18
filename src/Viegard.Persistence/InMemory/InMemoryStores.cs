@@ -845,6 +845,70 @@ public sealed class InMemoryAdminUserStore : IAdminUserStore
     };
 }
 
+public sealed class InMemoryAppPasswordStore : IAppPasswordStore
+{
+    private readonly object _sync = new();
+    private readonly ConcurrentDictionary<Guid, AppPassword> _appPasswords = new();
+
+    public ValueTask CreateAsync(AppPassword appPassword, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(appPassword);
+        lock (_sync)
+        {
+            if (_appPasswords.Values.Any(existing => existing.LookupKey == appPassword.LookupKey))
+            {
+                throw new InvalidOperationException($"App password lookup key '{appPassword.LookupKey}' already exists.");
+            }
+
+            if (!_appPasswords.TryAdd(appPassword.Id, appPassword))
+            {
+                throw new InvalidOperationException($"App password {appPassword.Id} already exists.");
+            }
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask<IReadOnlyList<AppPassword>> ListForUserAsync(Guid userId, CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult<IReadOnlyList<AppPassword>>(_appPasswords.Values
+            .Where(appPassword => appPassword.UserId == userId)
+            .OrderByDescending(appPassword => appPassword.CreatedAt)
+            .ToList());
+
+    public ValueTask<AppPassword?> GetByLookupKeyAsync(string lookupKey, CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(_appPasswords.Values
+            .FirstOrDefault(appPassword => appPassword.LookupKey == lookupKey));
+
+    public ValueTask<bool> RevokeAsync(Guid id, Guid userId, DateTimeOffset revokedAt, CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (!_appPasswords.TryGetValue(id, out var appPassword)
+                || appPassword.UserId != userId
+                || appPassword.RevokedAt is not null)
+            {
+                return ValueTask.FromResult(false);
+            }
+
+            _appPasswords[id] = appPassword with { RevokedAt = revokedAt.ToUniversalTime() };
+            return ValueTask.FromResult(true);
+        }
+    }
+
+    public ValueTask UpdateLastUsedAsync(Guid id, DateTimeOffset lastUsedAt, CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (_appPasswords.TryGetValue(id, out var appPassword))
+            {
+                _appPasswords[id] = appPassword with { LastUsedAt = lastUsedAt.ToUniversalTime() };
+            }
+        }
+
+        return ValueTask.CompletedTask;
+    }
+}
+
 public sealed class InMemoryAdminSessionStore : IAdminSessionStore
 {
     private readonly ConcurrentDictionary<Guid, AdminSession> _sessions = new();

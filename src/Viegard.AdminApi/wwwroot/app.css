@@ -428,7 +428,8 @@ a:hover {
 
     .page-index a {
         flex: 0 0 auto;
-        padding: 0.3rem 0.6rem;
+        /* Taller chips approach the recommended touch-target size. */
+        padding: 0.45rem 0.7rem;
         border: 1px solid var(--panel-border);
         border-radius: 1rem;
     }

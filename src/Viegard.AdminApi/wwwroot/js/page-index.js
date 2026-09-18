@@ -24,6 +24,11 @@
         links.forEach(link => {
             if (link === current) {
                 link.setAttribute("aria-current", "location");
+                // On the mobile chip strip the active chip can sit outside
+                // the scrolled viewport when landing on a later section;
+                // "nearest" keeps this a no-op when it is already visible
+                // and never scrolls the page vertically.
+                link.scrollIntoView({ inline: "nearest", block: "nearest" });
             }
             else {
                 link.removeAttribute("aria-current");

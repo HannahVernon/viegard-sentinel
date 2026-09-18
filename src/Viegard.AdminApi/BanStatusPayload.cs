@@ -14,8 +14,11 @@ public static class BanStatusPayload
 {
     public sealed record ActiveBanPayload(
         string Ip,
+        string IpSortKey,
         string ExpiresIn,
+        long ExpiresUnixMs,
         string Created,
+        long CreatedUnixMs,
         string DecisionId,
         string DecisionShort);
 
@@ -45,10 +48,14 @@ public static class BanStatusPayload
         ArgumentNullException.ThrowIfNull(format);
 
         var bans = activeBans
+            .OrderByDescending(ban => ban.CreatedAt)
             .Select(ban => new ActiveBanPayload(
                 ban.Ip,
+                IpSortKey(ban.Ip),
                 AdminText.Age(ban.ExpiresAt - now),
+                ban.ExpiresAt.ToUnixTimeMilliseconds(),
                 format(ban.CreatedAt),
+                ban.CreatedAt.ToUnixTimeMilliseconds(),
                 ban.DecisionId.ToString("N"),
                 AdminText.ShortId(ban.DecisionId)))
             .ToList();
@@ -78,4 +85,20 @@ public static class BanStatusPayload
         ActionStatus.RolledBack => "badge",
         _ => "badge",
     };
+
+    /// <summary>
+    /// Ordinal-sortable key for an IP address: the address bytes as hex, so
+    /// IPv4 octets compare numerically (10.2.x sorts before 10.10.x) instead
+    /// of lexically.  Unparseable strings fall back to themselves.
+    /// </summary>
+    public static string IpSortKey(string ip)
+    {
+        if (!System.Net.IPAddress.TryParse(ip, out var parsed))
+        {
+            return ip;
+        }
+
+        var normalized = parsed.IsIPv4MappedToIPv6 ? parsed.MapToIPv4() : parsed;
+        return Convert.ToHexStringLower(normalized.GetAddressBytes());
+    }
 }

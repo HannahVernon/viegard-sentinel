@@ -144,26 +144,10 @@ public sealed class PostgresPolicyPostureSettingsStore(
             return current;
         }
 
-        try
-        {
-            await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            var notified = false;
-            connection.Notification += (_, _) => notified = true;
-            await using (var listen = connection.CreateCommand())
-            {
-                listen.CommandText = $"LISTEN {NotifyChannel};";
-                await listen.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            await connection.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
-            return notified ? Interlocked.Increment(ref _changeVersion) : CurrentChangeVersion;
-        }
-        catch (NpgsqlException ex)
-        {
-            logger?.LogWarning(ex, "Falling back to polling for policy posture refresh.");
-            await Task.Delay(timeout, cancellationToken).ConfigureAwait(false);
-            return CurrentChangeVersion;
-        }
+        var notified = await PostgresNotifyWait
+            .WaitAsync(dataSource, NotifyChannel, timeout, logger, cancellationToken)
+            .ConfigureAwait(false);
+        return notified ? Interlocked.Increment(ref _changeVersion) : CurrentChangeVersion;
     }
 
     private static async ValueTask<PolicyPostureSettings?> GetInternalAsync(

@@ -85,6 +85,16 @@ public sealed class AppPasswordAuthenticationHandlerTests
         Assert.False(result.Succeeded);
     }
 
+    [Fact]
+    public async Task Owner_in_remediation_state_fails()
+    {
+        var mustChange = await HarnessAsync(mustChangePassword: true);
+        Assert.False((await mustChange.AuthenticateAsync("Bearer " + mustChange.Token)).Succeeded);
+
+        var noTotp = await HarnessAsync(totpEnrolled: false);
+        Assert.False((await noTotp.AuthenticateAsync("Bearer " + noTotp.Token)).Succeeded);
+    }
+
     private sealed record Harness(
         AppPasswordAuthenticationHandler Handler,
         InMemoryAppPasswordStore Store,
@@ -112,7 +122,9 @@ public sealed class AppPasswordAuthenticationHandlerTests
 
     private static async Task<Harness> HarnessAsync(
         DateTimeOffset? expiresAt = null,
-        DateTimeOffset? lockedUntil = null)
+        DateTimeOffset? lockedUntil = null,
+        bool mustChangePassword = false,
+        bool totpEnrolled = true)
     {
         var now = DateTimeOffset.UtcNow;
         var users = new InMemoryAdminUserStore();
@@ -124,8 +136,8 @@ public sealed class AppPasswordAuthenticationHandlerTests
             PasswordChangedAt = now,
             FailedLoginCount = 0,
             LockedUntil = lockedUntil,
-            MustChangePassword = false,
-            TotpEnrolled = true,
+            MustChangePassword = mustChangePassword,
+            TotpEnrolled = totpEnrolled,
             CreatedAt = now,
         };
         await users.CreateAsync(user);

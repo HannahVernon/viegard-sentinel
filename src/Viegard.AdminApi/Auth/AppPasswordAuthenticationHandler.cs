@@ -74,8 +74,11 @@ public sealed class AppPasswordAuthenticationHandler(
         }
 
         var user = await users.GetByIdAsync(appPassword.UserId, Context.RequestAborted).ConfigureAwait(false);
-        if (user is null || user.LockedUntil > now)
+        if (user is null || user.LockedUntil > now || user.MustChangePassword || !user.TotpEnrolled)
         {
+            // Locked, must-change-password, or un-enrolled owners are in a
+            // remediation state; their tokens stop authenticating until the
+            // account is healthy again.
             return Fail("owner unavailable");
         }
 

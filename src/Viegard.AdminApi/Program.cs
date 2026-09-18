@@ -322,6 +322,31 @@ app.Use(async (context, next) =>
 {
     var path = context.Request.Path;
     var authenticated = context.User.Identity?.IsAuthenticated == true;
+    if (!authenticated
+        && AppPasswordRequests.HasAppPasswordBearer(context)
+        && AppPasswordRequests.EndpointAcceptsAppPasswords(context))
+    {
+        // UseAuthentication populated context.User from the default cookie
+        // scheme only, so app-password bearers must authenticate here or
+        // this gate cookie-challenges them before endpoint authorization
+        // ever consults the scheme.  Only endpoints opted into the
+        // read-only policy are considered, so a token principal never
+        // widens the authenticated surface.
+        var appPasswordResult = await context.AuthenticateAsync(AppPasswordDefaults.SchemeName).ConfigureAwait(false);
+        if (appPasswordResult.Succeeded)
+        {
+            context.User = appPasswordResult.Principal;
+            authenticated = true;
+        }
+        else
+        {
+            // An explicitly presented token that fails answers 401 rather
+            // than a login-page redirect: honest API semantics.
+            await context.ChallengeAsync(AppPasswordDefaults.SchemeName).ConfigureAwait(false);
+            return;
+        }
+    }
+
     // Endpoint metadata is the source of truth for anonymous access: it
     // covers MapStaticAssets (whose asset URLs are fingerprinted in
     // Production, e.g. /app.<hash>.css) and [AllowAnonymous] components.

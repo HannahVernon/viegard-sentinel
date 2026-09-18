@@ -385,6 +385,66 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
         }
     }
 
+    public async ValueTask RecordAppPasswordCreatedAsync(
+        string username,
+        Guid appPasswordId,
+        string name,
+        DateTimeOffset expiresAt,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config write by {username}: created read-only app password '{name}'.",
+                SourceId = "admin:account",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "AppPasswordCreated",
+                    Username = username,
+                    AppPasswordId = appPasswordId,
+                    Name = name,
+                    ExpiresAt = expiresAt,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append app password creation audit record.");
+        }
+    }
+
+    public async ValueTask RecordAppPasswordRevokedAsync(
+        string username,
+        Guid appPasswordId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config write by {username}: revoked read-only app password {appPasswordId:N}.",
+                SourceId = "admin:account",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "AppPasswordRevoked",
+                    Username = username,
+                    AppPasswordId = appPasswordId,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append app password revocation audit record.");
+        }
+    }
+
     public async ValueTask RecordAdminErrorsClearedAsync(
         string username,
         long removedCount,

@@ -109,6 +109,7 @@ builder.Services.AddSingleton<RecoveryCodeService>();
 builder.Services.AddSingleton<AdminPasswordService>();
 builder.Services.AddSingleton<PendingTwoFactorCookie>();
 builder.Services.AddSingleton<RecoveryCodesCookie>();
+builder.Services.AddSingleton<NewAppPasswordCookie>();
 builder.Services.AddSingleton<WebAuthnStateCookie>();
 builder.Services.AddSingleton<WebAuthnConfigurationProvider>();
 builder.Services.AddSingleton<IWebAuthnService, Fido2WebAuthnService>();
@@ -400,6 +401,7 @@ app.MapGet("/status/bans", async (
     return Results.Json(BanStatusPayload.Build(bans, recent, now, display.Format));
 }).RequireAuthorization(AppPasswordDefaults.ReadOnlyApiPolicy);
 app.MapAdminAuthEndpoints();
+app.MapAdminAppPasswordEndpoints();
 app.MapAdminSignatureEndpoints();
 app.MapAdminConfigurationEndpoints();
 app.MapAdminDecisionEndpoints();

@@ -230,6 +230,37 @@ a:hover {
         gap: 0.5rem;
     }
 
+    /* Tables become their own horizontal scroll containers so a wide table
+       pans under the thumb instead of blowing out the panel and dragging
+       the whole page wide. */
+    .data-table {
+        display: block;
+        overflow-x: auto;
+        max-width: 100%;
+        scrollbar-width: thin;
+    }
+
+    .admin-panel {
+        margin: 1rem auto;
+        padding: 1rem;
+    }
+
+    .account-panel {
+        margin: 1rem auto;
+        padding: 1rem;
+    }
+
+    /* The pagination bar carries many controls; let it wrap tightly rather
+       than push the page wide. */
+    .pagination {
+        gap: 0.5rem;
+    }
+
+    .pagination-pages {
+        gap: 0.4rem;
+        flex-wrap: wrap;
+    }
+
     .refresh-indicator {
         font-size: 0.78rem;
         min-width: 0;
@@ -512,6 +543,7 @@ a:hover {
 
 .auth-panel,
 .account-panel {
+    box-sizing: border-box;
     width: min(52rem, calc(100% - 2rem));
     margin: 3rem auto;
     padding: 1.75rem 2rem;
@@ -522,11 +554,17 @@ a:hover {
 }
 
 .auth-panel {
+    box-sizing: border-box;
     width: min(30rem, calc(100% - 2rem));
     margin-top: 9vh;
 }
 
 .admin-panel {
+    /* border-box: the width calc already accounts for the page gutter, so
+       padding must come out of it, not add to it (content-box made every
+       panel 4rem wider than the viewport allowance; found by ui-check on a
+       390px viewport where the panel measured 424px). */
+    box-sizing: border-box;
     width: min(72rem, calc(100% - 2rem));
     margin: 2rem auto;
     padding: 1.5rem 2rem;

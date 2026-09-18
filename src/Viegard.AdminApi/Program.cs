@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Viegard.AdminApi;
+using Viegard.AdminApi.Api;
 using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Components;
 using Viegard.AdminApi.Configuration;
@@ -402,6 +403,7 @@ app.MapGet("/status/bans", async (
 }).RequireAuthorization(AppPasswordDefaults.ReadOnlyApiPolicy);
 app.MapAdminAuthEndpoints();
 app.MapAdminAppPasswordEndpoints();
+app.MapReadOnlyApiEndpoints();
 app.MapAdminSignatureEndpoints();
 app.MapAdminConfigurationEndpoints();
 app.MapAdminDecisionEndpoints();

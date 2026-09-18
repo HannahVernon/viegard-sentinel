@@ -77,6 +77,39 @@ public sealed class SyslogEventNormalizerTests
     }
 
     [Fact]
+    public void Zoneless_claimed_timestamp_does_not_drive_occurred_at()
+    {
+        // Classic RFC 3164 stamps carry no zone: the sender's wall clock
+        // (11:45) parsed under an assumed zone skewed OccurredAt by the
+        // sender's UTC offset (observed live: gr1 events five hours in the
+        // past).  The receive time orders the event; the claim stays in
+        // ReportedAt.
+        var raw = "<38>Aug 19 11:45:01 router sshd[99]: Failed password for admin";
+
+        var result = _normalizer.Normalize(Observation(), Payload(raw));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(new DateTimeOffset(2026, 8, 19, 12, 0, 0, TimeSpan.Zero), result.Event!.OccurredAt);
+        var syslog = Assert.IsType<SyslogEvent>(result.Event.Payload);
+        Assert.NotNull(syslog.ReportedAt);
+    }
+
+    [Fact]
+    public void Offset_carrying_claimed_timestamp_drives_occurred_at()
+    {
+        var raw = "<30>2026-08-19T06:45:01.500-05:00 GR1 ssh new connection: 172.16.0.2:55234 (4)";
+
+        var result = _normalizer.Normalize(Observation(), Payload(raw));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(
+            new DateTimeOffset(2026, 8, 19, 6, 45, 1, 500, TimeSpan.FromHours(-5)),
+            result.Event!.OccurredAt);
+        var syslog = Assert.IsType<SyslogEvent>(result.Event.Payload);
+        Assert.Equal("GR1", syslog.ClaimedHostname);
+    }
+
+    [Fact]
     public void Claimed_hostname_is_carried_but_origin_is_peer_ip()
     {
         var raw = "<13>Aug 19 11:45:01 forged-hostname tag: spoofing attempt";

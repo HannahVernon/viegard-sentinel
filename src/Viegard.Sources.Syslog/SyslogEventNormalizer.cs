@@ -101,7 +101,13 @@ public sealed class SyslogEventNormalizer(SyslogSourceOptions options) : IEventN
             Id = ViegardId.New(),
             SourceId = observation.SourceId,
             SourceType = SyslogSourceType,
-            OccurredAt = httpEvent?.RequestedAt ?? envelope.Timestamp ?? dto.ReceivedAt,
+            // A zone-less claimed timestamp (classic RFC 3164) is not an
+            // instant: the sender's UTC offset is unknown, so it stays in
+            // ReportedAt as claimed data while the trustworthy receive time
+            // orders the event.  Offset-carrying timestamps are used as-is.
+            OccurredAt = httpEvent?.RequestedAt
+                ?? (envelope.TimestampIsZoneless ? null : envelope.Timestamp)
+                ?? dto.ReceivedAt,
             Entities = entities,
             Payload = payload,
             RawObservationId = observation.Id,

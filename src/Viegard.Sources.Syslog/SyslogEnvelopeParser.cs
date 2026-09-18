@@ -12,6 +12,13 @@ public sealed record SyslogEnvelope
 
     public DateTimeOffset? Timestamp { get; init; }
 
+    /// <summary>
+    /// True when the timestamp came from a zone-less format (classic RFC
+    /// 3164): the wall-clock digits are preserved as claimed, but the sender's
+    /// UTC offset is unknown, so the value must not be treated as an instant.
+    /// </summary>
+    public bool TimestampIsZoneless { get; init; }
+
     public string? ClaimedHostname { get; init; }
 
     public string? Tag { get; init; }
@@ -20,9 +27,11 @@ public sealed record SyslogEnvelope
 }
 
 /// <summary>
-/// Parses RFC 3164 (BSD) and RFC 5424 syslog envelopes.  Never throws:
-/// anything unparseable degrades to a message-only envelope so hostile or
-/// malformed datagrams still become inspectable events.
+/// Parses RFC 3164 (BSD), RFC 5424, and the common "RFC 3164 with ISO 8601
+/// timestamp" hybrid (emitted by RouterOS and rsyslog forwarders) syslog
+/// envelopes.  Never throws: anything unparseable degrades to a message-only
+/// envelope so hostile or malformed datagrams still become inspectable
+/// events.
 /// </summary>
 public static partial class SyslogEnvelopeParser
 {
@@ -62,6 +71,30 @@ public static partial class SyslogEnvelopeParser
             };
         }
 
+        // RFC 3164 layout with an ISO 8601 timestamp (RouterOS "iso8601"
+        // remote-log format, rsyslog forward format):
+        // TIMESTAMP SP HOSTNAME SP TAG[pid]: MSG
+        var isoHybrid = IsoHybridPattern().Match(rest);
+        if (isoHybrid.Success
+            && DateTimeOffset.TryParse(
+                isoHybrid.Groups["ts"].Value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal,
+                out var parsedIso))
+        {
+            var hasOffset = HasExplicitOffset(isoHybrid.Groups["ts"].Value);
+            return new SyslogEnvelope
+            {
+                Facility = facility,
+                Severity = severity,
+                Timestamp = parsedIso,
+                TimestampIsZoneless = !hasOffset,
+                ClaimedHostname = isoHybrid.Groups["host"].Value,
+                Tag = string.IsNullOrEmpty(isoHybrid.Groups["tag"].Value) ? null : isoHybrid.Groups["tag"].Value,
+                Message = isoHybrid.Groups["msg"].Value,
+            };
+        }
+
         // RFC 3164: TIMESTAMP(MMM d HH:mm:ss) SP HOSTNAME SP TAG[pid]: MSG
         var rfc3164 = Rfc3164Pattern().Match(rest);
         if (rfc3164.Success)
@@ -71,7 +104,10 @@ public static partial class SyslogEnvelopeParser
                     rfc3164.Groups["ts"].Value.Replace("  ", " ", StringComparison.Ordinal),
                     "MMM d HH:mm:ss",
                     CultureInfo.InvariantCulture,
-                    DateTimeStyles.AssumeLocal,
+                    // The format carries no zone; parse deterministically
+                    // (independent of the host's time zone) and flag the
+                    // ambiguity so consumers do not treat it as an instant.
+                    DateTimeStyles.AssumeUniversal,
                     out var parsed3164))
             {
                 // RFC 3164 timestamps carry no year; assume the receive year
@@ -94,6 +130,7 @@ public static partial class SyslogEnvelopeParser
                 Facility = facility,
                 Severity = severity,
                 Timestamp = ts,
+                TimestampIsZoneless = ts is not null,
                 ClaimedHostname = rfc3164.Groups["host"].Value,
                 Tag = string.IsNullOrEmpty(rfc3164.Groups["tag"].Value) ? null : rfc3164.Groups["tag"].Value,
                 Message = rfc3164.Groups["msg"].Value,
@@ -110,11 +147,19 @@ public static partial class SyslogEnvelopeParser
 
     private static string? Nil(string value) => value == "-" ? null : value;
 
+    /// <summary>True when the ISO timestamp text carries Z or a +/-HH[:mm] offset.</summary>
+    private static bool HasExplicitOffset(string timestamp) =>
+        timestamp.EndsWith('Z')
+        || timestamp.LastIndexOfAny(['+', '-']) > timestamp.IndexOf('T', StringComparison.Ordinal);
+
     [GeneratedRegex(@"^<(?<pri>\d{1,3})>")]
     private static partial Regex PriPattern();
 
     [GeneratedRegex(@"^1 (?<ts>\S+) (?<host>\S+) (?<app>\S+) (?<procid>\S+) (?<msgid>\S+) (?:\[.*?\]|-)\s?(?<msg>.*)$", RegexOptions.Singleline)]
     private static partial Regex Rfc5424Pattern();
+
+    [GeneratedRegex(@"^(?<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?) (?<host>\S+) (?:(?<tag>[^:\[\s]+)(?:\[\d+\])?: )?(?<msg>.*)$", RegexOptions.Singleline)]
+    private static partial Regex IsoHybridPattern();
 
     [GeneratedRegex(@"^(?<ts>[A-Z][a-z]{2} [ \d]\d \d{2}:\d{2}:\d{2}) (?<host>\S+) (?:(?<tag>[^:\[\s]+)(?:\[\d+\])?: )?(?<msg>.*)$", RegexOptions.Singleline)]
     private static partial Regex Rfc3164Pattern();

@@ -10,7 +10,12 @@ public sealed record EventListFilter(string? Text);
 
 public sealed record IncidentListFilter(string? Text, IncidentState? State);
 
-public sealed record DecisionListFilter(string? Text, DecisionOutcome? Outcome, int? MinSeverity = null);
+public sealed record DecisionListFilter(
+    string? Text,
+    DecisionOutcome? Outcome,
+    int? MinSeverity = null,
+    int? MaxSeverity = null,
+    bool UnreviewedOnly = false);
 
 public sealed record AuditListFilter(string? Text, PipelineStage? Stage);
 

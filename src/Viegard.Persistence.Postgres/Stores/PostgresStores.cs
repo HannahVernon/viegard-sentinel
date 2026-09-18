@@ -682,6 +682,19 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
             .ConfigureAwait(false);
     }
 
+    public async ValueTask<int> CountUnreviewedAtOrBelowAsync(
+        int maxSeverity,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await db.Decisions
+            .Where(row => row.Outcome == (int)DecisionOutcome.RequireApproval
+                && row.ReviewedAt == null
+                && db.Classifications.Any(c => c.Id == row.ClassificationId && c.Severity <= maxSeverity))
+            .CountAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     private static readonly Func<int, string>[] DecisionSearchClauses =
     [
         index => $"d.rationale ILIKE {{{index}}} ESCAPE '\\'",
@@ -710,6 +723,17 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
         {
             conditions.Add($"EXISTS (SELECT 1 FROM classifications fc WHERE fc.id = d.classification_id AND fc.severity >= {{{args.Count}}})");
             args.Add(minSeverity);
+        }
+
+        if (filter?.MaxSeverity is { } maxSeverity)
+        {
+            conditions.Add($"EXISTS (SELECT 1 FROM classifications fx WHERE fx.id = d.classification_id AND fx.severity <= {{{args.Count}}})");
+            args.Add(maxSeverity);
+        }
+
+        if (filter?.UnreviewedOnly == true)
+        {
+            conditions.Add("d.reviewed_at IS NULL");
         }
 
         if (boundaryOffset is null)

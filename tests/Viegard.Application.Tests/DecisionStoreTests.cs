@@ -128,6 +128,49 @@ public sealed class DecisionStoreTests
         Assert.Null((await store.GetAsync(missingClassification.Id))!.ReviewedAt);
     }
 
+    [Fact]
+    public async Task ListPageAsync_filters_by_maximum_severity_and_unreviewed()
+    {
+        var classifications = new InMemoryClassificationStore();
+        var store = new InMemoryDecisionStore(classifications);
+        var now = DateTimeOffset.UtcNow;
+        var low = await AddWithSeverityAsync(store, classifications, DecisionOutcome.RequireApproval, 2);
+        var high = await AddWithSeverityAsync(store, classifications, DecisionOutcome.RequireApproval, 8);
+        var lowReviewed = await AddWithSeverityAsync(store, classifications, DecisionOutcome.RequireApproval, 2);
+        await store.TryReviewAsync(lowReviewed.Id, DecisionReviewOutcome.Rejected, "hannah", now);
+
+        var maxOnly = await store.ListPageAsync(null, 10, new DecisionListFilter(null, null, MaxSeverity: 3));
+        Assert.Equal(2, maxOnly.Items.Count);
+        Assert.DoesNotContain(maxOnly.Items, d => d.Id == high.Id);
+
+        var claimSet = await store.ListPageAsync(
+            null,
+            10,
+            new DecisionListFilter(null, DecisionOutcome.RequireApproval, MaxSeverity: 3, UnreviewedOnly: true));
+        Assert.Single(claimSet.Items);
+        Assert.Equal(low.Id, claimSet.Items[0].Id);
+    }
+
+    [Fact]
+    public async Task CountUnreviewedAtOrBelowAsync_matches_bulk_reject_claim_set()
+    {
+        var classifications = new InMemoryClassificationStore();
+        var store = new InMemoryDecisionStore(classifications);
+        var now = DateTimeOffset.UtcNow;
+        await AddWithSeverityAsync(store, classifications, DecisionOutcome.RequireApproval, 1);
+        await AddWithSeverityAsync(store, classifications, DecisionOutcome.RequireApproval, 3);
+        await AddWithSeverityAsync(store, classifications, DecisionOutcome.RequireApproval, 8);
+        await AddWithSeverityAsync(store, classifications, DecisionOutcome.ActionAuthorized, 2);
+        var reviewed = await AddWithSeverityAsync(store, classifications, DecisionOutcome.RequireApproval, 2);
+        await store.TryReviewAsync(reviewed.Id, DecisionReviewOutcome.Approved, "hannah", now);
+        await store.AddAsync(Decision(DecisionOutcome.RequireApproval));
+
+        Assert.Equal(2, await store.CountUnreviewedAtOrBelowAsync(3));
+        Assert.Equal(3, await store.CountUnreviewedAtOrBelowAsync(10));
+        Assert.Equal(2, await store.BulkRejectUnreviewedAsync(3, "operator", now));
+        Assert.Equal(0, await store.CountUnreviewedAtOrBelowAsync(3));
+    }
+
     private static async Task<Decision> AddWithSeverityAsync(
         InMemoryDecisionStore store,
         InMemoryClassificationStore classifications,

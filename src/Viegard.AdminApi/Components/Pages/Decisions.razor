@@ -38,6 +38,14 @@
             Min severity
             <input id="decision-filter-minseverity" name="minSeverity" type="number" min="1" max="10" value="@(_minSeverity?.ToString() ?? string.Empty)" placeholder="1-10" />
         </label>
+        <label for="decision-filter-maxseverity">
+            Max severity
+            <input id="decision-filter-maxseverity" name="maxSeverity" type="number" min="1" max="10" value="@(_maxSeverity?.ToString() ?? string.Empty)" placeholder="1-10" />
+        </label>
+        <label for="decision-filter-unreviewed" class="filter-checkbox">
+            <input id="decision-filter-unreviewed" name="unreviewed" type="checkbox" value="1" checked="@_unreviewedOnly" />
+            Unreviewed only
+        </label>
         @foreach (var parameter in ActiveFilterHiddenParams)
         {
             <input type="hidden" name="@parameter.Key" value="@parameter.Value" />
@@ -55,28 +63,43 @@
         <section class="card">
             <h2>Bulk reject</h2>
             <p class="small">Rejects every unreviewed decision awaiting approval whose severity is at or below the chosen value.  Higher-severity decisions stay in the queue for individual review.</p>
-            @if (!_stepUpFresh)
+            <p><strong>@_bulkCount</strong> unreviewed @(_bulkCount == 1 ? "decision is" : "decisions are") at severity @_bulkSeverity or below.</p>
+            <form method="get" action="/decisions" class="decision-review-form">
+                <input type="hidden" name="outcome" value="RequireApproval" />
+                <input type="hidden" name="unreviewed" value="1" />
+                <input type="hidden" name="take" value="@_take" />
+                <label>
+                    Max severity
+                    <select name="maxSeverity">
+                        @for (var severity = 1; severity <= 10; severity++)
+                        {
+                            <option value="@severity" selected="@(severity == _bulkSeverity)">@severity</option>
+                        }
+                    </select>
+                </label>
+                <button type="submit" class="secondary-button">Preview</button>
+            </form>
+            @if (BulkPreviewActive)
             {
-                <div class="step-up-strip">
-                    <span>Step-up verification is required before bulk-rejecting decisions.</span>
-                    <StepUpPrompt ReturnTo="/decisions?outcome=RequireApproval" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-bulk-reject" />
-                </div>
+                @if (!_stepUpFresh)
+                {
+                    <div class="step-up-strip">
+                        <span>Step-up verification is required before bulk-rejecting decisions.</span>
+                        <StepUpPrompt ReturnTo="@BulkPreviewPath" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-bulk-reject" />
+                    </div>
+                }
+                else
+                {
+                    <form method="post" action="/decisions/bulk-reject" class="decision-review-form">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="maxSeverity" value="@_maxSeverity" />
+                        <button type="submit" class="secondary-button">Reject these @_bulkCount decision@(_bulkCount == 1 ? "" : "s")</button>
+                    </form>
+                }
             }
             else
             {
-                <form method="post" action="/decisions/bulk-reject" class="decision-review-form">
-                    <AntiforgeryToken />
-                    <label>
-                        Max severity
-                        <select name="maxSeverity">
-                            @for (var severity = 1; severity <= 10; severity++)
-                            {
-                                <option value="@severity" selected="@(severity == 3)">@severity</option>
-                            }
-                        </select>
-                    </label>
-                    <button type="submit" class="secondary-button">Reject all at or below</button>
-                </form>
+                <p class="form-hint">Preview shows exactly the decisions a bulk reject would claim; the reject button appears once the list matches that set.</p>
             }
         </section>
     }
@@ -136,14 +159,33 @@
     private bool _searchTimedOut;
     private DecisionOutcome? _outcome;
     private int? _minSeverity;
+    private int? _maxSeverity;
+    private bool _unreviewedOnly;
     private string? _sortKey;
     private SortDirection? _sortDirection;
     private bool _stepUpFresh;
     private bool _hasSecurityKeys;
+    private int _bulkSeverity = DefaultBulkSeverity;
+    private int _bulkCount;
+
+    private const int DefaultBulkSeverity = 3;
 
     private int _take = KeysetPagination.DefaultPageSize;
 
-    private bool HasFilters => _filterText is not null || _outcome is not null || _minSeverity is not null;
+    private bool HasFilters => _filterText is not null || _outcome is not null
+        || _minSeverity is not null || _maxSeverity is not null || _unreviewedOnly;
+
+    // The reject button only renders while the displayed list is exactly the
+    // set a bulk reject would claim: RequireApproval, unreviewed, severity at
+    // or below the previewed value, with no other narrowing filters.
+    private bool BulkPreviewActive => _outcome == DecisionOutcome.RequireApproval
+        && _unreviewedOnly
+        && _maxSeverity is not null
+        && _minSeverity is null
+        && _filterText is null;
+
+    private string BulkPreviewPath =>
+        $"/decisions?outcome=RequireApproval&unreviewed=1&maxSeverity={_bulkSeverity}";
 
     private IEnumerable<KeyValuePair<string, string>> ActiveFilterHiddenParams => ActiveParameters(_filterHiddenParams);
 
@@ -168,6 +210,12 @@
     [SupplyParameterFromQuery(Name = "minSeverity")]
     public string? MinSeverityRaw { get; set; }
 
+    [SupplyParameterFromQuery(Name = "maxSeverity")]
+    public string? MaxSeverityRaw { get; set; }
+
+    [SupplyParameterFromQuery(Name = "unreviewed")]
+    public string? UnreviewedRaw { get; set; }
+
     [SupplyParameterFromQuery(Name = "sort")]
     public string? Sort { get; set; }
 
@@ -183,6 +231,11 @@
         _minSeverity = int.TryParse(MinSeverityRaw, out var minSeverity) && minSeverity is >= 1 and <= 10
             ? minSeverity
             : null;
+        _maxSeverity = int.TryParse(MaxSeverityRaw, out var maxSeverity) && maxSeverity is >= 1 and <= 10
+            ? maxSeverity
+            : null;
+        _unreviewedOnly = UnreviewedRaw is "1" or "true";
+        _bulkSeverity = _maxSeverity ?? DefaultBulkSeverity;
         var sort = ListSortParser.ParseDecision(Sort, Dir);
         if (sort is null && _outcome == DecisionOutcome.RequireApproval)
         {
@@ -196,10 +249,12 @@
         var direction = _sortDirection is null ? null : ListSortParser.ToQueryValue(_sortDirection.Value);
         var take = _take.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var minSeverityText = _minSeverity?.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        _filters = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["minSeverity"] = minSeverityText, ["sort"] = _sortKey, ["dir"] = direction };
-        _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["minSeverity"] = minSeverityText, ["take"] = take };
+        var maxSeverityText = _maxSeverity?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var unreviewedText = _unreviewedOnly ? "1" : null;
+        _filters = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["minSeverity"] = minSeverityText, ["maxSeverity"] = maxSeverityText, ["unreviewed"] = unreviewedText, ["sort"] = _sortKey, ["dir"] = direction };
+        _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["minSeverity"] = minSeverityText, ["maxSeverity"] = maxSeverityText, ["unreviewed"] = unreviewedText, ["take"] = take };
         _filterHiddenParams = new Dictionary<string, string?> { ["take"] = take, ["sort"] = _sortKey, ["dir"] = direction };
-        var filter = new DecisionListFilter(_filterText, _outcome, _minSeverity);
+        var filter = new DecisionListFilter(_filterText, _outcome, _minSeverity, _maxSeverity, _unreviewedOnly);
         try
         {
             _currentCursor = Page is { } requestedPage
@@ -223,6 +278,11 @@
         }
 
         _rows = rows;
+
+        if (_outcome == DecisionOutcome.RequireApproval)
+        {
+            _bulkCount = await DecisionStore.CountUnreviewedAtOrBelowAsync(_bulkSeverity).ConfigureAwait(false);
+        }
 
         if (_outcome == DecisionOutcome.RequireApproval && HttpContextAccessor.HttpContext is { } context)
         {

@@ -1,0 +1,204 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Viegard.AdminApi.Auth;
+using Viegard.AdminApi.Errors;
+using Viegard.Application.Audit;
+using Viegard.Application.Stores;
+using Viegard.Domain.Audit;
+using Viegard.Domain.Decisions;
+using Viegard.Domain.Incidents;
+
+namespace Viegard.AdminApi.Api;
+
+/// <summary>
+/// Read-only JSON API over the list stores (D-0040 scope b).  Every endpoint
+/// is GET-only, opted into the read-only-api policy (cookie session or app
+/// password), and serializes domain records directly with ISO-8601
+/// timestamps and string enums for machine consumption.  Text searches share
+/// the interactive pages' command budget and answer 408 when it elapses.
+/// </summary>
+public static class ReadOnlyApiEndpoints
+{
+    private const int DefaultTake = 50;
+    private const int MaxTake = 200;
+
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
+
+    public static void MapReadOnlyApiEndpoints(this WebApplication app)
+    {
+        var api = app.MapGroup("/api/v1").RequireAuthorization(AppPasswordDefaults.ReadOnlyApiPolicy);
+        api.MapGet("/events", ListEventsAsync);
+        api.MapGet("/events/{id:guid}", GetEventAsync);
+        api.MapGet("/incidents", ListIncidentsAsync);
+        api.MapGet("/incidents/{id:guid}", GetIncidentAsync);
+        api.MapGet("/decisions", ListDecisionsAsync);
+        api.MapGet("/decisions/{id:guid}", GetDecisionAsync);
+        api.MapGet("/classifications/{id:guid}", GetClassificationAsync);
+        api.MapGet("/audit", ListAuditAsync);
+        api.MapGet("/bans", ListBansAsync);
+    }
+
+    internal static async Task<IResult> ListEventsAsync(
+        HttpContext context,
+        IEventStore events)
+    {
+        var query = ReadListQuery(context);
+        return await ListAsync(query, (cursor, take) => events.ListPageAsync(
+            cursor,
+            take,
+            new EventListFilter(query.Text),
+            ListSortParser.ParseEvent(query.Sort, query.Direction),
+            context.RequestAborted)).ConfigureAwait(false);
+    }
+
+    internal static async Task<IResult> ListIncidentsAsync(
+        HttpContext context,
+        IIncidentStore incidents)
+    {
+        var query = ReadListQuery(context);
+        var state = ListFilterParser.ParseEnum<IncidentState>(context.Request.Query["state"]);
+        return await ListAsync(query, (cursor, take) => incidents.ListPageAsync(
+            cursor,
+            take,
+            new IncidentListFilter(query.Text, state),
+            ListSortParser.ParseIncident(query.Sort, query.Direction),
+            context.RequestAborted)).ConfigureAwait(false);
+    }
+
+    internal static async Task<IResult> ListDecisionsAsync(
+        HttpContext context,
+        IDecisionStore decisions)
+    {
+        var query = ReadListQuery(context);
+        var request = context.Request.Query;
+        var outcome = ListFilterParser.ParseEnum<DecisionOutcome>(request["outcome"]);
+        var filter = new DecisionListFilter(
+            query.Text,
+            outcome,
+            ParseSeverity(request["minSeverity"]),
+            ParseSeverity(request["maxSeverity"]),
+            request["unreviewed"].ToString() is "1" or "true");
+        return await ListAsync(query, (cursor, take) => decisions.ListPageAsync(
+            cursor,
+            take,
+            filter,
+            ListSortParser.ParseDecision(query.Sort, query.Direction),
+            context.RequestAborted)).ConfigureAwait(false);
+    }
+
+    internal static async Task<IResult> ListAuditAsync(
+        HttpContext context,
+        IAuditLedger audit)
+    {
+        var query = ReadListQuery(context);
+        var stage = ListFilterParser.ParseEnum<PipelineStage>(context.Request.Query["stage"]);
+        return await ListAsync(query, (cursor, take) => audit.ListPageAsync(
+            cursor,
+            take,
+            new AuditListFilter(query.Text, stage),
+            ListSortParser.ParseAudit(query.Sort, query.Direction),
+            context.RequestAborted)).ConfigureAwait(false);
+    }
+
+    internal static async Task<IResult> ListBansAsync(
+        HttpContext context,
+        Viegard.Application.Actions.IActiveBanStore activeBans,
+        IActionStore actions)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var bans = await activeBans.ListUnexpiredAsync(now, context.RequestAborted).ConfigureAwait(false);
+        var recent = await actions.ListRecentByProviderAsync(
+            Viegard.Actions.MikroTik.MikroTikBanActionProvider.MikroTikProviderId,
+            50,
+            context.RequestAborted).ConfigureAwait(false);
+        return Results.Json(new { activeBans = bans, recentActions = recent }, Json);
+    }
+
+    internal static async Task<IResult> GetEventAsync(Guid id, IEventStore events, HttpContext context)
+    {
+        var found = await events.GetAsync(id, context.RequestAborted).ConfigureAwait(false);
+        return found is null ? NotFound() : Results.Json(found, Json);
+    }
+
+    internal static async Task<IResult> GetIncidentAsync(Guid id, IIncidentStore incidents, HttpContext context)
+    {
+        var found = await incidents.GetAsync(id, context.RequestAborted).ConfigureAwait(false);
+        return found is null ? NotFound() : Results.Json(found, Json);
+    }
+
+    internal static async Task<IResult> GetDecisionAsync(
+        Guid id,
+        IDecisionStore decisions,
+        IClassificationStore classifications,
+        HttpContext context)
+    {
+        var decision = await decisions.GetAsync(id, context.RequestAborted).ConfigureAwait(false);
+        if (decision is null)
+        {
+            return NotFound();
+        }
+
+        var classification = await classifications.GetAsync(decision.ClassificationId, context.RequestAborted)
+            .ConfigureAwait(false);
+        return Results.Json(new { decision, classification }, Json);
+    }
+
+    internal static async Task<IResult> GetClassificationAsync(
+        Guid id,
+        IClassificationStore classifications,
+        HttpContext context)
+    {
+        var found = await classifications.GetAsync(id, context.RequestAborted).ConfigureAwait(false);
+        return found is null ? NotFound() : Results.Json(found, Json);
+    }
+
+    private sealed record ListQuery(string? Text, string? Sort, string? Direction, Guid? Cursor, int Take);
+
+    private static ListQuery ReadListQuery(HttpContext context)
+    {
+        var query = context.Request.Query;
+        var take = int.TryParse(query["take"], out var parsedTake)
+            ? Math.Clamp(parsedTake, 1, MaxTake)
+            : DefaultTake;
+        Guid? cursor = Guid.TryParse(query["cursor"], out var parsedCursor) ? parsedCursor : null;
+        return new ListQuery(
+            ListFilterText.Normalize(query["q"]),
+            query["sort"],
+            query["dir"],
+            cursor,
+            take);
+    }
+
+    private static async Task<IResult> ListAsync<T>(
+        ListQuery query,
+        Func<Guid?, int, ValueTask<KeysetPage<T>>> fetch)
+    {
+        try
+        {
+            var page = await fetch(query.Cursor, query.Take).ConfigureAwait(false);
+            return Results.Json(new
+            {
+                items = page.Items,
+                nextCursor = page.NextCursor,
+                totalCount = page.TotalCount,
+                preceding = page.Preceding,
+            }, Json);
+        }
+        catch (Exception ex) when (query.Text is not null && AdminQueryTimeout.IsTimeout(ex))
+        {
+            return Results.Json(
+                new { error = "The search took too long and was stopped.  Try a more specific term." },
+                Json,
+                statusCode: StatusCodes.Status408RequestTimeout);
+        }
+    }
+
+    private static int? ParseSeverity(string? value) =>
+        int.TryParse(value, out var severity) && severity is >= 1 and <= 10 ? severity : null;
+
+    private static IResult NotFound() =>
+        Results.Json(new { error = "Not found." }, Json, statusCode: StatusCodes.Status404NotFound);
+}

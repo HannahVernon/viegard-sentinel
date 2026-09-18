@@ -842,6 +842,58 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Signature_wait_for_change_returns_after_timeout_without_notify()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var seen = store.CurrentChangeVersion;
+
+        // The refresh loops rely on this returning at the timeout even when
+        // no notification ever arrives (the polling fallback).  Found live:
+        // signature edits went unseen by the pipeline for 35+ minutes, so
+        // this asserts the fallback actually fires.
+        var wait = store.WaitForChangeAsync(seen, TimeSpan.FromSeconds(3)).AsTask();
+        var completed = await Task.WhenAny(wait, Task.Delay(TimeSpan.FromSeconds(15)));
+
+        Assert.Same(wait, completed);
+        Assert.Equal(seen, await wait);
+    }
+
+    [PostgresFact]
+    public async Task Posture_wait_for_change_returns_after_timeout_without_notify()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresPolicyPostureSettingsStore(factory, _dataSource!);
+        var seen = store.CurrentChangeVersion;
+
+        var wait = store.WaitForChangeAsync(seen, TimeSpan.FromSeconds(3)).AsTask();
+        var completed = await Task.WhenAny(wait, Task.Delay(TimeSpan.FromSeconds(15)));
+
+        Assert.Same(wait, completed);
+        Assert.Equal(seen, await wait);
+    }
+
+    [PostgresFact]
+    public async Task Signature_wait_for_change_wakes_on_cross_connection_notify()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var listener = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var writer = new PostgresCustomSignatureStore(factory, _dataSource!);
+        var seen = listener.CurrentChangeVersion;
+
+        var wait = listener.WaitForChangeAsync(seen, TimeSpan.FromSeconds(30)).AsTask();
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        var signature = CustomSignature($"it-notify-{ViegardId.New():N}");
+        await writer.UpsertAsync(signature);
+
+        var completed = await Task.WhenAny(wait, Task.Delay(TimeSpan.FromSeconds(10)));
+
+        Assert.Same(wait, completed);
+        Assert.NotEqual(seen, await wait);
+        await writer.DeleteAsync(signature.Id);
+    }
+
+    [PostgresFact]
     public async Task Admin_webauthn_credentials_enforce_unique_credential_id_and_ownership()
     {
         var factory = new TestDbContextFactory(_dataSource!);

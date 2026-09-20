@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Viegard.Actions.MikroTik;
 using Viegard.Application.Audit;
 using Viegard.Application.Configuration;
+using Viegard.Application.Policy;
 using Viegard.Domain;
 using Viegard.Domain.Audit;
 using Viegard.PipelineHost.Configuration;
@@ -19,6 +20,8 @@ public sealed class JetPackReconciliationWorker(
     IRouterCredentialProtector credentialProtector,
     IOptions<ActionWorkerOptions> options,
     IOptions<JetPackFeedOptions> feedOptions,
+    IOptions<PolicyOptions> policyOptions,
+    PolicyPostureSource postureSource,
     IMikroTikRouterHttpClientFactory httpClientFactory,
     IAuditLedger auditLedger,
     TimeProvider timeProvider,
@@ -52,6 +55,7 @@ public sealed class JetPackReconciliationWorker(
 
     internal async Task<JetPackReconciliationCycleResult> RunCycleAsync(CancellationToken cancellationToken = default)
     {
+        var posture = postureSource.CurrentValues(policyOptions.Value);
         var now = timeProvider.GetUtcNow();
         var settings = await settingsStore.GetAsync(cancellationToken).ConfigureAwait(false)
             ?? JetPackFeedSettings.FromOptions(feedOptions.Value, now);
@@ -79,6 +83,7 @@ public sealed class JetPackReconciliationWorker(
                     router,
                     settings.AddressListName,
                     desiredMap,
+                    posture.DryRun,
                     cancellationToken).ConfigureAwait(false);
                 if (routerResult.Skipped)
                 {
@@ -105,14 +110,15 @@ public sealed class JetPackReconciliationWorker(
             }
         }
 
-        var cycle = new JetPackReconciliationCycleResult(now, settings.AddressListName, false, results);
+        var cycle = new JetPackReconciliationCycleResult(now, settings.AddressListName, posture.DryRun, false, results);
         if (!cycle.Changed)
         {
             logger.LogDebug(
-                "JetPack reconciliation cycle completed with no router changes. DesiredCount={DesiredCount}; RouterCount={RouterCount}; AddressListName={AddressListName}.",
+                    "JetPack reconciliation cycle completed with no router changes. DesiredCount={DesiredCount}; RouterCount={RouterCount}; AddressListName={AddressListName}; DryRun={DryRun}.",
                 desiredMap.Count,
                 routers.Count,
-                settings.AddressListName);
+                    settings.AddressListName,
+                    posture.DryRun);
             return cycle;
         }
 
@@ -165,6 +171,7 @@ public sealed class JetPackReconciliationWorker(
         MikroTikRouter router,
         string addressListName,
         IReadOnlyDictionary<string, JetPackDesiredAddress> desired,
+        bool dryRun,
         CancellationToken cancellationToken)
     {
         var savedRouter = MikroTikRouterValidator.NormalizeForSave(router);
@@ -215,6 +222,26 @@ public sealed class JetPackReconciliationWorker(
             var extraneous = actual
                 .Where(entry => entry.CanonicalAddress is null || !desired.ContainsKey(entry.CanonicalAddress))
                 .ToList();
+
+            if (dryRun)
+            {
+                if (missing.Count > 0 || extraneous.Count > 0)
+                {
+                    logger.LogInformation(
+                        "JetPack reconciliation dry-run would change router {RouterName}. Add={AddCount}; Remove={RemoveCount}.",
+                        savedRouter.Name,
+                        missing.Count,
+                        extraneous.Count);
+                }
+
+                return new JetPackReconciliationRouterResult(
+                    savedRouter.Id,
+                    savedRouter.Name,
+                    false,
+                    null,
+                    missing.Select(item => item.Address).ToList(),
+                    extraneous.Select(entry => string.IsNullOrWhiteSpace(entry.CanonicalAddress) ? entry.RawAddress : entry.CanonicalAddress).ToList());
+            }
 
             var added = new List<string>();
             var removed = new List<string>();
@@ -320,17 +347,18 @@ public sealed class JetPackReconciliationWorker(
 public sealed record JetPackReconciliationCycleResult(
     DateTimeOffset StartedAt,
     string AddressListName,
+    bool DryRun,
     bool Disabled,
     IReadOnlyList<JetPackReconciliationRouterResult> Routers)
 {
     public bool Changed => TotalAdded > 0 || TotalRemoved > 0;
 
-    public int TotalAdded => Routers.Sum(router => router.Added.Count);
+    public int TotalAdded => DryRun ? 0 : Routers.Sum(router => router.Added.Count);
 
-    public int TotalRemoved => Routers.Sum(router => router.Removed.Count);
+    public int TotalRemoved => DryRun ? 0 : Routers.Sum(router => router.Removed.Count);
 
     public static JetPackReconciliationCycleResult CreateDisabled(DateTimeOffset startedAt, string addressListName) =>
-        new(startedAt, addressListName, true, []);
+        new(startedAt, addressListName, false, true, []);
 }
 
 public sealed record JetPackReconciliationRouterResult(

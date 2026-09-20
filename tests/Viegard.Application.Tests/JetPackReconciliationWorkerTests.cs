@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Viegard.Application.Configuration;
+using Viegard.Application.Policy;
 using Viegard.Domain.Audit;
 using Viegard.Persistence.InMemory;
 using Viegard.PipelineHost.Configuration;
@@ -75,7 +76,8 @@ public sealed class JetPackReconciliationWorkerTests
         ProviderFixture fixture,
         IJetPackFeedSettingsStore settings,
         IJetPackDesiredAddressStore desired,
-        InMemoryAuditLedger audit) =>
+        InMemoryAuditLedger audit,
+        bool dryRun = false) =>
         new(
             settings,
             desired,
@@ -83,10 +85,42 @@ public sealed class JetPackReconciliationWorkerTests
             fixture.Credentials,
             Options.Create(new ActionWorkerOptions()),
             Options.Create(new JetPackFeedOptions()),
+            Options.Create(new PolicyOptions
+            {
+                Posture = new PolicyPostureOptions
+                {
+                    DryRun = dryRun,
+                    EmergencyStop = false,
+                    ManualApprovalMode = true,
+                },
+            }),
+            new PolicyPostureSource(),
             fixture.Http,
             audit,
             fixture.Time,
             NullLogger<JetPackReconciliationWorker>.Instance);
+
+    [Fact]
+    public async Task Reconciler_dry_run_reads_and_reports_drift_without_mutating()
+    {
+        var fixture = new ProviderFixture();
+        var audit = new InMemoryAuditLedger();
+        var router = await fixture.AddRouterAsync("router-a");
+        var settings = await SeedSettingsAsync(enabled: true);
+        var desired = new InMemoryJetPackDesiredAddressStore();
+        await desired.ReplaceSnapshotAsync(["122.248.245.244/32"], fixture.Time.GetUtcNow());
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, """[{".id":"*1","list":"jetpack_servers","address":"198.51.100.7"}]"""));
+
+        var result = await Worker(fixture, settings, desired, audit, dryRun: true).RunCycleAsync();
+
+        Assert.False(result.Changed);
+        Assert.Single(fixture.Http.Requests);
+        Assert.Equal("GET", fixture.Http.Requests[0].Method);
+        var routerResult = Assert.Single(result.Routers);
+        Assert.Equal("122.248.245.244/32", Assert.Single(routerResult.Added));
+        Assert.Equal("198.51.100.7", Assert.Single(routerResult.Removed));
+        Assert.Empty(audit.Snapshot());
+    }
 
     private static async Task<IJetPackFeedSettingsStore> SeedSettingsAsync(bool enabled)
     {

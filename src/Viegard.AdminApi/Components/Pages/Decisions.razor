@@ -2,9 +2,13 @@
 @attribute [Authorize]
 @inject IDecisionStore DecisionStore
 @inject IClassificationStore ClassificationStore
+@inject IIncidentStore IncidentStore
+@inject IEventStore EventStore
 @inject IAdminUserStore Users
 @inject IAdminSessionStore Sessions
 @inject IOptions<AdminAuthOptions> AuthOptions
+@inject IOptions<PolicyOptions> PolicyOptions
+@inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
 @inject IHttpContextAccessor HttpContextAccessor
 @inject UserDisplay Display
 
@@ -119,6 +123,7 @@
                     <SortHeader Title="Severity" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Severity)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Desc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
                     <th>Review</th>
                     <SortHeader Title="Classification" SortKey="@ListSortParser.ToQueryKey(DecisionSortColumn.Classification)" CurrentSortKey="@_sortKey" CurrentDirection="@_sortDirection" DefaultDirection="SortDirection.Asc" BasePath="/decisions" ExtraQueryParams="@_sortHeaderParams" />
+                    <th>Triggered by</th>
                     <th>Rationale</th>
                 </tr>
             </thead>
@@ -130,15 +135,61 @@
                         <td>@row.Decision.PolicyId @row.Decision.PolicyVersion</td>
                         <td><span class="@AdminText.OutcomeCss(row.Decision.Outcome)">@AdminText.DecisionOutcomeLabel(row.Decision.Outcome)</span></td>
                         <td>@SeverityBadge(row.Classification)</td>
-                        <td>
+                        <td class="actions-cell">
                             <span class="@ReviewCss(row.Decision)">@ReviewLabel(row.Decision)</span>
-                            @if (row.Decision is { Outcome: DecisionOutcome.RequireApproval, ReviewedAt: null })
+                            @if (row.Review is not null)
                             {
                                 <div class="small">waiting @WaitingAge(row.Decision.CreatedAt)</div>
+                                @if (!_stepUpFresh)
+                                {
+                                    <div class="decision-inline-review">
+                                        <span class="small">Verify step-up to review.</span>
+                                        <StepUpPrompt ReturnTo="@_stepUpReturnTo" ShowSecurityKey="_hasSecurityKeys" PopoverId="@($"step-up-popover-decision-{row.Decision.Id:N}")" />
+                                    </div>
+                                }
+                                else if (row.Review.Target.Kind == IncidentTargetIpKind.Found && !string.IsNullOrWhiteSpace(row.Review.Target.Ip))
+                                {
+                                    <div class="decision-inline-review">
+                                        <div class="decision-inline-actions">
+                                            <form method="post" action="/decisions/review" class="decision-review-form decision-inline-form">
+                                                <AntiforgeryToken />
+                                                <input type="hidden" name="id" value="@row.Decision.Id" />
+                                                <input type="hidden" name="verdict" value="approve" />
+                                                <input type="hidden" name="duration" value="@DecisionReviewDurations.OneDay" />
+                                                <button type="submit">Approve</button>
+                                            </form>
+                                            <form method="post" action="/decisions/review" class="decision-review-form decision-inline-form">
+                                                <AntiforgeryToken />
+                                                <input type="hidden" name="id" value="@row.Decision.Id" />
+                                                <input type="hidden" name="verdict" value="reject" />
+                                                <button type="submit" class="secondary-button">Reject</button>
+                                            </form>
+                                        </div>
+                                        @if (_dryRunPosture)
+                                        {
+                                            <div class="small">Dry-run: approval queues the action, but bans nothing until dry-run is disabled.</div>
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="decision-inline-review">
+                                        <span class="small">Approval unavailable: @row.Review.Target.Detail</span>
+                                        <div class="decision-inline-actions">
+                                            <form method="post" action="/decisions/review" class="decision-review-form decision-inline-form">
+                                                <AntiforgeryToken />
+                                                <input type="hidden" name="id" value="@row.Decision.Id" />
+                                                <input type="hidden" name="verdict" value="reject" />
+                                                <button type="submit" class="secondary-button">Reject</button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                }
                             }
                         </td>
                         <td>@ClassificationSummary(row.Classification)</td>
-                        <td>@AdminText.OneLine(row.Decision.Rationale, 220)</td>
+                        <td>@AdminText.OneLine(row.TriggeredBy, TriggeredByListMaxChars)</td>
+                        <td>@AdminText.OneLine(row.Decision.Rationale, RationaleListMaxChars)</td>
                     </tr>
                 }
             </tbody>
@@ -165,10 +216,14 @@
     private SortDirection? _sortDirection;
     private bool _stepUpFresh;
     private bool _hasSecurityKeys;
+    private bool _dryRunPosture;
     private int _bulkSeverity = DefaultBulkSeverity;
     private int _bulkCount;
+    private string _stepUpReturnTo = "/decisions";
 
     private const int DefaultBulkSeverity = 3;
+    private const int TriggeredByListMaxChars = 96;
+    private const int RationaleListMaxChars = 120;
 
     private int _take = KeysetPagination.DefaultPageSize;
 
@@ -225,6 +280,8 @@
     protected override async Task OnInitializedAsync()
     {
         await Display.InitializeAsync().ConfigureAwait(false);
+        _dryRunPosture = (await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false))?.DryRun
+            ?? PolicyOptions.Value.Posture.DryRun;
         _take = Take is null ? Display.DefaultPageSize : KeysetPagination.ClampPageSize(Take);
         _filterText = ListFilterText.Normalize(Q);
         _outcome = ListFilterParser.ParseEnum<DecisionOutcome>(OutcomeRaw);
@@ -271,21 +328,17 @@
             // banner with an empty page instead of the generic error page.
             _searchTimedOut = true;
         }
-        var rows = new List<DecisionRow>();
-        foreach (var decision in _page.Items)
-        {
-            rows.Add(new DecisionRow(decision, await ClassificationStore.GetAsync(decision.ClassificationId).ConfigureAwait(false)));
-        }
-
-        _rows = rows;
+        _rows = await BuildRowsAsync(_page.Items).ConfigureAwait(false);
 
         if (_outcome == DecisionOutcome.RequireApproval)
         {
             _bulkCount = await DecisionStore.CountUnreviewedAtOrBelowAsync(_bulkSeverity).ConfigureAwait(false);
         }
 
-        if (_outcome == DecisionOutcome.RequireApproval && HttpContextAccessor.HttpContext is { } context)
+        if ((_outcome == DecisionOutcome.RequireApproval || _rows.Any(static row => row.Review is not null))
+            && HttpContextAccessor.HttpContext is { } context)
         {
+            _stepUpReturnTo = CurrentListPath(context);
             if (Guid.TryParse(context.User.FindFirstValue(AdminCookieNames.SessionIdClaim), out var sessionId))
             {
                 var session = await Sessions.GetAsync(sessionId).ConfigureAwait(false);
@@ -368,6 +421,74 @@
         };
     }
 
+    private async Task<IReadOnlyList<DecisionRow>> BuildRowsAsync(IReadOnlyList<Decision> decisions)
+    {
+        if (decisions.Count == 0)
+        {
+            return [];
+        }
+
+        var classifications = await ClassificationStore
+            .GetManyAsync(decisions.Select(decision => decision.ClassificationId).Distinct().ToArray())
+            .ConfigureAwait(false);
+        var incidents = await IncidentStore
+            .GetManyAsync(classifications.Values
+                .Where(classification => classification.SubjectKind == ClassificationSubjectKind.Incident)
+                .Select(classification => classification.SubjectId)
+                .Distinct()
+                .ToArray())
+            .ConfigureAwait(false);
+        var eventsById = await EventStore
+            .GetManyAsync(incidents.Values
+                .SelectMany(IncidentEventIds)
+                .Distinct()
+                .ToArray())
+            .ConfigureAwait(false);
+        var rows = new List<DecisionRow>(decisions.Count);
+        foreach (var decision in decisions)
+        {
+            classifications.TryGetValue(decision.ClassificationId, out var classification);
+            var incident = classification is { SubjectKind: ClassificationSubjectKind.Incident }
+                && incidents.TryGetValue(classification.SubjectId, out var foundIncident)
+                    ? foundIncident
+                    : null;
+            rows.Add(new DecisionRow(
+                decision,
+                classification,
+                DecisionTriggeredBySummary.Summarize(classification, incident, eventsById),
+                BuildReview(decision, classification, incident)));
+        }
+
+        return rows;
+    }
+
+    private static DecisionRowReview? BuildReview(
+        Decision decision,
+        Classification? classification,
+        Incident? incident)
+    {
+        if (decision is not { Outcome: DecisionOutcome.RequireApproval, ReviewedAt: null })
+        {
+            return null;
+        }
+
+        var target = classification is null
+            ? IncidentTargetIpResult.Unavailable($"Classification {decision.ClassificationId} was not found.")
+            : IncidentTargetIp.TryDerive(classification, incident);
+        return new DecisionRowReview(target);
+    }
+
+    private static IEnumerable<Guid> IncidentEventIds(Incident incident) =>
+        incident.EventIds.Concat(incident.Evidence
+            .Where(item => item.EventId is not null)
+            .Select(item => item.EventId!.Value));
+
+    private static string CurrentListPath(HttpContext context)
+    {
+        var path = $"{context.Request.PathBase}{context.Request.Path}";
+        return string.IsNullOrEmpty(path) ? "/decisions" : path + context.Request.QueryString;
+    }
+
     private async Task<Guid?> PreviousPageCursorAsync(DecisionListFilter filter, ListSort<DecisionSortColumn>? sort)
     {
         var pageNumber = PaginationMath.PageNumber(_page.Preceding, _take);
@@ -382,5 +503,11 @@
             .Where(parameter => !string.IsNullOrWhiteSpace(parameter.Key) && !string.IsNullOrWhiteSpace(parameter.Value))
             .Select(parameter => new KeyValuePair<string, string>(parameter.Key, parameter.Value!));
 
-    private sealed record DecisionRow(Decision Decision, Classification? Classification);
+    private sealed record DecisionRow(
+        Decision Decision,
+        Classification? Classification,
+        string TriggeredBy,
+        DecisionRowReview? Review);
+
+    private sealed record DecisionRowReview(IncidentTargetIpResult Target);
 }

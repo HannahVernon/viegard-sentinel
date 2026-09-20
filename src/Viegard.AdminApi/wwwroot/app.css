@@ -1271,6 +1271,27 @@ th[aria-sort="descending"] button.client-sort::after {
     box-sizing: border-box;
 }
 
+.decision-inline-review {
+    margin-top: 0.45rem;
+}
+
+.decision-inline-actions {
+    display: flex;
+    gap: 0.45rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.decision-inline-form,
+.decision-inline-form button,
+.decision-inline-review .step-up-trigger {
+    margin-top: 0;
+}
+
+.decision-inline-review .step-up-fallback {
+    margin-left: 0;
+}
+
 td code {
     color: var(--ink);
 }

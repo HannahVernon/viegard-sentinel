@@ -58,6 +58,18 @@ public sealed class InMemoryEventStore : IEventStore
     public ValueTask<NormalizedEvent?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(_events.GetValueOrDefault(id));
 
+    public ValueTask<IReadOnlyDictionary<Guid, NormalizedEvent>> GetManyAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        var items = ids
+            .Distinct()
+            .Where(id => _events.ContainsKey(id))
+            .ToDictionary(id => id, id => _events[id]);
+        return ValueTask.FromResult<IReadOnlyDictionary<Guid, NormalizedEvent>>(items);
+    }
+
     public ValueTask<KeysetPage<NormalizedEvent>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
@@ -98,6 +110,18 @@ public sealed class InMemoryIncidentStore : IIncidentStore
 
     public ValueTask<Incident?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(_incidents.GetValueOrDefault(id));
+
+    public ValueTask<IReadOnlyDictionary<Guid, Incident>> GetManyAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        var items = ids
+            .Distinct()
+            .Where(id => _incidents.ContainsKey(id))
+            .ToDictionary(id => id, id => _incidents[id]);
+        return ValueTask.FromResult<IReadOnlyDictionary<Guid, Incident>>(items);
+    }
 
     public ValueTask<Incident?> FindOpenByCorrelationKeyAsync(string correlationKey, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(_incidents.Values
@@ -152,6 +176,18 @@ public sealed class InMemoryClassificationStore : IClassificationStore
 
     public ValueTask<Classification?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(_classifications.GetValueOrDefault(id));
+
+    public ValueTask<IReadOnlyDictionary<Guid, Classification>> GetManyAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        var items = ids
+            .Distinct()
+            .Where(id => _classifications.ContainsKey(id))
+            .ToDictionary(id => id, id => _classifications[id]);
+        return ValueTask.FromResult<IReadOnlyDictionary<Guid, Classification>>(items);
+    }
 
     internal int? TryGetSeverity(Guid id) =>
         _classifications.TryGetValue(id, out var classification) ? classification.Severity : null;

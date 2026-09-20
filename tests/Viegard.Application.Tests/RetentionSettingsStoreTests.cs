@@ -94,6 +94,7 @@ public sealed class RetentionSettingsStoreTests
             Id = RetentionSettings.FixedId,
             UpdatedAt = DateTimeOffset.UtcNow,
             UpdatedBy = "test",
+            LocalModelAdvisorConsultsDays = null,
         };
         foreach (var (target, days) in values)
         {

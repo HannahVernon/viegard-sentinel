@@ -59,6 +59,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<LocalModelAdvisorSettingsRow> LocalModelAdvisorSettings => Set<LocalModelAdvisorSettingsRow>();
 
+    public DbSet<LocalModelAdvisorConsultRow> LocalModelAdvisorConsults => Set<LocalModelAdvisorConsultRow>();
+
     public DbSet<PolicyThresholdSettingsRow> PolicyThresholdSettings => Set<PolicyThresholdSettingsRow>();
 
     public DbSet<PolicyPostureSettingsRow> PolicyPostureSettings => Set<PolicyPostureSettingsRow>();
@@ -318,6 +320,18 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.Model).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxModelLength);
             entity.Property(e => e.KeepAlive).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxKeepAliveLength);
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<LocalModelAdvisorConsultRow>(entity =>
+        {
+            entity.ToTable("local_model_advisor_consults");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.ClassificationId);
+            entity.Property(e => e.Category).HasColumnType("text");
+            entity.Property(e => e.FailureKind).HasColumnType("text");
+            entity.Property(e => e.ModelId).HasColumnType("text");
         });
 
         modelBuilder.Entity<PolicyThresholdSettingsRow>(entity =>

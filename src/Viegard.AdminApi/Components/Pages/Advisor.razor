@@ -1,0 +1,178 @@
+@page "/advisor"
+@attribute [Authorize]
+@inject ILocalModelAdvisorConsultStore AdvisorConsults
+@inject ILocalModelAdvisorSettingsStore AdvisorSettings
+@inject UserDisplay Display
+
+<PageTitle>Viegard advisor</PageTitle>
+
+<main class="admin-panel wide">
+    <h1>Advisor</h1>
+
+    <section class="card">
+        <h2>Current configuration</h2>
+        <dl class="detail-list">
+            <dt>State</dt><dd><span class="@(_settings?.Enabled == true ? "badge badge-green" : "badge")">@(_settings?.Enabled == true ? "Enabled" : "Disabled")</span></dd>
+            <dt>Endpoint</dt><dd>@(_settings?.Endpoint ?? LocalModelAdvisorSettings.DefaultEndpoint)</dd>
+            <dt>Model</dt><dd>@(_settings?.Model ?? LocalModelAdvisorSettings.DefaultModel)</dd>
+        </dl>
+        <p><a href="/configuration#local-model-advisor">Edit local-model advisor configuration</a></p>
+    </section>
+
+    <section class="card">
+        <h2>Outcome windows</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Window</th>
+                    <th>Escalated</th>
+                    <th>No change</th>
+                    <th>Provider failed</th>
+                    <th>Invalid output</th>
+                    <th>Skipped out of band</th>
+                    <th>Total</th>
+                    <th>Escalation rate</th>
+                    <th>Failures</th>
+                    <th>Latency p50 / p95</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var window in _windows)
+                {
+                    <tr>
+                        <td>@window.Label</td>
+                        <td>@Count(window, AdvisorConsultOutcome.Escalated)</td>
+                        <td>@Count(window, AdvisorConsultOutcome.NoChange)</td>
+                        <td>@Count(window, AdvisorConsultOutcome.ProviderFailed)</td>
+                        <td>@Count(window, AdvisorConsultOutcome.InvalidOutput)</td>
+                        <td>@Count(window, AdvisorConsultOutcome.SkippedOutOfBand)</td>
+                        <td>@Total(window)</td>
+                        <td>@EscalationRate(window)</td>
+                        <td>@Failures(window)</td>
+                        <td>@Latency(window.Latency)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+
+    <section class="card">
+        <h2>Recent consults</h2>
+        @if (_recent.Count == 0)
+        {
+            <p>No advisor consults have been recorded.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Outcome</th>
+                        <th>Category</th>
+                        <th>Severity</th>
+                        <th>Confidence</th>
+                        <th>Latency</th>
+                        <th>Model</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var consult in _recent)
+                    {
+                        <tr>
+                            <td>@Display.Format(consult.CreatedAt)</td>
+                            <td><span class="@OutcomeCss(consult.Outcome)">@OutcomeLabel(consult.Outcome)</span></td>
+                            <td>@consult.Category</td>
+                            <td>@consult.BaseSeverity &rarr; @consult.FinalSeverity</td>
+                            <td>@FormatConfidence(consult.BaseConfidence) &rarr; @FormatConfidence(consult.FinalConfidence)</td>
+                            <td>@FormatLatency(consult.LatencyMs)</td>
+                            <td>@(consult.ModelId ?? "-")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+</main>
+
+@code {
+    private LocalModelAdvisorSettings? _settings;
+    private IReadOnlyList<AdvisorWindow> _windows = [];
+    private IReadOnlyList<AdvisorConsultRecord> _recent = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Display.InitializeAsync().ConfigureAwait(false);
+        _settings = await AdvisorSettings.GetAsync().ConfigureAwait(false);
+        var now = DateTimeOffset.UtcNow;
+        var definitions = new[]
+        {
+            new WindowDefinition("1h", now.AddHours(-1)),
+            new WindowDefinition("24h", now.AddDays(-1)),
+            new WindowDefinition("7d", now.AddDays(-7)),
+            new WindowDefinition("All time", DateTimeOffset.UnixEpoch),
+        };
+        var windows = new List<AdvisorWindow>(definitions.Length);
+        foreach (var definition in definitions)
+        {
+            var counts = await AdvisorConsults.GetOutcomeCountsAsync(definition.Since).ConfigureAwait(false);
+            var latency = await AdvisorConsults.GetLatencyStatsAsync(definition.Since).ConfigureAwait(false);
+            windows.Add(new AdvisorWindow(definition.Label, counts.ToDictionary(c => c.Outcome, c => c.Count), latency));
+        }
+
+        _windows = windows;
+        _recent = await AdvisorConsults.GetRecentAsync(50).ConfigureAwait(false);
+    }
+
+    private static long Count(AdvisorWindow window, AdvisorConsultOutcome outcome) =>
+        window.Counts.GetValueOrDefault(outcome);
+
+    private static long Total(AdvisorWindow window) => window.Counts.Values.Sum();
+
+    private static long Failures(AdvisorWindow window) =>
+        Count(window, AdvisorConsultOutcome.ProviderFailed) + Count(window, AdvisorConsultOutcome.InvalidOutput);
+
+    private static string EscalationRate(AdvisorWindow window)
+    {
+        var escalated = Count(window, AdvisorConsultOutcome.Escalated);
+        var noChange = Count(window, AdvisorConsultOutcome.NoChange);
+        var denominator = escalated + noChange;
+        return denominator == 0
+            ? "-"
+            : (escalated / (double)denominator).ToString("P1", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static string Latency(AdvisorLatencyStats stats) =>
+        stats.Count == 0 ? "-" : $"{stats.P50} ms / {stats.P95} ms";
+
+    private static string FormatLatency(int? latencyMs) =>
+        latencyMs is null ? "-" : $"{latencyMs.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)} ms";
+
+    private static string FormatConfidence(double confidence) =>
+        confidence.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string OutcomeLabel(AdvisorConsultOutcome outcome) => outcome switch
+    {
+        AdvisorConsultOutcome.SkippedOutOfBand => "Skipped out of band",
+        AdvisorConsultOutcome.Escalated => "Escalated",
+        AdvisorConsultOutcome.NoChange => "No change",
+        AdvisorConsultOutcome.ProviderFailed => "Provider failed",
+        AdvisorConsultOutcome.InvalidOutput => "Invalid output",
+        _ => outcome.ToString(),
+    };
+
+    private static string OutcomeCss(AdvisorConsultOutcome outcome) => outcome switch
+    {
+        AdvisorConsultOutcome.Escalated => "badge badge-amber",
+        AdvisorConsultOutcome.NoChange => "badge badge-green",
+        AdvisorConsultOutcome.ProviderFailed or AdvisorConsultOutcome.InvalidOutput => "badge badge-red",
+        _ => "badge",
+    };
+
+    private sealed record WindowDefinition(string Label, DateTimeOffset Since);
+
+    private sealed record AdvisorWindow(
+        string Label,
+        IReadOnlyDictionary<AdvisorConsultOutcome, long> Counts,
+        AdvisorLatencyStats Latency);
+}

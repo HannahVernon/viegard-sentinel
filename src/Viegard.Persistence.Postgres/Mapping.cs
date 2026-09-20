@@ -568,6 +568,7 @@ internal static class Mapping
         AuditRecordsDays = settings.AuditRecordsDays,
         DeadLetteredQueueMessagesDays = settings.DeadLetteredQueueMessagesDays,
         ExpiredAdminSessionsDays = settings.ExpiredAdminSessionsDays,
+        LocalModelAdvisorConsultsDays = settings.LocalModelAdvisorConsultsDays,
         Version = settings.Version,
         SeededAt = Utc(settings.SeededAt),
         UpdatedAt = Utc(settings.UpdatedAt),
@@ -588,6 +589,7 @@ internal static class Mapping
         AuditRecordsDays = row.AuditRecordsDays,
         DeadLetteredQueueMessagesDays = row.DeadLetteredQueueMessagesDays,
         ExpiredAdminSessionsDays = row.ExpiredAdminSessionsDays,
+        LocalModelAdvisorConsultsDays = row.LocalModelAdvisorConsultsDays,
         Version = row.Version,
         SeededAt = row.SeededAt,
         UpdatedAt = row.UpdatedAt,
@@ -672,6 +674,40 @@ internal static class Mapping
         SeededAt = row.SeededAt,
         UpdatedAt = row.UpdatedAt,
         UpdatedBy = row.UpdatedBy,
+    };
+
+    public static LocalModelAdvisorConsultRow ToRow(this AdvisorConsultRecord record) => new()
+    {
+        Id = record.Id,
+        ClassificationId = record.ClassificationId,
+        IncidentId = record.IncidentId,
+        Category = record.Category,
+        Outcome = (int)record.Outcome,
+        BaseSeverity = record.BaseSeverity,
+        FinalSeverity = record.FinalSeverity,
+        BaseConfidence = record.BaseConfidence,
+        FinalConfidence = record.FinalConfidence,
+        LatencyMs = record.LatencyMs,
+        FailureKind = record.FailureKind,
+        ModelId = record.ModelId,
+        CreatedAt = Utc(record.CreatedAt),
+    };
+
+    public static AdvisorConsultRecord ToDomain(this LocalModelAdvisorConsultRow row) => new()
+    {
+        Id = row.Id,
+        ClassificationId = row.ClassificationId,
+        IncidentId = row.IncidentId,
+        Category = row.Category,
+        Outcome = (AdvisorConsultOutcome)row.Outcome,
+        BaseSeverity = row.BaseSeverity,
+        FinalSeverity = row.FinalSeverity,
+        BaseConfidence = row.BaseConfidence,
+        FinalConfidence = row.FinalConfidence,
+        LatencyMs = row.LatencyMs,
+        FailureKind = row.FailureKind,
+        ModelId = row.ModelId,
+        CreatedAt = row.CreatedAt,
     };
 
     public static PolicyThresholdSettingsRow ToRow(this PolicyThresholdSettings settings) => new()

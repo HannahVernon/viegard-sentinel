@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Viegard.Application.Configuration;
 using Viegard.Application.Inference;
@@ -17,7 +18,8 @@ public sealed class AdvisoryIncidentClassifier(
     LocalModelAdvisorSource advisorSource,
     IOptions<LocalModelAdvisorOptions> options,
     IInferenceProvider inferenceProvider,
-    ClassificationOutputValidator outputValidator) : IClassifier
+    ClassificationOutputValidator outputValidator,
+    ILocalModelAdvisorDiagnostics? diagnostics = null) : IClassifier
 {
     public const string Id = "local-advisor-v1";
     public const string PromptTemplateVersion = "local-model-advisor-v1.0";
@@ -44,12 +46,32 @@ public sealed class AdvisoryIncidentClassifier(
                 || baseClassification.Confidence < settings.InvokeConfidenceMin
                 || baseClassification.Confidence > settings.InvokeConfidenceMax)
             {
+                if (settings.Enabled)
+                {
+                    await RecordConsultAsync(BuildRecord(
+                        baseClassification,
+                        AdvisorConsultOutcome.SkippedOutOfBand,
+                        finalSeverity: baseClassification.Severity,
+                        finalConfidence: baseClassification.Confidence,
+                        latencyMs: null,
+                        failureKind: null,
+                        modelId: settings.Model), cancellationToken).ConfigureAwait(false);
+                }
+
                 return baseOutcome;
             }
 
             var incident = await incidentStore.GetAsync(baseClassification.SubjectId, cancellationToken).ConfigureAwait(false);
             if (incident is null)
             {
+                await RecordConsultAsync(BuildRecord(
+                    baseClassification,
+                    AdvisorConsultOutcome.SkippedOutOfBand,
+                    finalSeverity: baseClassification.Severity,
+                    finalConfidence: baseClassification.Confidence,
+                    latencyMs: null,
+                    failureKind: null,
+                    modelId: settings.Model), cancellationToken).ConfigureAwait(false);
                 return baseOutcome;
             }
 
@@ -63,19 +85,49 @@ public sealed class AdvisoryIncidentClassifier(
                 Timeout = TimeSpan.FromMilliseconds(settings.TimeoutMs),
             };
 
+            var stopwatch = Stopwatch.StartNew();
             var inference = await inferenceProvider.InferAsync(request, cancellationToken).ConfigureAwait(false);
+            stopwatch.Stop();
+            var latencyMs = ToLatencyMs(inference.Latency ?? stopwatch.Elapsed);
             if (!inference.Succeeded)
             {
+                await RecordConsultAsync(BuildRecord(
+                    baseClassification,
+                    AdvisorConsultOutcome.ProviderFailed,
+                    finalSeverity: baseClassification.Severity,
+                    finalConfidence: baseClassification.Confidence,
+                    latencyMs: latencyMs,
+                    failureKind: inference.FailureKind?.ToString(),
+                    modelId: inference.ModelId ?? settings.Model), cancellationToken).ConfigureAwait(false);
                 return baseOutcome;
             }
 
             var validation = outputValidator.Validate(inference.RawOutput);
             if (!validation.Succeeded || validation.Output is null)
             {
+                await RecordConsultAsync(BuildRecord(
+                    baseClassification,
+                    AdvisorConsultOutcome.InvalidOutput,
+                    finalSeverity: baseClassification.Severity,
+                    finalConfidence: baseClassification.Confidence,
+                    latencyMs: latencyMs,
+                    failureKind: null,
+                    modelId: inference.ModelId ?? settings.Model), cancellationToken).ConfigureAwait(false);
                 return baseOutcome;
             }
 
             var adjusted = ApplyEscalateOnlyClamp(baseClassification, validation.Output, inference.ModelId ?? settings.Model, settings);
+            var outcome = adjusted.Severity > baseClassification.Severity || adjusted.Confidence > baseClassification.Confidence
+                ? AdvisorConsultOutcome.Escalated
+                : AdvisorConsultOutcome.NoChange;
+            await RecordConsultAsync(BuildRecord(
+                baseClassification,
+                outcome,
+                finalSeverity: adjusted.Severity,
+                finalConfidence: adjusted.Confidence,
+                latencyMs: latencyMs,
+                failureKind: null,
+                modelId: inference.ModelId ?? settings.Model), cancellationToken).ConfigureAwait(false);
             return ClassificationOutcome.Success(adjusted);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -83,6 +135,45 @@ public sealed class AdvisoryIncidentClassifier(
             return baseOutcome;
         }
     }
+
+    private async Task RecordConsultAsync(AdvisorConsultRecord record, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await (diagnostics ?? NullLocalModelAdvisorDiagnostics.Instance)
+                .RecordConsultAsync(record, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+        }
+    }
+
+    private static AdvisorConsultRecord BuildRecord(
+        Classification baseClassification,
+        AdvisorConsultOutcome outcome,
+        int finalSeverity,
+        double finalConfidence,
+        int? latencyMs,
+        string? failureKind,
+        string? modelId) => new()
+    {
+        ClassificationId = baseClassification.Id,
+        IncidentId = baseClassification.SubjectId,
+        Category = baseClassification.Category,
+        Outcome = outcome,
+        BaseSeverity = baseClassification.Severity,
+        FinalSeverity = finalSeverity,
+        BaseConfidence = baseClassification.Confidence,
+        FinalConfidence = finalConfidence,
+        LatencyMs = latencyMs,
+        FailureKind = failureKind,
+        ModelId = modelId,
+        CreatedAt = DateTimeOffset.UtcNow,
+    };
+
+    private static int ToLatencyMs(TimeSpan latency) =>
+        Math.Max(0, (int)Math.Round(latency.TotalMilliseconds, MidpointRounding.AwayFromZero));
 
     private async Task<IReadOnlyList<PromptVariable>> BuildPromptVariablesAsync(
         Classification baseClassification,

@@ -69,6 +69,7 @@ public sealed class PostgresRetentionSettingsStore(IDbContextFactory<ViegardDbCo
                 .SetProperty(r => r.AuditRecordsDays, settings.AuditRecordsDays)
                 .SetProperty(r => r.DeadLetteredQueueMessagesDays, settings.DeadLetteredQueueMessagesDays)
                 .SetProperty(r => r.ExpiredAdminSessionsDays, settings.ExpiredAdminSessionsDays)
+                .SetProperty(r => r.LocalModelAdvisorConsultsDays, settings.LocalModelAdvisorConsultsDays)
                 .SetProperty(r => r.Version, expectedVersion + 1)
                 .SetProperty(r => r.UpdatedAt, utcUpdatedAt)
                 .SetProperty(r => r.UpdatedBy, normalizedUpdatedBy),
@@ -109,6 +110,7 @@ public sealed class PostgresRetentionSettingsStore(IDbContextFactory<ViegardDbCo
                 audit_records_days,
                 dead_lettered_queue_messages_days,
                 expired_admin_sessions_days,
+                local_model_advisor_consults_days,
                 version,
                 seeded_at,
                 updated_at,
@@ -127,6 +129,7 @@ public sealed class PostgresRetentionSettingsStore(IDbContextFactory<ViegardDbCo
                 {seed.AuditRecordsDays},
                 {seed.DeadLetteredQueueMessagesDays},
                 {seed.ExpiredAdminSessionsDays},
+                {seed.LocalModelAdvisorConsultsDays},
                 {seed.Version},
                 {seed.SeededAt},
                 {seed.UpdatedAt},

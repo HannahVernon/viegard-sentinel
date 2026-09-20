@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Viegard.AdminApi.Api;
+using Viegard.Application.Configuration;
 using Viegard.Domain;
 using Viegard.Domain.Classifications;
 using Viegard.Domain.Decisions;
@@ -69,6 +70,112 @@ public sealed class ReadOnlyApiEndpointsTests
         await missing.ExecuteAsync(missingContext);
         Assert.Equal(StatusCodes.Status404NotFound, missingContext.Response.StatusCode);
     }
+
+    [Fact]
+    public async Task GetAdvisorSummary_reports_configuration_and_outcome_windows()
+    {
+        var consults = new InMemoryLocalModelAdvisorConsultStore();
+        var now = DateTimeOffset.UtcNow;
+        await consults.AppendAsync(Consult(AdvisorConsultOutcome.Escalated, now.AddMinutes(-5), 100));
+        await consults.AppendAsync(Consult(AdvisorConsultOutcome.NoChange, now.AddMinutes(-6), 200));
+        await consults.AppendAsync(Consult(AdvisorConsultOutcome.ProviderFailed, now.AddMinutes(-7), 400, "Timeout"));
+        var settings = new InMemoryLocalModelAdvisorSettingsStore();
+        await settings.UpsertAsync(
+            new LocalModelAdvisorSettings { Enabled = true, Endpoint = "http://example.test:11434", Model = "qwen-test:latest" },
+            expectedVersion: 0,
+            updatedBy: "tester",
+            updatedAt: now);
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetAdvisorSummaryAsync(context, consults, settings),
+            context);
+
+        var config = json.GetProperty("configuration");
+        Assert.True(config.GetProperty("enabled").GetBoolean());
+        Assert.Equal("http://example.test:11434", config.GetProperty("endpoint").GetString());
+        Assert.Equal("qwen-test:latest", config.GetProperty("model").GetString());
+
+        var oneHour = json.GetProperty("windows").EnumerateArray().Single(w => w.GetProperty("window").GetString() == "1h");
+        Assert.Equal(1, oneHour.GetProperty("escalated").GetInt64());
+        Assert.Equal(1, oneHour.GetProperty("noChange").GetInt64());
+        Assert.Equal(1, oneHour.GetProperty("providerFailed").GetInt64());
+        Assert.Equal(1, oneHour.GetProperty("failures").GetInt64());
+        Assert.Equal(3, oneHour.GetProperty("total").GetInt64());
+        Assert.Equal(0.5, oneHour.GetProperty("escalationRate").GetDouble());
+        Assert.Equal(2, oneHour.GetProperty("latency").GetProperty("count").GetInt64());
+    }
+
+    [Fact]
+    public async Task ListAdvisorConsults_pages_and_filters_by_outcome()
+    {
+        var consults = new InMemoryLocalModelAdvisorConsultStore();
+        var now = DateTimeOffset.UtcNow;
+        await consults.AppendAsync(Consult(AdvisorConsultOutcome.Escalated, now.AddMinutes(-1), 100));
+        await consults.AppendAsync(Consult(AdvisorConsultOutcome.NoChange, now.AddMinutes(-2), 200));
+        await consults.AppendAsync(Consult(AdvisorConsultOutcome.NoChange, now.AddMinutes(-3), 300));
+
+        var pageContext = Context("?take=1");
+        var page = await ExecuteAsync(await ReadOnlyApiEndpoints.ListAdvisorConsultsAsync(pageContext, consults), pageContext);
+        Assert.Equal(1, page.GetProperty("items").GetArrayLength());
+        Assert.Equal(3, page.GetProperty("totalCount").GetInt64());
+        Assert.False(page.GetProperty("nextCursor").ValueKind is JsonValueKind.Null);
+
+        var filterContext = Context("?outcome=NoChange");
+        var filtered = await ExecuteAsync(await ReadOnlyApiEndpoints.ListAdvisorConsultsAsync(filterContext, consults), filterContext);
+        Assert.Equal(2, filtered.GetProperty("items").GetArrayLength());
+        Assert.Equal(2, filtered.GetProperty("totalCount").GetInt64());
+        foreach (var item in filtered.GetProperty("items").EnumerateArray())
+        {
+            Assert.Equal("NoChange", item.GetProperty("outcome").GetString());
+        }
+    }
+
+    [Fact]
+    public async Task GetAdvisorConsult_returns_record_by_id_and_by_classification_and_404s()
+    {
+        var consults = new InMemoryLocalModelAdvisorConsultStore();
+        var record = Consult(AdvisorConsultOutcome.Escalated, DateTimeOffset.UtcNow.AddMinutes(-1), 150);
+        await consults.AppendAsync(record);
+
+        var byIdContext = Context(string.Empty);
+        var byId = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetAdvisorConsultAsync(record.Id, consults, byIdContext),
+            byIdContext);
+        Assert.Equal(record.Id.ToString(), byId.GetProperty("id").GetString());
+        Assert.Equal("Escalated", byId.GetProperty("outcome").GetString());
+
+        var byClassContext = Context(string.Empty);
+        var byClass = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetAdvisorConsultByClassificationAsync(record.ClassificationId, consults, byClassContext),
+            byClassContext);
+        Assert.Equal(record.Id.ToString(), byClass.GetProperty("id").GetString());
+
+        var missingContext = Context(string.Empty);
+        var missing = await ReadOnlyApiEndpoints.GetAdvisorConsultAsync(ViegardId.New(), consults, missingContext);
+        await missing.ExecuteAsync(missingContext);
+        Assert.Equal(StatusCodes.Status404NotFound, missingContext.Response.StatusCode);
+    }
+
+    private static AdvisorConsultRecord Consult(
+        AdvisorConsultOutcome outcome,
+        DateTimeOffset createdAt,
+        int? latencyMs,
+        string? failureKind = null) => new()
+    {
+        ClassificationId = ViegardId.New(),
+        IncidentId = ViegardId.New(),
+        Category = "scanner",
+        Outcome = outcome,
+        BaseSeverity = 6,
+        FinalSeverity = outcome == AdvisorConsultOutcome.Escalated ? 8 : 6,
+        BaseConfidence = 0.6,
+        FinalConfidence = outcome == AdvisorConsultOutcome.Escalated ? 0.8 : 0.6,
+        LatencyMs = latencyMs,
+        FailureKind = failureKind,
+        ModelId = "qwen-test:latest",
+        CreatedAt = createdAt,
+    };
 
     private static DefaultHttpContext Context(string queryString)
     {

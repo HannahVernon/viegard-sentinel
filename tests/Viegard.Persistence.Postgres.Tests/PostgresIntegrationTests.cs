@@ -1301,7 +1301,8 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var now = new DateTimeOffset(2026, 9, 20, 7, 0, 0, TimeSpan.Zero);
         var classificationId = ViegardId.New();
 
-        await store.AppendAsync(AdvisorConsultRecord(classificationId, AdvisorConsultOutcome.Escalated, now.AddMinutes(-10), 100, finalSeverity: 8));
+        var escalated = AdvisorConsultRecord(classificationId, AdvisorConsultOutcome.Escalated, now.AddMinutes(-10), 100, finalSeverity: 8);
+        await store.AppendAsync(escalated);
         await store.AppendAsync(AdvisorConsultRecord(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-9), 200));
         await store.AppendAsync(AdvisorConsultRecord(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-8), 300));
         await store.AppendAsync(AdvisorConsultRecord(ViegardId.New(), AdvisorConsultOutcome.ProviderFailed, now.AddDays(-2), 400, failureKind: "Timeout"));
@@ -1309,6 +1310,24 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var consult = await store.GetByClassificationIdAsync(classificationId);
         Assert.NotNull(consult);
         Assert.Equal(AdvisorConsultOutcome.Escalated, consult!.Outcome);
+
+        var byId = await store.GetByIdAsync(escalated.Id);
+        Assert.NotNull(byId);
+        Assert.Equal(escalated.Id, byId!.Id);
+        Assert.Null(await store.GetByIdAsync(ViegardId.New()));
+
+        var firstPage = await store.ListPageAsync(beforeId: null, pageSize: 2, outcome: null);
+        Assert.Equal(2, firstPage.Items.Count);
+        Assert.Equal(4, firstPage.TotalCount);
+        Assert.NotNull(firstPage.NextCursor);
+        var secondPage = await store.ListPageAsync(firstPage.NextCursor, pageSize: 2, outcome: null);
+        Assert.Equal(2, secondPage.Items.Count);
+        Assert.Null(secondPage.NextCursor);
+
+        var noChangeOnly = await store.ListPageAsync(beforeId: null, pageSize: 10, outcome: AdvisorConsultOutcome.NoChange);
+        Assert.Equal(2, noChangeOnly.Items.Count);
+        Assert.Equal(2, noChangeOnly.TotalCount);
+        Assert.All(noChangeOnly.Items, r => Assert.Equal(AdvisorConsultOutcome.NoChange, r.Outcome));
 
         var counts = await store.GetOutcomeCountsAsync(now.AddHours(-1));
         Assert.Equal(1, counts.Single(c => c.Outcome == AdvisorConsultOutcome.Escalated).Count);

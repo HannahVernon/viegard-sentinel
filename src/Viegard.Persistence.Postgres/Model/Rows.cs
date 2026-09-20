@@ -420,6 +420,39 @@ public sealed class JetPackDesiredAddressRow
     public DateTimeOffset LastSeenAt { get; set; }
 }
 
+public sealed class LocalModelAdvisorSettingsRow
+{
+    public int Id { get; set; }
+
+    public bool Enabled { get; set; }
+
+    public string Endpoint { get; set; } = string.Empty;
+
+    public string Model { get; set; } = string.Empty;
+
+    public double Temperature { get; set; }
+
+    public int TimeoutMs { get; set; }
+
+    public string KeepAlive { get; set; } = string.Empty;
+
+    public double InvokeConfidenceMin { get; set; }
+
+    public double InvokeConfidenceMax { get; set; }
+
+    public int MaxSeverityDelta { get; set; }
+
+    public double MaxConfidenceDelta { get; set; }
+
+    public int Version { get; set; }
+
+    public DateTimeOffset? SeededAt { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+}
+
 public sealed class PolicyThresholdSettingsRow
 {
     public int Id { get; set; }

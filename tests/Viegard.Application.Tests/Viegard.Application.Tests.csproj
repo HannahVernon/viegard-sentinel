@@ -25,6 +25,7 @@
     <ProjectReference Include="..\..\src\Viegard.Actions.MikroTik\Viegard.Actions.MikroTik.csproj" />
     <ProjectReference Include="..\..\src\Viegard.Persistence\Viegard.Persistence.csproj" />
     <ProjectReference Include="..\..\src\Viegard.PipelineHost\Viegard.PipelineHost.csproj" />
+    <ProjectReference Include="..\..\src\Viegard.Inference.Ollama\Viegard.Inference.Ollama.csproj" />
   </ItemGroup>
 
 </Project>

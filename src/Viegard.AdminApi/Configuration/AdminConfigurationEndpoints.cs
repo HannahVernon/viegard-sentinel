@@ -17,6 +17,7 @@ public static class AdminConfigurationEndpoints
 {
     private const string RetentionConfigurationPath = "/configuration#retention";
     private const string JetPackConfigurationPath = "/configuration#jetpack";
+    private const string LocalModelAdvisorConfigurationPath = "/configuration#local-model-advisor";
     private const string SatellitesConfigurationPath = "/configuration#satellites";
     private const string RoutersConfigurationPath = "/configuration#routers";
     private const string UpgradesConfigurationPath = "/configuration#upgrades";
@@ -31,6 +32,9 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/jetpack", SaveJetPackAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/local-model-advisor", SaveLocalModelAdvisorAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/satellites/create", CreateSatelliteAsync)
@@ -191,6 +195,64 @@ public static class AdminConfigurationEndpoints
             result.Settings,
             context.RequestAborted).ConfigureAwait(false);
         return Redirect(JetPackConfigurationPath, status: "JetPack allowlist settings saved.");
+    }
+
+    internal static async Task<IResult> SaveLocalModelAdvisorAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ILocalModelAdvisorSettingsStore advisorSettings,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Step-up verification is required before editing local-model advisor settings.");
+        }
+
+        if (!int.TryParse(form["version"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedVersion)
+            || expectedVersion < 0)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor settings version was not valid.  Reload the page and try again.");
+        }
+
+        var before = await advisorSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        if (!TryReadLocalModelAdvisorSettings(form, out var candidate, out var error))
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: error);
+        }
+
+        var result = await advisorSettings.UpsertAsync(
+            candidate,
+            expectedVersion,
+            user.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor settings were changed by another session.  Review the current values and save again.");
+        }
+
+        await configAuditor.RecordLocalModelAdvisorSettingsWriteAsync(
+            user.Username,
+            before,
+            result.Settings,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(LocalModelAdvisorConfigurationPath, status: "Local-model advisor settings saved.");
     }
 
     internal static async Task<IResult> CreateSatelliteAsync(
@@ -1136,6 +1198,72 @@ public static class AdminConfigurationEndpoints
             AddressListName = addressListName,
         };
         if (!JetPackFeedSettingsValidator.TryValidate(settings, out error))
+        {
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryReadLocalModelAdvisorSettings(
+        IFormCollection form,
+        out LocalModelAdvisorSettings settings,
+        out string error)
+    {
+        settings = new LocalModelAdvisorSettings();
+        if (!LocalModelAdvisorSettingsValidator.TryNormalizeEndpoint(form["endpoint"].ToString(), out var endpoint, out error)
+            || !LocalModelAdvisorSettingsValidator.TryNormalizeModel(form["model"].ToString(), out var model, out error)
+            || !LocalModelAdvisorSettingsValidator.TryNormalizeKeepAlive(form["keepAlive"].ToString(), out var keepAlive, out error))
+        {
+            return false;
+        }
+
+        if (!double.TryParse(form["temperature"].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var temperature))
+        {
+            error = LocalModelAdvisorSettingsValidator.TemperatureError;
+            return false;
+        }
+
+        if (!int.TryParse(form["timeoutMs"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var timeoutMs))
+        {
+            error = LocalModelAdvisorSettingsValidator.TimeoutError;
+            return false;
+        }
+
+        if (!double.TryParse(form["invokeConfidenceMin"].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var invokeConfidenceMin)
+            || !double.TryParse(form["invokeConfidenceMax"].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var invokeConfidenceMax))
+        {
+            error = LocalModelAdvisorSettingsValidator.ConfidenceBandError;
+            return false;
+        }
+
+        if (!int.TryParse(form["maxSeverityDelta"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var maxSeverityDelta))
+        {
+            error = LocalModelAdvisorSettingsValidator.MaxSeverityDeltaError;
+            return false;
+        }
+
+        if (!double.TryParse(form["maxConfidenceDelta"].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var maxConfidenceDelta))
+        {
+            error = LocalModelAdvisorSettingsValidator.MaxConfidenceDeltaError;
+            return false;
+        }
+
+        settings = new LocalModelAdvisorSettings
+        {
+            Enabled = form.ContainsKey("enabled"),
+            Endpoint = endpoint,
+            Model = model,
+            Temperature = temperature,
+            TimeoutMs = timeoutMs,
+            KeepAlive = keepAlive,
+            InvokeConfidenceMin = invokeConfidenceMin,
+            InvokeConfidenceMax = invokeConfidenceMax,
+            MaxSeverityDelta = maxSeverityDelta,
+            MaxConfidenceDelta = maxConfidenceDelta,
+        };
+        if (!LocalModelAdvisorSettingsValidator.TryValidate(settings, out error))
         {
             return false;
         }

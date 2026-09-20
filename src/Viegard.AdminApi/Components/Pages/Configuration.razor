@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject IRetentionSettingsStore RetentionSettingsStore
 @inject IJetPackFeedSettingsStore JetPackFeedSettingsStore
+@inject ILocalModelAdvisorSettingsStore LocalModelAdvisorSettingsStore
 @inject IPolicyThresholdSettingsStore PolicyThresholdSettingsStore
 @inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
 @inject IIngestionFilterStore IngestionFilters
@@ -15,6 +16,7 @@
 @inject IOptions<AdminAuthOptions> AuthOptions
 @inject IOptions<PolicyOptions> PolicyOptions
 @inject IOptions<JetPackFeedOptions> JetPackOptions
+@inject IOptions<LocalModelAdvisorOptions> LocalModelAdvisorOptions
 @inject UserDisplay Display
 @inject SatelliteRoleCredentialCookie SatelliteCredentialCookie
 
@@ -26,6 +28,7 @@
         <a href="/configuration#satellites">Satellites</a>
         <a href="/configuration#routers">Routers</a>
         <a href="/configuration#jetpack">JetPack allowlist</a>
+        <a href="/configuration#local-model-advisor">Local-model advisor</a>
         <a href="/configuration#upgrades">Upgrades</a>
         <a href="/configuration#thresholds">Policy thresholds</a>
         <a href="/configuration#posture">Policy posture</a>
@@ -493,6 +496,125 @@
         }
     </section>
 
+    <section id="local-model-advisor" class="indexed">
+        <h2>Local-model advisor</h2>
+        <p class="small">The advisor optionally asks a local Ollama model for a second opinion on ambiguous incident classifications.  It is disabled by default, fail-open, escalation-only, clamped, and uses prompt assembly that fences observed evidence as untrusted data.</p>
+        <p class="small">The endpoint is runtime configuration.  Use the loopback default until the local workstation endpoint is entered here.</p>
+
+        <h3>Status</h3>
+        <dl class="detail-list">
+            <dt>Settings row</dt><dd>@LocalModelAdvisorSettingsState</dd>
+            <dt>Version</dt><dd>@(_localModelAdvisorSettings?.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")</dd>
+            <dt>Last changed</dt><dd>@LocalModelAdvisorLastChanged</dd>
+            <dt>Prompt template</dt><dd><code>@AdvisoryIncidentClassifier.PromptTemplateVersion</code></dd>
+        </dl>
+
+        @if (_localModelAdvisorSettings is null)
+        {
+            <p class="message">Showing deployment defaults.  The settings row seeds on the next maintenance-role startup unless an admin saves values first.</p>
+        }
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Knob</th>
+                    <th>Effective value</th>
+                    <th>Meaning</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>Enabled</code></td>
+                    <td><span class="badge">@(LocalModelAdvisorCurrentSettings.Enabled ? "On" : "Off")</span></td>
+                    <td>When off, the deterministic classification is returned unchanged and the model is not called.</td>
+                </tr>
+                <tr>
+                    <td><code>Endpoint</code></td>
+                    <td><code>@LocalModelAdvisorCurrentSettings.Endpoint</code></td>
+                    <td>Absolute http or https base URL for the local Ollama service.</td>
+                </tr>
+                <tr>
+                    <td><code>Model</code></td>
+                    <td><code>@LocalModelAdvisorCurrentSettings.Model</code></td>
+                    <td>Ollama model name used for advisory assessment.</td>
+                </tr>
+                <tr>
+                    <td><code>Ambiguous band</code></td>
+                    <td>@FormatConfidence(LocalModelAdvisorCurrentSettings.InvokeConfidenceMin) to @FormatConfidence(LocalModelAdvisorCurrentSettings.InvokeConfidenceMax)</td>
+                    <td>The advisor is called only when base confidence is inside this inclusive range.</td>
+                </tr>
+                <tr>
+                    <td><code>Clamp</code></td>
+                    <td>Severity +@LocalModelAdvisorCurrentSettings.MaxSeverityDelta, confidence +@FormatConfidence(LocalModelAdvisorCurrentSettings.MaxConfidenceDelta)</td>
+                    <td>Maximum model-suggested raise above the deterministic classification.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Edit local-model advisor settings</h3>
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/local-model-advisor" class="edit-form">
+                <AntiforgeryToken />
+                <input type="hidden" name="version" value="@(_localModelAdvisorSettings?.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")" />
+                <label class="checkbox-label">
+                    <input name="enabled" type="checkbox" checked="@LocalModelAdvisorCurrentSettings.Enabled" />
+                    Enabled
+                    <span class="small">When unchecked, classification stays deterministic and the model is not called.</span>
+                </label>
+                <label>
+                    Endpoint
+                    <input name="endpoint" maxlength="@LocalModelAdvisorSettings.MaxEndpointLength" value="@LocalModelAdvisorCurrentSettings.Endpoint" required />
+                    <span class="small">Absolute http or https URL, for example <code>http://127.0.0.1:11434</code>.</span>
+                </label>
+                <label>
+                    Model
+                    <input name="model" maxlength="@LocalModelAdvisorSettings.MaxModelLength" value="@LocalModelAdvisorCurrentSettings.Model" required />
+                    <span class="small">Ollama model name, for example <code>qwen2.5:7b-instruct</code>.</span>
+                </label>
+                <label>
+                    Temperature
+                    <input name="temperature" type="number" min="0" max="2" step="0.01" value="@FormatConfidence(LocalModelAdvisorCurrentSettings.Temperature)" required />
+                    <span class="small">Use 0 for deterministic advisory output.</span>
+                </label>
+                <label>
+                    Timeout (ms)
+                    <input name="timeoutMs" type="number" min="250" max="120000" step="1" value="@LocalModelAdvisorCurrentSettings.TimeoutMs.ToString(System.Globalization.CultureInfo.InvariantCulture)" required />
+                    <span class="small">Provider failures and timeouts fail open to the deterministic classification.</span>
+                </label>
+                <label>
+                    Keep alive
+                    <input name="keepAlive" maxlength="@LocalModelAdvisorSettings.MaxKeepAliveLength" value="@LocalModelAdvisorCurrentSettings.KeepAlive" required />
+                    <span class="small">Passed to Ollama as <code>keep_alive</code>.</span>
+                </label>
+                <label>
+                    Invoke confidence minimum
+                    <input name="invokeConfidenceMin" type="number" min="0" max="1" step="0.001" value="@FormatConfidence(LocalModelAdvisorCurrentSettings.InvokeConfidenceMin)" required />
+                </label>
+                <label>
+                    Invoke confidence maximum
+                    <input name="invokeConfidenceMax" type="number" min="0" max="1" step="0.001" value="@FormatConfidence(LocalModelAdvisorCurrentSettings.InvokeConfidenceMax)" required />
+                </label>
+                <label>
+                    Max severity delta
+                    <input name="maxSeverityDelta" type="number" min="0" max="10" step="1" value="@LocalModelAdvisorCurrentSettings.MaxSeverityDelta.ToString(System.Globalization.CultureInfo.InvariantCulture)" required />
+                </label>
+                <label>
+                    Max confidence delta
+                    <input name="maxConfidenceDelta" type="number" min="0" max="1" step="0.001" value="@FormatConfidence(LocalModelAdvisorCurrentSettings.MaxConfidenceDelta)" required />
+                </label>
+                <button type="submit">Save local-model advisor settings</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Editing local-model advisor settings requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#local-model-advisor" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-local-model-advisor" />
+            </div>
+        }
+    </section>
+
     <section id="upgrades" class="indexed">
         <h2>Upgrades</h2>
         <p class="small">Request an upgrade for a Viegard deployment target.  The request is executed by a privileged host-side or satellite-side agent; the admin UI does not receive the Docker socket, Windows elevation rights, or host execution rights.</p>
@@ -835,6 +957,7 @@
 @code {
     private RetentionSettings? _settings;
     private JetPackFeedSettings? _jetPackSettings;
+    private LocalModelAdvisorSettings? _localModelAdvisorSettings;
     private PolicyThresholdSettings? _thresholdSettings;
     private PolicyPostureSettings? _postureSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
@@ -891,6 +1014,20 @@
         ? "Not seeded.  Showing deployment defaults; the settings row seeds on the first actions-role fetch cycle."
         : $"{_jetPackSettings.UpdatedBy} at {Display.Format(_jetPackSettings.UpdatedAt)}";
 
+    private LocalModelAdvisorSettings LocalModelAdvisorCurrentSettings =>
+        _localModelAdvisorSettings ?? LocalModelAdvisorSettings.FromOptions(LocalModelAdvisorOptions.Value, DateTimeOffset.UtcNow);
+
+    private string LocalModelAdvisorSettingsState => _localModelAdvisorSettings switch
+    {
+        null => "Not seeded",
+        { SeededAt: { } seededAt } => $"Seeded from deployment configuration at {Display.Format(seededAt)}",
+        _ => "Configured in the admin UI before automatic seeding",
+    };
+
+    private string LocalModelAdvisorLastChanged => _localModelAdvisorSettings is null
+        ? "Not seeded.  Showing deployment defaults; the settings row seeds on next maintenance startup."
+        : $"{_localModelAdvisorSettings.UpdatedBy} at {Display.Format(_localModelAdvisorSettings.UpdatedAt)}";
+
     private PolicyThresholdValues ThresholdValues =>
         _thresholdSettings?.ToValues() ?? PolicyThresholdValues.FromOptions(PolicyOptions.Value);
 
@@ -920,6 +1057,7 @@
         await Display.InitializeAsync().ConfigureAwait(false);
         _settings = await RetentionSettingsStore.GetAsync().ConfigureAwait(false);
         _jetPackSettings = await JetPackFeedSettingsStore.GetAsync().ConfigureAwait(false);
+        _localModelAdvisorSettings = await LocalModelAdvisorSettingsStore.GetAsync().ConfigureAwait(false);
         _thresholdSettings = await PolicyThresholdSettingsStore.GetAsync().ConfigureAwait(false);
         _postureSettings = await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();

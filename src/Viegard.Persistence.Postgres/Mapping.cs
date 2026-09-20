@@ -636,6 +636,44 @@ internal static class Mapping
         LastSeenAt = row.LastSeenAt,
     };
 
+    public static LocalModelAdvisorSettingsRow ToRow(this LocalModelAdvisorSettings settings) => new()
+    {
+        Id = settings.Id,
+        Enabled = settings.Enabled,
+        Endpoint = settings.Endpoint,
+        Model = settings.Model,
+        Temperature = settings.Temperature,
+        TimeoutMs = settings.TimeoutMs,
+        KeepAlive = settings.KeepAlive,
+        InvokeConfidenceMin = settings.InvokeConfidenceMin,
+        InvokeConfidenceMax = settings.InvokeConfidenceMax,
+        MaxSeverityDelta = settings.MaxSeverityDelta,
+        MaxConfidenceDelta = settings.MaxConfidenceDelta,
+        Version = settings.Version,
+        SeededAt = Utc(settings.SeededAt),
+        UpdatedAt = Utc(settings.UpdatedAt),
+        UpdatedBy = settings.UpdatedBy,
+    };
+
+    public static LocalModelAdvisorSettings ToDomain(this LocalModelAdvisorSettingsRow row) => new()
+    {
+        Id = row.Id,
+        Enabled = row.Enabled,
+        Endpoint = row.Endpoint,
+        Model = row.Model,
+        Temperature = row.Temperature,
+        TimeoutMs = row.TimeoutMs,
+        KeepAlive = row.KeepAlive,
+        InvokeConfidenceMin = row.InvokeConfidenceMin,
+        InvokeConfidenceMax = row.InvokeConfidenceMax,
+        MaxSeverityDelta = row.MaxSeverityDelta,
+        MaxConfidenceDelta = row.MaxConfidenceDelta,
+        Version = row.Version,
+        SeededAt = row.SeededAt,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+    };
+
     public static PolicyThresholdSettingsRow ToRow(this PolicyThresholdSettings settings) => new()
     {
         Id = settings.Id,

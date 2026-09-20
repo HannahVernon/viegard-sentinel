@@ -5,6 +5,7 @@
     <ProjectReference Include="..\Viegard.Actions.MikroTik\Viegard.Actions.MikroTik.csproj" />
     <ProjectReference Include="..\Viegard.Persistence\Viegard.Persistence.csproj" />
     <ProjectReference Include="..\Viegard.Persistence.Postgres\Viegard.Persistence.Postgres.csproj" />
+    <ProjectReference Include="..\Viegard.Inference.Ollama\Viegard.Inference.Ollama.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -20,6 +20,7 @@
     <ProjectReference Include="..\Viegard.Sources.MDaemonLogs\Viegard.Sources.MDaemonLogs.csproj" />
     <ProjectReference Include="..\Viegard.Sources.Syslog\Viegard.Sources.Syslog.csproj" />
     <ProjectReference Include="..\Viegard.Persistence.Postgres\Viegard.Persistence.Postgres.csproj" />
+    <ProjectReference Include="..\Viegard.Inference.Ollama\Viegard.Inference.Ollama.csproj" />
   </ItemGroup>
 
   <ItemGroup>

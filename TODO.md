@@ -40,8 +40,9 @@ When the project owner answers a question, remove or update the item here and re
 
 ### Inference
 
-- [ ] **Dev model selection**: which small quantized Qwen-class model and quantization level for the CPU-only dev workstation.
-- [ ] **Production model selection** for the V100 inference server.
+- [x] **Local-model advisor first slice** - DONE 2026-09-20: `AdvisoryIncidentClassifier` decorates deterministic classification, `Viegard.Inference.Ollama` implements `IInferenceProvider`, runtime settings are database-owned at `/configuration#local-model-advisor`, and the advisor is disabled by default, escalation-only, clamped, fail-open, and prompt-injection-hardened.
+- [ ] **Dev model selection**: runtime default is `qwen2.5:7b-instruct`; confirm which locally available Ollama model and quantization should be used for the dev workstation.
+- [ ] **Production model selection** for any future dedicated inference server.
 - [x] **Classification thresholds** - DECIDED provisionally by D-0027, 2026-08-20: AI action at confidence >= 0.9 and severity >= 7, review at confidence >= 0.7, with deterministic evidence using the normalized confidence band.  Calibrate after dry-run deployment before enabling unattended action.
 
 ### Actions / integrations
@@ -82,7 +83,7 @@ When the project owner answers a question, remove or update the item here and re
 - [ ] **PostgreSQL guardrail-state store**: replace the current in-memory guardrail state with durable shared PostgreSQL state before unattended policy/action instances are split across processes or hosts.
 - [x] **Classification stage to feed PolicyWorker** - DONE 2026-08-20: deterministic incident classification now consumes the incidents queue, persists `Classification`, enqueues the classifications queue, and `PolicyWorker` persists dry-run `Decision` records.  LLM enrichment remains optional Phase 6 work.
 - [ ] **Policy threshold calibration after deployment**: review dry-run decisions against real traffic, then adjust provisional D-0027 thresholds and durations before any unattended action is approved.
-- [ ] **Phase 6: Local AI** - optional inference enrichment, llama.cpp adapter, local dev inference install.
+- [x] **Phase 6: Local AI first slice** - DONE 2026-09-20: optional Ollama-backed local-model advisor implemented as a decorator around deterministic incident classification.  It stays disabled until an operator enables it in `/configuration#local-model-advisor`.
 - [ ] **Phase 7: Actions** - DECIDED 2026-09-16 (D-0038): increment one is manual-approval network enforcement.  Build order:
   - [x] **Policy thresholds /configuration slice** - DONE 2026-09-16: review severity/confidence and unattended confidence seeded from env, UI-edited, LISTEN/NOTIFY to the policy engine (D-0029 slice).
   - [x] **Router registry /configuration slice** - DONE 2026-09-16: UI-managed MikroTik router list, AES-256-GCM encrypted credentials (D-0006 amendment), per-router transport mode (HTTP / HTTPS any-cert / HTTPS pinned), certificate fetch-and-pin workflow, connectivity test.

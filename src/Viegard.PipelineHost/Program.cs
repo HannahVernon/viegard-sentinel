@@ -15,6 +15,7 @@ using Viegard.Application.Secrets;
 using Viegard.Application.Sources;
 using Viegard.Application.Stores;
 using Viegard.Application.Telemetry;
+using Viegard.Inference.Ollama;
 using Viegard.Persistence.InMemory;
 using Viegard.Persistence.Postgres;
 using Viegard.PipelineHost.Configuration;
@@ -48,6 +49,11 @@ builder.Services
     .Bind(builder.Configuration.GetSection(JetPackFeedOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<JetPackFeedOptions>, JetPackFeedOptionsValidator>();
+builder.Services
+    .AddOptions<LocalModelAdvisorOptions>()
+    .Bind(builder.Configuration.GetSection(LocalModelAdvisorOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<LocalModelAdvisorOptions>, LocalModelAdvisorOptionsValidator>();
 
 builder.Services
     .AddOptions<DetectionOptions>()
@@ -145,6 +151,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
         builder.Services.AddSingleton<IJetPackFeedSettingsStore, InMemoryJetPackFeedSettingsStore>();
         builder.Services.AddSingleton<IJetPackDesiredAddressStore, InMemoryJetPackDesiredAddressStore>();
+        builder.Services.AddSingleton<ILocalModelAdvisorSettingsStore, InMemoryLocalModelAdvisorSettingsStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();
@@ -174,6 +181,10 @@ builder.Services.AddSingleton<IPolicyThresholdDiagnostics, LoggingPolicyThreshol
 builder.Services.AddSingleton<PolicyThresholdSource>();
 builder.Services.AddSingleton<IPolicyPostureDiagnostics, LoggingPolicyPostureDiagnostics>();
 builder.Services.AddSingleton<PolicyPostureSource>();
+builder.Services.AddSingleton<ILocalModelAdvisorDiagnostics, LoggingLocalModelAdvisorDiagnostics>();
+builder.Services.AddSingleton<LocalModelAdvisorSource>();
+builder.Services.AddSingleton<Viegard.Application.Inference.Validation.ClassificationOutputValidator>();
+builder.Services.AddViegardOllamaInference();
 
 // IMAP source module (Phase 4; D-0019..D-0022).  Account configuration
 // (hosts, usernames) is environment-specific: in development it lives in
@@ -318,7 +329,9 @@ if (configuredRoles.Contains(RoleNames.Correlation, StringComparer.OrdinalIgnore
 // The classification worker runs only in the singleton classification role (D-0011, D-0028).
 if (configuredRoles.Contains(RoleNames.Classification, StringComparer.OrdinalIgnoreCase))
 {
-    builder.Services.AddSingleton<IClassifier, DeterministicIncidentClassifier>();
+    builder.Services.AddSingleton<DeterministicIncidentClassifier>();
+    builder.Services.AddSingleton<IClassifier, AdvisoryIncidentClassifier>();
+    builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, LocalModelAdvisorRefreshWorker>());
     builder.Services.AddHostedService<ClassificationWorker>();
 }
 

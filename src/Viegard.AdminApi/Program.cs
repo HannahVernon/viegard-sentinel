@@ -27,6 +27,7 @@ using Viegard.Application.Secrets;
 using Viegard.Application.Stores;
 using Viegard.Application.Telemetry;
 using Viegard.Domain.Incidents;
+using Viegard.Inference.Ollama;
 using Viegard.Persistence.InMemory;
 using Viegard.Persistence.Postgres;
 
@@ -104,6 +105,11 @@ builder.Services
     .Bind(builder.Configuration.GetSection(JetPackFeedOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<JetPackFeedOptions>, JetPackFeedOptionsValidator>();
+builder.Services
+    .AddOptions<LocalModelAdvisorOptions>()
+    .Bind(builder.Configuration.GetSection(LocalModelAdvisorOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<LocalModelAdvisorOptions>, LocalModelAdvisorOptionsValidator>();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddRazorComponents();
@@ -127,6 +133,10 @@ builder.Services.AddSingleton<IRouterCredentialProtector, AesGcmRouterCredential
 builder.Services.AddSingleton<RouterCertificateFetcher>();
 builder.Services.AddSingleton<RouterConnectivityTester>();
 builder.Services.AddSingleton<DecisionTargetResolver>();
+builder.Services.AddSingleton<LocalModelAdvisorSource>();
+builder.Services.AddSingleton<Viegard.Application.Inference.Validation.ClassificationOutputValidator>();
+builder.Services.AddSingleton(new HttpClient());
+builder.Services.AddViegardOllamaInference();
 
 builder.Services
     .AddOptions<AdminWebAuthnOptions>()
@@ -241,6 +251,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
         builder.Services.AddSingleton<IJetPackFeedSettingsStore, InMemoryJetPackFeedSettingsStore>();
         builder.Services.AddSingleton<IJetPackDesiredAddressStore, InMemoryJetPackDesiredAddressStore>();
+        builder.Services.AddSingleton<ILocalModelAdvisorSettingsStore, InMemoryLocalModelAdvisorSettingsStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<ISatelliteRoleStore, InMemorySatelliteRoleStore>();

@@ -59,13 +59,13 @@ Incidents queue                                FLIGHT
      |
      v
 Deterministic Incident Classification          MIND
-(always available; no inference dependency)
+     |
+     v
+Optional Local-Model Advisor                   MIND
+(decorator, disabled by default, escalation-only)
      |
      v
 Classifications queue                          FLIGHT
-     |                           Optional AI enrichment later may add
-     |                           schema-validated context without blocking
-     |                           deterministic flow.
      v
             Policy Engine -> Decision          JUDGMENT
                   |
@@ -81,9 +81,10 @@ Classifications queue                          FLIGHT
 Key invariants:
 
 - Deterministic detection, ingestion, and admin access never block on, or degrade because of, AI classification.
+- The local-model advisor decorates deterministic classification and returns the same single classification record.  It is not registered as a parallel classifier.
 - The AI recommends; the policy engine decides; the action engine executes only typed, validated operations.
 - Every stage transition is separately auditable (retrieval vs. classification vs. recommendation vs. decision vs. modification).
-- AI failure fails safe: no action, event retained, failure recorded, deterministic path unaffected.
+- AI failure fails safe: no action, event retained, deterministic path unaffected.  The local-model advisor fails open to the deterministic classification.
 
 ## Deployables
 
@@ -94,7 +95,7 @@ Deployable | Container | Responsibility
 `viegard-host-agent` | systemd service on Docker host | Privileged host-side upgrade agent.  Polls fixed-verb `host_upgrade_commands` through the adjacent PostgreSQL container, claims commands for target `vm`, and runs only `deploy/viegard-deploy.sh upgrade --yes`.
 `viegard-pipeline` | Worker Service (Generic Host) | Role-configurable host binary; deployable one or more times, each instance running a configured subset of pipeline modules (ingestion, normalization, correlation, classification, policy, actions, ban reconciliation, maintenance retention, ingestion-filter seeding, audit).  Holds only the credentials its configured modules need.  No inbound listener except a bind-local health endpoint.
 `viegard-admin` | ASP.NET Core (Blazor Web App: static SSR, D-0016) | Mobile-compatible admin GUI + API: local-account authentication with mandatory TOTP and WebAuthn security keys (D-0032), server-side filtered and sortable read access to incidents, classifications, decisions, and audit; decision-list trigger summaries plus inline approve/reject actions that reuse the audited review flow; step-up-gated runtime configuration editors for custom signatures, retention periods, ingestion filters, satellite database roles with one-time password display, and MikroTik router registry entries with encrypted credentials and probes; custom-signature previews that run the same literal matcher as the pipeline against a bounded recent-event scan without writing audit or config rows; command submission (approve/reject action, unblock IP, reclassify, retry, corrections) usable from a phone, degradable to plain form posts; queue health monitor with per-queue traffic-light status (see Observability); automated staleness detection and refresh with an explicit "data is out of date, refreshing" hint.  Mobile push deferred (D-0015).  Holds router credentials only for step-up-gated management probes.
-llama.cpp `llama-server` | Existing/third-party | Local inference endpoint.  Dev: small quantized Qwen-class model on CPU.  Prod: larger model on the V100 server.
+Ollama | Existing/third-party | Optional local inference endpoint for the advisory classifier.  Disabled by default; endpoint and model are runtime settings.
 Database | PostgreSQL 17 container (D-0024) | Shared persistence for events, incidents, classifications, decisions, actions, active bans, audit, commands, host upgrade requests, feedback, telemetry, instance version registry, MikroTik router registry, and durable queues (`SKIP LOCKED` + `LISTEN/NOTIFY`); nightly `pg_dump` sidecar for DR
 
 ### Host roles and process topology (proposal)
@@ -135,8 +136,8 @@ src/
   Viegard.Sources.MDaemonLogs/ MDaemon flat-file log source adapter; SMTP/IMAP/POP session
                                transcripts, Screening, and Dynamic Screening logs normalize
                                to MDaemon credential-attack and IP-block evidence
-  Viegard.Inference.LlamaCpp/  llama-server adapter (OpenAI-compatible wire protocol lives
-                               here only; never in Domain/Application)
+  Viegard.Inference.Ollama/    Ollama adapter for the optional local-model advisor.  HTTP
+                               wire protocol lives here only; never in Domain/Application.
   Viegard.Actions.Imap/        Email action provider
   Viegard.Actions.MikroTik/    RouterOS address-list action provider
   Viegard.Actions.Fail2Ban/    Fail2Ban integration (mode TBD)
@@ -177,6 +178,14 @@ Implemented source integrations:
 - IMAP mail source, using per-account configuration and read-only folder access.
 - Syslog UDP source, with source allowlist, size cap, rate cap, RFC 3164/5424 parsing, and nginx access-log normalization.
 - MDaemon flat-file log source, intended for the Windows satellite pipeline instance on the MDaemon host.  It tails configured per-day log patterns, stores byte offsets per file, baselines existing files by default, skips session-log banners, drops Dynamic Screening noise by default, and normalizes SMTP/IMAP/POP, Screening, and Dynamic Screening lines into shared IP-correlatable events.  Runtime ingestion filters can suppress configured low-value MDaemon kinds before event storage and queueing while raw observations still persist every payload.  The Windows satellite installer publishes the pipeline host as the client-specific `ViegardSatelliteMDaemon` service with only the `sources` role enabled.
+
+### Local-model advisor
+
+The local-model advisor is optional, disabled by default, and database-owned through `/configuration#local-model-advisor` plus `local_model_advisor_settings`.  The settings row includes the Ollama endpoint, model, timeout, keep-alive, temperature, confidence invocation band, severity clamp, confidence clamp, version, seed timestamp, update timestamp, and updater.  The maintenance role seeds the row from bootstrap options, and classification-role instances hot-refresh a last-known-good snapshot through LISTEN/NOTIFY with polling fallback.
+
+`AdvisoryIncidentClassifier` decorates `DeterministicIncidentClassifier` and is the only registered `IClassifier` in the classification role.  The pipeline therefore still persists one `Classification` and one downstream `Decision` per incident.  The decorator preserves the deterministic classifier id, category, and recommended action.  A valid model response can only raise severity and confidence, and only up to `MaxSeverityDelta` and `MaxConfidenceDelta`; code enforces this after schema validation, so prompt injection cannot lower the base classification.
+
+Prompt safety uses the existing `PromptAssembler`.  Deterministic context is supplied as trusted application variables, while evidence descriptions and attacker-controlled event fields are emitted only inside random-boundary untrusted data blocks.  `Viegard.Inference.Ollama` sends the assembled prompt as the system message, uses a fixed trusted user message, requests Ollama JSON-schema constrained output, and returns provider failures as `InferenceResult.Failure`.  Provider failures, invalid JSON, oversized responses, timeouts, and unexpected exceptions fail open to the deterministic classification.
 
 ## Core interfaces (ports; final shapes at implementation)
 

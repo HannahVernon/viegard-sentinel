@@ -57,6 +57,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<JetPackDesiredAddressRow> JetPackDesiredAddresses => Set<JetPackDesiredAddressRow>();
 
+    public DbSet<LocalModelAdvisorSettingsRow> LocalModelAdvisorSettings => Set<LocalModelAdvisorSettingsRow>();
+
     public DbSet<PolicyThresholdSettingsRow> PolicyThresholdSettings => Set<PolicyThresholdSettingsRow>();
 
     public DbSet<PolicyPostureSettingsRow> PolicyPostureSettings => Set<PolicyPostureSettingsRow>();
@@ -304,6 +306,18 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.Address).HasColumnType("text");
             entity.Property(e => e.FirstSeenAt).HasColumnType("timestamp with time zone");
             entity.Property(e => e.LastSeenAt).HasColumnType("timestamp with time zone");
+        });
+
+        modelBuilder.Entity<LocalModelAdvisorSettingsRow>(entity =>
+        {
+            entity.ToTable("local_model_advisor_settings", table =>
+                table.HasCheckConstraint("CK_local_model_advisor_settings_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.Endpoint).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxEndpointLength);
+            entity.Property(e => e.Model).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxModelLength);
+            entity.Property(e => e.KeepAlive).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxKeepAliveLength);
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxUpdatedByLength);
         });
 
         modelBuilder.Entity<PolicyThresholdSettingsRow>(entity =>

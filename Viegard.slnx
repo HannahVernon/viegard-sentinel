@@ -4,6 +4,7 @@
     <Project Path="src/Viegard.Actions.MikroTik/Viegard.Actions.MikroTik.csproj" />
     <Project Path="src/Viegard.Application/Viegard.Application.csproj" />
     <Project Path="src/Viegard.Domain/Viegard.Domain.csproj" />
+    <Project Path="src/Viegard.Inference.Ollama/Viegard.Inference.Ollama.csproj" />
     <Project Path="src/Viegard.Persistence.Postgres/Viegard.Persistence.Postgres.csproj" />
     <Project Path="src/Viegard.Persistence/Viegard.Persistence.csproj" />
     <Project Path="src/Viegard.PipelineHost/Viegard.PipelineHost.csproj" />

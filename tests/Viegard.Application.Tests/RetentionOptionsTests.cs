@@ -6,13 +6,15 @@ namespace Viegard.Application.Tests;
 public sealed class RetentionOptionsTests
 {
     [Fact]
-    public void Defaults_keep_every_purge_target_disabled()
+    public void Defaults_enable_advisor_consult_purge_only()
     {
         var options = new RetentionOptions();
         var result = new RetentionOptionsValidator().Validate(Options.DefaultName, options);
 
         Assert.True(result.Succeeded);
-        Assert.Empty(options.ConfiguredPeriods());
+        var period = Assert.Single(options.ConfiguredPeriods());
+        Assert.Equal(RetentionTarget.LocalModelAdvisorConsults, period.Target);
+        Assert.Equal(90, period.Days);
         Assert.Equal(RetentionOptions.DefaultBatchSize, options.EffectiveBatchSize);
     }
 
@@ -25,6 +27,7 @@ public sealed class RetentionOptionsTests
             {
                 RawObservationsDays = -1,
                 ExpiredAdminSessionsDays = -30,
+                LocalModelAdvisorConsultsDays = -90,
                 BatchSize = -5,
                 StartupDelay = TimeSpan.FromSeconds(-1),
                 CheckInterval = TimeSpan.Zero,
@@ -32,7 +35,7 @@ public sealed class RetentionOptionsTests
 
         Assert.True(result.Failed);
         Assert.NotNull(result.Failures);
-        Assert.Equal(5, result.Failures!.Count());
+        Assert.Equal(6, result.Failures!.Count());
     }
 
     [Fact]
@@ -51,6 +54,7 @@ public sealed class RetentionOptionsTests
             EventsDays = 90,
             IncidentsDays = null,
             AuditRecordsDays = 365,
+            LocalModelAdvisorConsultsDays = null,
         }.ConfiguredPeriods();
 
         Assert.Equal(

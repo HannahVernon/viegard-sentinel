@@ -21,6 +21,7 @@ public sealed record RetentionSettings
         RetentionTarget.AuditRecords,
         RetentionTarget.DeadLetteredQueueMessages,
         RetentionTarget.ExpiredAdminSessions,
+        RetentionTarget.LocalModelAdvisorConsults,
     ];
 
     public int Id { get; init; } = FixedId;
@@ -42,6 +43,8 @@ public sealed record RetentionSettings
     public int? DeadLetteredQueueMessagesDays { get; init; }
 
     public int? ExpiredAdminSessionsDays { get; init; }
+
+    public int? LocalModelAdvisorConsultsDays { get; init; } = 90;
 
     public int Version { get; init; }
 
@@ -80,6 +83,7 @@ public sealed record RetentionSettings
         RetentionTarget.AuditRecords => AuditRecordsDays,
         RetentionTarget.DeadLetteredQueueMessages => DeadLetteredQueueMessagesDays,
         RetentionTarget.ExpiredAdminSessions => ExpiredAdminSessionsDays,
+        RetentionTarget.LocalModelAdvisorConsults => LocalModelAdvisorConsultsDays,
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, null),
     };
 
@@ -94,6 +98,7 @@ public sealed record RetentionSettings
         RetentionTarget.AuditRecords => this with { AuditRecordsDays = days },
         RetentionTarget.DeadLetteredQueueMessages => this with { DeadLetteredQueueMessagesDays = days },
         RetentionTarget.ExpiredAdminSessions => this with { ExpiredAdminSessionsDays = days },
+        RetentionTarget.LocalModelAdvisorConsults => this with { LocalModelAdvisorConsultsDays = days },
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, null),
     };
 
@@ -147,6 +152,7 @@ public sealed record RetentionSettings
             AuditRecordsDays = options.AuditRecordsDays,
             DeadLetteredQueueMessagesDays = options.DeadLetteredQueueMessagesDays,
             ExpiredAdminSessionsDays = options.ExpiredAdminSessionsDays,
+            LocalModelAdvisorConsultsDays = options.LocalModelAdvisorConsultsDays,
             Version = 1,
             SeededAt = utc,
             UpdatedAt = utc,
@@ -210,6 +216,11 @@ public static class RetentionTargetMetadata
             "expired_admin_sessions",
             "Expired admin sessions",
             "Only revoked or expired admin sessions are deleted after this many days.  Live sessions are never deleted."),
+        new(
+            RetentionTarget.LocalModelAdvisorConsults,
+            "local_model_advisor_consults",
+            "Local-model advisor consults",
+            "Advisor consult rows are deleted after this many days."),
     ];
 
     public static RetentionTargetDescriptor Descriptor(this RetentionTarget target) =>

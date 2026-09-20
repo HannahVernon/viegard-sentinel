@@ -3,6 +3,8 @@ namespace Viegard.Application.Configuration;
 public interface ILocalModelAdvisorDiagnostics
 {
     void RefreshFailed(Exception exception);
+
+    Task RecordConsultAsync(AdvisorConsultRecord record, CancellationToken cancellationToken = default);
 }
 
 public sealed class NullLocalModelAdvisorDiagnostics : ILocalModelAdvisorDiagnostics
@@ -16,6 +18,9 @@ public sealed class NullLocalModelAdvisorDiagnostics : ILocalModelAdvisorDiagnos
     public void RefreshFailed(Exception exception)
     {
     }
+
+    public Task RecordConsultAsync(AdvisorConsultRecord record, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
 }
 
 /// <summary>

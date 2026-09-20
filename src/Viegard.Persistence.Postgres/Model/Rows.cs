@@ -377,6 +377,8 @@ public sealed class RetentionSettingsRow
 
     public int? ExpiredAdminSessionsDays { get; set; }
 
+    public int? LocalModelAdvisorConsultsDays { get; set; }
+
     public int Version { get; set; }
 
     public DateTimeOffset? SeededAt { get; set; }
@@ -451,6 +453,35 @@ public sealed class LocalModelAdvisorSettingsRow
     public DateTimeOffset UpdatedAt { get; set; }
 
     public string UpdatedBy { get; set; } = string.Empty;
+}
+
+public sealed class LocalModelAdvisorConsultRow
+{
+    public Guid Id { get; set; }
+
+    public Guid ClassificationId { get; set; }
+
+    public Guid IncidentId { get; set; }
+
+    public string Category { get; set; } = string.Empty;
+
+    public int Outcome { get; set; }
+
+    public int BaseSeverity { get; set; }
+
+    public int FinalSeverity { get; set; }
+
+    public double BaseConfidence { get; set; }
+
+    public double FinalConfidence { get; set; }
+
+    public int? LatencyMs { get; set; }
+
+    public string? FailureKind { get; set; }
+
+    public string? ModelId { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
 }
 
 public sealed class PolicyThresholdSettingsRow

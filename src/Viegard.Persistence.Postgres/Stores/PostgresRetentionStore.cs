@@ -135,6 +135,16 @@ public sealed class PostgresRetentionStore(IDbContextFactory<ViegardDbContext> f
             );
             """, cancellationToken),
 
+        RetentionTarget.LocalModelAdvisorConsults => db.Database.ExecuteSqlInterpolatedAsync($"""
+            DELETE FROM local_model_advisor_consults
+            WHERE ctid IN (
+                SELECT ctid
+                FROM local_model_advisor_consults
+                WHERE created_at < {cutoff}
+                LIMIT {batchSize}
+            );
+            """, cancellationToken),
+
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, null),
     };
 }

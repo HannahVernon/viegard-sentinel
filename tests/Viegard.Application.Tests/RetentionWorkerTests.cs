@@ -42,14 +42,15 @@ public sealed class RetentionWorkerTests
             Assert.Empty(purgeStore.Calls);
 
             time.Advance(TimeSpan.FromSeconds(1));
-            await WaitForAsync(() => purgeStore.Calls.Count == 1);
-            var first = Assert.Single(purgeStore.Calls);
+            await WaitForAsync(() => purgeStore.Calls.Count >= 2);
+            var first = purgeStore.Calls.Single(call => call.Target == RetentionTarget.Events);
             Assert.Equal(RetentionTarget.Events, first.Target);
             Assert.Equal(start.AddSeconds(1).AddDays(-90), first.Cutoff);
+            Assert.Contains(purgeStore.Calls, call => call.Target == RetentionTarget.LocalModelAdvisorConsults);
 
             time.Advance(TimeSpan.FromHours(24));
-            await WaitForAsync(() => purgeStore.Calls.Count == 2);
-            var second = purgeStore.Calls[1];
+            await WaitForAsync(() => purgeStore.Calls.Count >= 4);
+            var second = purgeStore.Calls.Where(call => call.Target == RetentionTarget.Events).ElementAt(1);
             Assert.Equal(RetentionTarget.Events, second.Target);
             Assert.Equal(start.AddSeconds(1).AddHours(24).AddDays(-90), second.Cutoff);
         }
@@ -248,6 +249,7 @@ public sealed class RetentionWorkerTests
             Version = 1,
             UpdatedAt = DateTimeOffset.UtcNow,
             UpdatedBy = "test",
+            LocalModelAdvisorConsultsDays = null,
         };
         foreach (var (target, days) in values)
         {

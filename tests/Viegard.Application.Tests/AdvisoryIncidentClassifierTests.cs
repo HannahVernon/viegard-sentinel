@@ -30,6 +30,12 @@ public sealed class AdvisoryIncidentClassifierTests
         Assert.Equal(0.75, classification.Confidence, precision: 10);
         Assert.Contains(classification.Reasons, reason => reason.StartsWith("[advisor]", StringComparison.Ordinal));
         Assert.Equal(1, fixture.Provider.CallCount);
+        var record = Assert.Single(fixture.Diagnostics.Records);
+        Assert.Equal(AdvisorConsultOutcome.Escalated, record.Outcome);
+        Assert.Equal(6, record.BaseSeverity);
+        Assert.Equal(8, record.FinalSeverity);
+        Assert.Equal(0.6, record.BaseConfidence, precision: 10);
+        Assert.Equal(0.75, record.FinalConfidence, precision: 10);
     }
 
     [Fact]
@@ -45,6 +51,7 @@ public sealed class AdvisoryIncidentClassifierTests
         Assert.Equal(0.6, classification.Confidence, precision: 10);
         Assert.Equal("path-traversal", classification.Category);
         Assert.Equal("block-source-ip", classification.RecommendedAction);
+        Assert.Equal(AdvisorConsultOutcome.NoChange, Assert.Single(fixture.Diagnostics.Records).Outcome);
     }
 
     [Fact]
@@ -70,6 +77,7 @@ public sealed class AdvisoryIncidentClassifierTests
         var classification = Assert.IsType<Classification>(outcome.Classification);
         Assert.Null(classification.Model);
         Assert.Equal(0, fixture.Provider.CallCount);
+        Assert.Empty(fixture.Diagnostics.Records);
     }
 
     [Fact]
@@ -83,6 +91,7 @@ public sealed class AdvisoryIncidentClassifierTests
         Assert.Equal(1.0, classification.Confidence, precision: 10);
         Assert.Null(classification.Model);
         Assert.Equal(0, fixture.Provider.CallCount);
+        Assert.Equal(AdvisorConsultOutcome.SkippedOutOfBand, Assert.Single(fixture.Diagnostics.Records).Outcome);
     }
 
     [Fact]
@@ -94,6 +103,9 @@ public sealed class AdvisoryIncidentClassifierTests
         var failureOutcome = await providerFailure.Classifier.ClassifyAsync(Subject(providerFailure.Incident.Id));
 
         Assert.Null(Assert.IsType<Classification>(failureOutcome.Classification).Model);
+        var providerRecord = Assert.Single(providerFailure.Diagnostics.Records);
+        Assert.Equal(AdvisorConsultOutcome.ProviderFailed, providerRecord.Outcome);
+        Assert.Equal(nameof(InferenceFailureKind.Unavailable), providerRecord.FailureKind);
 
         var invalidJson = await CreateFixtureAsync(Settings());
         invalidJson.Provider.RawOutput = "not json";
@@ -104,6 +116,19 @@ public sealed class AdvisoryIncidentClassifierTests
         Assert.Equal(6, invalidClassification.Severity);
         Assert.Equal(0.6, invalidClassification.Confidence, precision: 10);
         Assert.Null(invalidClassification.Model);
+        Assert.Equal(AdvisorConsultOutcome.InvalidOutput, Assert.Single(invalidJson.Diagnostics.Records).Outcome);
+    }
+
+    [Fact]
+    public async Task Consult_recording_failure_does_not_break_classification()
+    {
+        var fixture = await CreateFixtureAsync(Settings(), diagnostics: new RecordingDiagnostics { ThrowOnRecord = true });
+        fixture.Provider.RawOutput = Output(severity: 7, confidence: 0.7, "higher confidence");
+
+        var outcome = await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+
+        Assert.True(outcome.Succeeded);
+        Assert.Equal(7, Assert.IsType<Classification>(outcome.Classification).Severity);
     }
 
     [Fact]
@@ -145,7 +170,8 @@ public sealed class AdvisoryIncidentClassifierTests
     private static async Task<Fixture> CreateFixtureAsync(
         LocalModelAdvisorSettings settings,
         double evidenceScore = 3.0,
-        string evidenceDescription = "Rule http.path-traversal: decoded URI contains parent-directory traversal.")
+        string evidenceDescription = "Rule http.path-traversal: decoded URI contains parent-directory traversal.",
+        RecordingDiagnostics? diagnostics = null)
     {
         var incidentStore = new InMemoryIncidentStore();
         var eventStore = new InMemoryEventStore();
@@ -154,6 +180,7 @@ public sealed class AdvisoryIncidentClassifierTests
         var source = new LocalModelAdvisorSource(store);
         await source.RefreshAsync();
         var provider = new FakeInferenceProvider();
+        diagnostics ??= new RecordingDiagnostics();
         var classifier = new AdvisoryIncidentClassifier(
             new DeterministicIncidentClassifier(incidentStore, Options.Create(new ClassifierOptions())),
             incidentStore,
@@ -161,12 +188,13 @@ public sealed class AdvisoryIncidentClassifierTests
             source,
             Options.Create(new LocalModelAdvisorOptions()),
             provider,
-            new ClassificationOutputValidator());
+            new ClassificationOutputValidator(),
+            diagnostics);
         var eventId = Guid.NewGuid();
         var incident = Incident(eventId, evidenceDescription, evidenceScore);
         await eventStore.AddAsync(HostileEvent(eventId));
         await incidentStore.UpsertAsync(incident);
-        return new Fixture(classifier, provider, incident);
+        return new Fixture(classifier, provider, incident, diagnostics);
     }
 
     private static LocalModelAdvisorSettings Settings(
@@ -241,7 +269,33 @@ public sealed class AdvisoryIncidentClassifierTests
     private static string Output(int severity, double confidence, string reason) =>
         $$"""{"classification":"command-injection","confidence":{{confidence.ToString(System.Globalization.CultureInfo.InvariantCulture)}},"severity":{{severity}},"reasons":["{{reason}}"],"recommended_action":"do-not-use"}""";
 
-    private sealed record Fixture(AdvisoryIncidentClassifier Classifier, FakeInferenceProvider Provider, Incident Incident);
+    private sealed record Fixture(
+        AdvisoryIncidentClassifier Classifier,
+        FakeInferenceProvider Provider,
+        Incident Incident,
+        RecordingDiagnostics Diagnostics);
+
+    private sealed class RecordingDiagnostics : ILocalModelAdvisorDiagnostics
+    {
+        public List<AdvisorConsultRecord> Records { get; } = [];
+
+        public bool ThrowOnRecord { get; init; }
+
+        public void RefreshFailed(Exception exception)
+        {
+        }
+
+        public Task RecordConsultAsync(AdvisorConsultRecord record, CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnRecord)
+            {
+                throw new InvalidOperationException("recording failed");
+            }
+
+            Records.Add(record);
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class FakeInferenceProvider : IInferenceProvider
     {

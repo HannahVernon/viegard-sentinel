@@ -8,6 +8,7 @@
 @inject IOptions<AdminAuthOptions> AuthOptions
 @inject IOptions<PolicyOptions> PolicyOptions
 @inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
+@inject ILocalModelAdvisorConsultStore AdvisorConsults
 @inject IHttpContextAccessor HttpContextAccessor
 @inject UserDisplay Display
 
@@ -44,6 +45,38 @@
                     <dt>Confidence</dt><dd>@_classification.Confidence.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)</dd>
                     <dt>Subject</dt><dd>@_classification.SubjectKind <a href="/incidents/@_classification.SubjectId">@AdminText.ShortId(_classification.SubjectId)</a></dd>
                 </dl>
+            </section>
+
+            <section class="card">
+                <h2>Local-model advisor</h2>
+                @if (_advisorConsult is null)
+                {
+                    <p>Advisor not consulted.</p>
+                }
+                else
+                {
+                    <dl class="detail-list">
+                        <dt>Outcome</dt><dd><span class="@AdvisorOutcomeCss(_advisorConsult.Outcome)">@AdvisorOutcomeLabel(_advisorConsult.Outcome)</span></dd>
+                        <dt>Severity</dt><dd>@_advisorConsult.BaseSeverity &rarr; @_advisorConsult.FinalSeverity</dd>
+                        <dt>Confidence</dt><dd>@FormatConfidence(_advisorConsult.BaseConfidence) &rarr; @FormatConfidence(_advisorConsult.FinalConfidence)</dd>
+                        <dt>Latency</dt><dd>@FormatLatency(_advisorConsult.LatencyMs)</dd>
+                        <dt>Model</dt><dd>@(_advisorConsult.ModelId ?? "-")</dd>
+                        @if (!string.IsNullOrWhiteSpace(_advisorConsult.FailureKind))
+                        {
+                            <dt>Failure kind</dt><dd>@_advisorConsult.FailureKind</dd>
+                        }
+                    </dl>
+                    @if (AdvisorReasons.Count > 0)
+                    {
+                        <h3>Advisor reasons</h3>
+                        <ul>
+                            @foreach (var reason in AdvisorReasons)
+                            {
+                                <li>@reason</li>
+                            }
+                        </ul>
+                    }
+                }
             </section>
         }
 
@@ -142,6 +175,7 @@
 
     private Decision? _decision;
     private Classification? _classification;
+    private AdvisorConsultRecord? _advisorConsult;
     private IncidentTargetIpResult? _target;
     private bool _stepUpFresh;
     private bool _hasSecurityKeys;
@@ -156,6 +190,10 @@
         ? _decision?.Outcome == DecisionOutcome.RequireApproval ? "Needs approval" : "Not applicable"
         : $"{_decision.ReviewOutcome} by {_decision.ReviewedBy} at {Display.Format(_decision.ReviewedAt.Value)}";
 
+    private IReadOnlyList<string> AdvisorReasons => _classification?.Reasons
+        .Where(reason => reason.StartsWith("[advisor]", StringComparison.Ordinal))
+        .ToList() ?? [];
+
     protected override async Task OnInitializedAsync()
     {
         await Display.InitializeAsync().ConfigureAwait(false);
@@ -165,6 +203,7 @@
         if (_decision is not null)
         {
             _classification = await ClassificationStore.GetAsync(_decision.ClassificationId).ConfigureAwait(false);
+            _advisorConsult = await AdvisorConsults.GetByClassificationIdAsync(_decision.ClassificationId).ConfigureAwait(false);
             var incident = _classification?.SubjectKind == ClassificationSubjectKind.Incident
                 ? await IncidentStore.GetAsync(_classification.SubjectId).ConfigureAwait(false)
                 : null;
@@ -191,4 +230,28 @@
             _hasSecurityKeys = credentials.Count > 0;
         }
     }
+
+    private static string FormatLatency(int? latencyMs) =>
+        latencyMs is null ? "-" : $"{latencyMs.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)} ms";
+
+    private static string FormatConfidence(double confidence) =>
+        confidence.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string AdvisorOutcomeLabel(AdvisorConsultOutcome outcome) => outcome switch
+    {
+        AdvisorConsultOutcome.SkippedOutOfBand => "Skipped out of band",
+        AdvisorConsultOutcome.Escalated => "Escalated",
+        AdvisorConsultOutcome.NoChange => "No change",
+        AdvisorConsultOutcome.ProviderFailed => "Provider failed",
+        AdvisorConsultOutcome.InvalidOutput => "Invalid output",
+        _ => outcome.ToString(),
+    };
+
+    private static string AdvisorOutcomeCss(AdvisorConsultOutcome outcome) => outcome switch
+    {
+        AdvisorConsultOutcome.Escalated => "badge badge-amber",
+        AdvisorConsultOutcome.NoChange => "badge badge-green",
+        AdvisorConsultOutcome.ProviderFailed or AdvisorConsultOutcome.InvalidOutput => "badge badge-red",
+        _ => "badge",
+    };
 }

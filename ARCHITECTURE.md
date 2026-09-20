@@ -145,10 +145,11 @@ src/
   Viegard.PipelineHost/        Worker service executable, including ingestion,
                                correlation, classification, policy, actions,
                                ban reconciliation, and maintenance retention and
-                               ingestion-filter workers
+                               ingestion-filter workers, plus advisor consult
+                               persistence diagnostics
   Viegard.AdminApi/            Admin API executable, auth endpoints, WebAuthn adapter,
                                static SSR pages, configuration editors, router probes, display preferences,
-                               keyset pagination, filter, and sort UI, first-party WebAuthn JS bridge
+                               Advisor dashboard, keyset pagination, filter, and sort UI, first-party WebAuthn JS bridge
 tests/
   Viegard.AdminApi.Tests/      Admin API adapter, WebAuthn option, display, and
                                pagination tests
@@ -187,6 +188,8 @@ The local-model advisor is optional, disabled by default, and database-owned thr
 
 Prompt safety uses the existing `PromptAssembler`.  Deterministic context is supplied as trusted application variables, while evidence descriptions and attacker-controlled event fields are emitted only inside random-boundary untrusted data blocks.  `Viegard.Inference.Ollama` sends the assembled prompt as the system message, uses a fixed trusted user message, requests Ollama JSON-schema constrained output, and returns provider failures as `InferenceResult.Failure`.  Provider failures, invalid JSON, oversized responses, timeouts, and unexpected exceptions fail open to the deterministic classification.
 
+Advisor observability is stored in `local_model_advisor_consults`.  The decorator records enabled-only skipped consults, provider failures, invalid output, escalations, no-change outcomes, base-to-final severity and confidence, latency, failure kind, model id, classification id, incident id, and creation time.  Recording is best-effort and cannot fail classification.  `/advisor` shows rolling outcome counts, escalation rate, failure counts, latency p50/p95, and recent consult rows.  Decision detail pages show the consult attached to the decision's classification and list the `[advisor]` reasons already stored on the classification.  Retention prunes consult rows after 90 days by default.
+
 ## Core interfaces (ports; final shapes at implementation)
 
 Interface | Metaphor | Contract summary
@@ -203,6 +206,7 @@ Interface | Metaphor | Contract summary
 `IAuditLedger` | Ledger | Append-only audit records covering every stage
 `IRetentionStore` | Roost | Batched deletes for configured data-retention targets; unset periods keep rows forever
 `IRetentionSettingsStore` | Roost | Database-owned retention periods plus last-cycle status for admin editing and worker execution
+`ILocalModelAdvisorConsultStore` | Roost | Append-only local-model advisor consult records, dashboard aggregations, decision lookup, and 90-day pruning
 `IIngestionFilterStore` | Roost | Database-owned source-type/event-kind suppression matrix for normalization-time event emission, with notification-backed refresh and fail-open runtime reads
 `IInstanceRegistryStore` | Roost | Latest build/version registration per running admin or pipeline instance: instance id, full informational version, commit SHA, roles, host name, start time, and report time
 `IActiveBanStore` | Roost | PostgreSQL-owned desired state for active MikroTik bans.  One row per canonical IP records expiry, decision id, and action id; the actions-role reconciler converges routers to this table.

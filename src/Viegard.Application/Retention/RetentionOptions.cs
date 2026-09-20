@@ -28,6 +28,8 @@ public sealed class RetentionOptions
 
     public int? ExpiredAdminSessionsDays { get; set; }
 
+    public int? LocalModelAdvisorConsultsDays { get; set; } = 90;
+
     public int BatchSize { get; set; } = DefaultBatchSize;
 
     public TimeSpan StartupDelay { get; set; } = TimeSpan.FromSeconds(30);
@@ -38,7 +40,7 @@ public sealed class RetentionOptions
 
     public IReadOnlyList<RetentionPeriod> ConfiguredPeriods()
     {
-        var periods = new List<RetentionPeriod>(capacity: 9);
+        var periods = new List<RetentionPeriod>(capacity: 10);
         AddConfigured(periods, RetentionTarget.RawObservations, RawObservationsDays);
         AddConfigured(periods, RetentionTarget.Events, EventsDays);
         AddConfigured(periods, RetentionTarget.Incidents, IncidentsDays);
@@ -48,6 +50,7 @@ public sealed class RetentionOptions
         AddConfigured(periods, RetentionTarget.AuditRecords, AuditRecordsDays);
         AddConfigured(periods, RetentionTarget.DeadLetteredQueueMessages, DeadLetteredQueueMessagesDays);
         AddConfigured(periods, RetentionTarget.ExpiredAdminSessions, ExpiredAdminSessionsDays);
+        AddConfigured(periods, RetentionTarget.LocalModelAdvisorConsults, LocalModelAdvisorConsultsDays);
         return periods;
     }
 
@@ -73,6 +76,7 @@ public enum RetentionTarget
     AuditRecords,
     DeadLetteredQueueMessages,
     ExpiredAdminSessions,
+    LocalModelAdvisorConsults,
 }
 
 public static class RetentionTargetNames
@@ -88,6 +92,7 @@ public static class RetentionTargetNames
         RetentionTarget.AuditRecords => "audit_records",
         RetentionTarget.DeadLetteredQueueMessages => "queue_messages",
         RetentionTarget.ExpiredAdminSessions => "admin_sessions",
+        RetentionTarget.LocalModelAdvisorConsults => "local_model_advisor_consults",
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, null),
     };
 }
@@ -109,6 +114,7 @@ public sealed class RetentionOptionsValidator : IValidateOptions<RetentionOption
         ValidateNonNegative(options.AuditRecordsDays, nameof(options.AuditRecordsDays), failures);
         ValidateNonNegative(options.DeadLetteredQueueMessagesDays, nameof(options.DeadLetteredQueueMessagesDays), failures);
         ValidateNonNegative(options.ExpiredAdminSessionsDays, nameof(options.ExpiredAdminSessionsDays), failures);
+        ValidateNonNegative(options.LocalModelAdvisorConsultsDays, nameof(options.LocalModelAdvisorConsultsDays), failures);
 
         if (options.BatchSize < 0)
         {

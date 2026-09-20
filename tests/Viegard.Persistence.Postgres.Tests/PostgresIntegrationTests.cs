@@ -61,7 +61,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         // 180d window) age into purge eligibility ~24h after the run that
         // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -1294,6 +1294,36 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Local_model_advisor_consult_store_round_trips_aggregates_and_prunes()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresLocalModelAdvisorConsultStore(factory);
+        var now = new DateTimeOffset(2026, 9, 20, 7, 0, 0, TimeSpan.Zero);
+        var classificationId = ViegardId.New();
+
+        await store.AppendAsync(AdvisorConsultRecord(classificationId, AdvisorConsultOutcome.Escalated, now.AddMinutes(-10), 100, finalSeverity: 8));
+        await store.AppendAsync(AdvisorConsultRecord(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-9), 200));
+        await store.AppendAsync(AdvisorConsultRecord(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-8), 300));
+        await store.AppendAsync(AdvisorConsultRecord(ViegardId.New(), AdvisorConsultOutcome.ProviderFailed, now.AddDays(-2), 400, failureKind: "Timeout"));
+
+        var consult = await store.GetByClassificationIdAsync(classificationId);
+        Assert.NotNull(consult);
+        Assert.Equal(AdvisorConsultOutcome.Escalated, consult!.Outcome);
+
+        var counts = await store.GetOutcomeCountsAsync(now.AddHours(-1));
+        Assert.Equal(1, counts.Single(c => c.Outcome == AdvisorConsultOutcome.Escalated).Count);
+        Assert.Equal(2, counts.Single(c => c.Outcome == AdvisorConsultOutcome.NoChange).Count);
+
+        var latency = await store.GetLatencyStatsAsync(now.AddHours(-1));
+        Assert.Equal(3, latency.Count);
+        Assert.Equal(200, latency.P50);
+        Assert.Equal(300, latency.P95);
+
+        Assert.Equal(1, await store.PruneOlderThanAsync(now.AddDays(-1)));
+        Assert.Equal(3, (await store.GetRecentAsync(10)).Count);
+    }
+
+    [PostgresFact]
     public async Task Policy_threshold_settings_store_creates_updates_conflicts_and_notifies()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -1871,6 +1901,8 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var oldExpiredSession = AdminSession(user.Id, now.AddDays(-60), now.AddDays(-31), revokedAt: null);
         var newExpiredSession = AdminSession(user.Id, now.AddDays(-60), now.AddDays(-29), revokedAt: null);
         var liveSession = AdminSession(user.Id, now, now.AddDays(1), revokedAt: null);
+        var oldAdvisorConsult = AdvisorConsultRow(now.AddDays(-91));
+        var newAdvisorConsult = AdvisorConsultRow(now.AddDays(-89));
 
         db.AddRange(
             oldRaw,
@@ -1897,7 +1929,9 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             newRevokedSession,
             oldExpiredSession,
             newExpiredSession,
-            liveSession);
+            liveSession,
+            oldAdvisorConsult,
+            newAdvisorConsult);
         await db.SaveChangesAsync();
 
         Assert.Equal(1, await store.PurgeAsync(RetentionTarget.RawObservations, now.AddDays(-30), batchSize: 1));
@@ -1909,6 +1943,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(1, await store.PurgeAsync(RetentionTarget.AuditRecords, now.AddDays(-365), batchSize: 1));
         Assert.Equal(1, await store.PurgeAsync(RetentionTarget.DeadLetteredQueueMessages, now.AddDays(-30), batchSize: 1));
         Assert.Equal(2, await store.PurgeAsync(RetentionTarget.ExpiredAdminSessions, now.AddDays(-30), batchSize: 1));
+        Assert.Equal(1, await store.PurgeAsync(RetentionTarget.LocalModelAdvisorConsults, now.AddDays(-90), batchSize: 1));
 
         db.ChangeTracker.Clear();
         Assert.False(await db.RawObservations.AnyAsync(r => r.Id == oldRaw.Id));
@@ -1935,6 +1970,8 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.False(await db.AdminSessions.AnyAsync(s => s.Id == oldExpiredSession.Id));
         Assert.True(await db.AdminSessions.AnyAsync(s => s.Id == newExpiredSession.Id));
         Assert.True(await db.AdminSessions.AnyAsync(s => s.Id == liveSession.Id));
+        Assert.False(await db.LocalModelAdvisorConsults.AnyAsync(c => c.Id == oldAdvisorConsult.Id));
+        Assert.True(await db.LocalModelAdvisorConsults.AnyAsync(c => c.Id == newAdvisorConsult.Id));
     }
 
     private static CustomSignature CustomSignature(string name) => new()
@@ -1991,6 +2028,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             Id = RetentionSettings.FixedId,
             UpdatedAt = DateTimeOffset.UtcNow,
             UpdatedBy = "it",
+            LocalModelAdvisorConsultsDays = null,
         };
         foreach (var (target, days) in values)
         {
@@ -2102,6 +2140,28 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Reasons = ["integration test"],
         CreatedAt = createdAt,
     };
+
+    private static AdvisorConsultRecord AdvisorConsultRecord(
+        Guid classificationId,
+        AdvisorConsultOutcome outcome,
+        DateTimeOffset createdAt,
+        int? latencyMs,
+        int finalSeverity = 6,
+        string? failureKind = null) => new()
+        {
+            ClassificationId = classificationId,
+            IncidentId = ViegardId.New(),
+            Category = "path-traversal",
+            Outcome = outcome,
+            BaseSeverity = 6,
+            FinalSeverity = finalSeverity,
+            BaseConfidence = 0.6,
+            FinalConfidence = finalSeverity > 6 ? 0.8 : 0.6,
+            LatencyMs = latencyMs,
+            FailureKind = failureKind,
+            ModelId = "qwen-test:latest",
+            CreatedAt = createdAt,
+        };
 
     private static Decision Decision(
         Guid classificationId,
@@ -2251,6 +2311,22 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         IpBindingMode = "strict",
         UserAgent = "retention-test",
         RevokedAt = revokedAt,
+    };
+
+    private static LocalModelAdvisorConsultRow AdvisorConsultRow(DateTimeOffset createdAt) => new()
+    {
+        Id = ViegardId.New(),
+        ClassificationId = ViegardId.New(),
+        IncidentId = ViegardId.New(),
+        Category = "path-traversal",
+        Outcome = (int)AdvisorConsultOutcome.NoChange,
+        BaseSeverity = 6,
+        FinalSeverity = 6,
+        BaseConfidence = 0.6,
+        FinalConfidence = 0.6,
+        LatencyMs = 100,
+        ModelId = "qwen-test:latest",
+        CreatedAt = createdAt,
     };
 
     private static PostgresSatelliteRoleStore CreateSatelliteStore(NpgsqlDataSource dataSource)

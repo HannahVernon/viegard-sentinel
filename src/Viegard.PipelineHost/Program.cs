@@ -152,6 +152,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IJetPackFeedSettingsStore, InMemoryJetPackFeedSettingsStore>();
         builder.Services.AddSingleton<IJetPackDesiredAddressStore, InMemoryJetPackDesiredAddressStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorSettingsStore, InMemoryLocalModelAdvisorSettingsStore>();
+        builder.Services.AddSingleton<ILocalModelAdvisorConsultStore, InMemoryLocalModelAdvisorConsultStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();
@@ -181,7 +182,7 @@ builder.Services.AddSingleton<IPolicyThresholdDiagnostics, LoggingPolicyThreshol
 builder.Services.AddSingleton<PolicyThresholdSource>();
 builder.Services.AddSingleton<IPolicyPostureDiagnostics, LoggingPolicyPostureDiagnostics>();
 builder.Services.AddSingleton<PolicyPostureSource>();
-builder.Services.AddSingleton<ILocalModelAdvisorDiagnostics, LoggingLocalModelAdvisorDiagnostics>();
+builder.Services.AddSingleton<ILocalModelAdvisorDiagnostics, StoreLocalModelAdvisorDiagnostics>();
 builder.Services.AddSingleton<LocalModelAdvisorSource>();
 builder.Services.AddSingleton<Viegard.Application.Inference.Validation.ClassificationOutputValidator>();
 builder.Services.AddViegardOllamaInference();

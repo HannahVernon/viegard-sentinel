@@ -92,6 +92,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IIngestionFilterStore, PostgresIngestionFilterStore>();
         services.AddSingleton<IRetentionStore, PostgresRetentionStore>();
         services.AddSingleton<IRetentionSettingsStore, PostgresRetentionSettingsStore>();
+        services.AddSingleton<IJetPackFeedSettingsStore, PostgresJetPackFeedSettingsStore>();
+        services.AddSingleton<IJetPackDesiredAddressStore, PostgresJetPackDesiredAddressStore>();
         services.AddSingleton<IPolicyThresholdSettingsStore, PostgresPolicyThresholdSettingsStore>();
         services.AddSingleton<IPolicyPostureSettingsStore, PostgresPolicyPostureSettingsStore>();
         services.AddSingleton<ISatelliteRoleStore, PostgresSatelliteRoleStore>();

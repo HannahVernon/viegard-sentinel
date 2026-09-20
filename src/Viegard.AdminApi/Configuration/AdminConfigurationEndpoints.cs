@@ -16,6 +16,7 @@ namespace Viegard.AdminApi.Configuration;
 public static class AdminConfigurationEndpoints
 {
     private const string RetentionConfigurationPath = "/configuration#retention";
+    private const string JetPackConfigurationPath = "/configuration#jetpack";
     private const string SatellitesConfigurationPath = "/configuration#satellites";
     private const string RoutersConfigurationPath = "/configuration#routers";
     private const string UpgradesConfigurationPath = "/configuration#upgrades";
@@ -27,6 +28,9 @@ public static class AdminConfigurationEndpoints
     public static void MapAdminConfigurationEndpoints(this WebApplication app)
     {
         app.MapPost("/configuration/retention", SaveRetentionAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/jetpack", SaveJetPackAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/satellites/create", CreateSatelliteAsync)
@@ -129,6 +133,64 @@ public static class AdminConfigurationEndpoints
             result.Settings,
             context.RequestAborted).ConfigureAwait(false);
         return Redirect(RetentionConfigurationPath, status: "Retention settings saved.");
+    }
+
+    internal static async Task<IResult> SaveJetPackAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IJetPackFeedSettingsStore jetPackSettings,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(JetPackConfigurationPath, error: "Step-up verification is required before editing JetPack allowlist settings.");
+        }
+
+        if (!int.TryParse(form["version"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedVersion)
+            || expectedVersion < 0)
+        {
+            return Redirect(JetPackConfigurationPath, error: "JetPack settings version was not valid.  Reload the page and try again.");
+        }
+
+        var before = await jetPackSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        if (!TryReadJetPackSettings(form, out var candidate, out var error))
+        {
+            return Redirect(JetPackConfigurationPath, error: error);
+        }
+
+        var result = await jetPackSettings.UpsertAsync(
+            candidate,
+            expectedVersion,
+            user.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(JetPackConfigurationPath, error: "JetPack settings were changed by another session.  Review the current values and save again.");
+        }
+
+        await configAuditor.RecordJetPackFeedSettingsWriteAsync(
+            user.Username,
+            before,
+            result.Settings,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(JetPackConfigurationPath, status: "JetPack allowlist settings saved.");
     }
 
     internal static async Task<IResult> CreateSatelliteAsync(
@@ -1040,6 +1102,45 @@ public static class AdminConfigurationEndpoints
             settings = settings.WithDays(descriptor.Target, days);
         }
 
+        return true;
+    }
+
+    private static bool TryReadJetPackSettings(
+        IFormCollection form,
+        out JetPackFeedSettings settings,
+        out string error)
+    {
+        settings = new JetPackFeedSettings();
+        if (!JetPackFeedSettingsValidator.TryNormalizeFeedUrl(form["feedUrl"].ToString(), out var feedUrl, out error))
+        {
+            return false;
+        }
+
+        if (!int.TryParse(form["fetchIntervalMinutes"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var fetchIntervalMinutes)
+            || fetchIntervalMinutes <= 0)
+        {
+            error = "JetPack fetch interval must be a whole number of minutes greater than zero.";
+            return false;
+        }
+
+        if (!JetPackFeedSettingsValidator.TryNormalizeAddressListName(form["addressListName"].ToString(), out var addressListName, out error))
+        {
+            return false;
+        }
+
+        settings = new JetPackFeedSettings
+        {
+            FeedUrl = feedUrl,
+            FetchInterval = TimeSpan.FromMinutes(fetchIntervalMinutes),
+            Enabled = form.ContainsKey("enabled"),
+            AddressListName = addressListName,
+        };
+        if (!JetPackFeedSettingsValidator.TryValidate(settings, out error))
+        {
+            return false;
+        }
+
+        error = string.Empty;
         return true;
     }
 

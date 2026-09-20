@@ -43,6 +43,11 @@ builder.Services
     .Bind(builder.Configuration.GetSection(RetentionOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<RetentionOptions>, RetentionOptionsValidator>();
+builder.Services
+    .AddOptions<JetPackFeedOptions>()
+    .Bind(builder.Configuration.GetSection(JetPackFeedOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<JetPackFeedOptions>, JetPackFeedOptionsValidator>();
 
 builder.Services
     .AddOptions<DetectionOptions>()
@@ -73,6 +78,7 @@ builder.Services
     .Bind(builder.Configuration.GetSection(ActionWorkerOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<ActionWorkerOptions>, ActionWorkerOptionsValidator>();
+builder.Services.AddSingleton(new HttpClient());
 
 builder.Services
     .AddOptions<HostUpgradeAgentOptions>()
@@ -137,6 +143,8 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IIngestionFilterStore, InMemoryIngestionFilterStore>();
         builder.Services.AddSingleton<IRetentionStore, InMemoryRetentionStore>();
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
+        builder.Services.AddSingleton<IJetPackFeedSettingsStore, InMemoryJetPackFeedSettingsStore>();
+        builder.Services.AddSingleton<IJetPackDesiredAddressStore, InMemoryJetPackDesiredAddressStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();
@@ -329,6 +337,8 @@ if (configuredRoles.Contains(RoleNames.Actions, StringComparer.OrdinalIgnoreCase
     builder.Services.AddSingleton<IActionProvider, MikroTikBanActionProvider>();
     builder.Services.AddHostedService<ActionWorker>();
     builder.Services.AddHostedService<BanReconciliationWorker>();
+    builder.Services.AddHostedService<JetPackFeedFetchWorker>();
+    builder.Services.AddHostedService<JetPackReconciliationWorker>();
 }
 
 // The posture refresh loop feeds every posture consumer (policy engine,

@@ -99,6 +99,11 @@ builder.Services
     .Bind(builder.Configuration.GetSection(PolicyOptions.SectionName))
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<PolicyOptions>, PolicyOptionsValidator>();
+builder.Services
+    .AddOptions<JetPackFeedOptions>()
+    .Bind(builder.Configuration.GetSection(JetPackFeedOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<JetPackFeedOptions>, JetPackFeedOptionsValidator>();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddRazorComponents();
@@ -234,6 +239,8 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ICustomSignatureStore, InMemoryCustomSignatureStore>();
         builder.Services.AddSingleton<IIngestionFilterStore, InMemoryIngestionFilterStore>();
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
+        builder.Services.AddSingleton<IJetPackFeedSettingsStore, InMemoryJetPackFeedSettingsStore>();
+        builder.Services.AddSingleton<IJetPackDesiredAddressStore, InMemoryJetPackDesiredAddressStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<ISatelliteRoleStore, InMemorySatelliteRoleStore>();

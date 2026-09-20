@@ -1,6 +1,7 @@
 @page "/configuration"
 @attribute [Authorize]
 @inject IRetentionSettingsStore RetentionSettingsStore
+@inject IJetPackFeedSettingsStore JetPackFeedSettingsStore
 @inject IPolicyThresholdSettingsStore PolicyThresholdSettingsStore
 @inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
 @inject IIngestionFilterStore IngestionFilters
@@ -13,6 +14,7 @@
 @inject IHttpContextAccessor HttpContextAccessor
 @inject IOptions<AdminAuthOptions> AuthOptions
 @inject IOptions<PolicyOptions> PolicyOptions
+@inject IOptions<JetPackFeedOptions> JetPackOptions
 @inject UserDisplay Display
 @inject SatelliteRoleCredentialCookie SatelliteCredentialCookie
 
@@ -23,6 +25,7 @@
         <a class="index-default-link" href="/configuration#retention">Retention</a>
         <a href="/configuration#satellites">Satellites</a>
         <a href="/configuration#routers">Routers</a>
+        <a href="/configuration#jetpack">JetPack allowlist</a>
         <a href="/configuration#upgrades">Upgrades</a>
         <a href="/configuration#thresholds">Policy thresholds</a>
         <a href="/configuration#posture">Policy posture</a>
@@ -398,6 +401,98 @@
         }
     </section>
 
+    <section id="jetpack" class="indexed">
+        <h2>JetPack allowlist</h2>
+        <p class="small">JetPack's published IPv4 ranges are fetched on the configured interval and reconciled to the configured MikroTik address list on every enabled router.</p>
+        <p class="small">This is a scheduled address-list sync, not a policy decision.  Disabling it pauses both feed fetches and router reconciliation.</p>
+
+        <h3>Status</h3>
+        <dl class="detail-list">
+            <dt>Settings row</dt><dd>@JetPackSettingsState</dd>
+            <dt>Version</dt><dd>@(_jetPackSettings?.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")</dd>
+            <dt>Last changed</dt><dd>@JetPackLastChanged</dd>
+        </dl>
+
+        @if (_jetPackSettings is null)
+        {
+            <p class="message">Showing deployment defaults.  The settings row seeds on the first actions-role fetch cycle unless an admin saves values first.</p>
+        }
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Knob</th>
+                    <th>Effective value</th>
+                    <th>Meaning</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>FeedUrl</code></td>
+                    <td><code>@JetPackCurrentSettings.FeedUrl</code></td>
+                    <td>Source JSON feed containing JetPack IPv4 addresses and CIDRs.</td>
+                </tr>
+                <tr>
+                    <td><code>FetchInterval</code></td>
+                    <td>@FormatMinutes(JetPackCurrentSettings.FetchInterval)</td>
+                    <td>How often the actions role refreshes the desired-address snapshot from JetPack.</td>
+                </tr>
+                <tr>
+                    <td><code>Enabled</code></td>
+                    <td><span class="badge">@(JetPackCurrentSettings.Enabled ? "On" : "Off")</span></td>
+                    <td>When off, both the feed fetch and the router reconciliation skip their cycles.</td>
+                </tr>
+                <tr>
+                    <td><code>AddressListName</code></td>
+                    <td><code>@JetPackCurrentSettings.AddressListName</code></td>
+                    <td>RouterOS address list fully owned by the JetPack sync.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Edit JetPack allowlist settings</h3>
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/jetpack" class="edit-form">
+                <AntiforgeryToken />
+                <input type="hidden" name="version" value="@(_jetPackSettings?.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")" />
+                <label>
+                    Feed URL
+                    <input name="feedUrl" value="@JetPackCurrentSettings.FeedUrl" required />
+                    <span class="small">Absolute http or https URL returning a JSON string array of IPv4 addresses or CIDRs.</span>
+                </label>
+                <label>
+                    Fetch interval (minutes)
+                    <input name="fetchIntervalMinutes"
+                           type="number"
+                           min="1"
+                           step="1"
+                           value="@JetPackIntervalMinutes(JetPackCurrentSettings)"
+                           required />
+                    <span class="small">How often the feed snapshot is refreshed.  Router reconciliation keeps its separate 5-minute cadence.</span>
+                </label>
+                <label class="checkbox-label">
+                    <input name="enabled" type="checkbox" checked="@JetPackCurrentSettings.Enabled" />
+                    Enabled
+                    <span class="small">When unchecked, the feed fetch and router convergence both skip their cycles.</span>
+                </label>
+                <label>
+                    Address-list name
+                    <input name="addressListName" maxlength="@JetPackFeedSettings.MaxAddressListNameLength" value="@JetPackCurrentSettings.AddressListName" required />
+                    <span class="small">RouterOS address list name owned by this sync.</span>
+                </label>
+                <button type="submit">Save JetPack allowlist settings</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Editing JetPack allowlist settings requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#jetpack" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-jetpack" />
+            </div>
+        }
+    </section>
+
     <section id="upgrades" class="indexed">
         <h2>Upgrades</h2>
         <p class="small">Request an upgrade for a Viegard deployment target.  The request is executed by a privileged host-side or satellite-side agent; the admin UI does not receive the Docker socket, Windows elevation rights, or host execution rights.</p>
@@ -580,7 +675,7 @@
     <section id="posture" class="indexed">
         <h2>Policy posture</h2>
         <p class="small">The posture flags govern what happens after a decision.  Dry-run composes router calls without applying them.  Manual approval routes every would-be action to operator review and wins over dry-run in the decision overlay.  Emergency stop refuses all action execution.</p>
-        <p class="small">Changes reach the policy engine, action dispatch, and ban reconciliation within moments through database notifications with a polling fallback.</p>
+        <p class="small">Changes reach the policy engine, action dispatch, ban reconciliation, and JetPack allowlist reconciliation within moments through database notifications with a polling fallback.</p>
 
         <h3>Status</h3>
         <dl class="detail-list">
@@ -739,6 +834,7 @@
 
 @code {
     private RetentionSettings? _settings;
+    private JetPackFeedSettings? _jetPackSettings;
     private PolicyThresholdSettings? _thresholdSettings;
     private PolicyPostureSettings? _postureSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
@@ -781,6 +877,20 @@
 
     private string LastCycleTotal => _lastCycleCounts.Values.Sum().ToString(System.Globalization.CultureInfo.InvariantCulture);
 
+    private JetPackFeedSettings JetPackCurrentSettings =>
+        _jetPackSettings ?? JetPackFeedSettings.FromOptions(JetPackOptions.Value, DateTimeOffset.UtcNow);
+
+    private string JetPackSettingsState => _jetPackSettings switch
+    {
+        null => "Not seeded",
+        { SeededAt: { } seededAt } => $"Seeded from deployment configuration at {Display.Format(seededAt)}",
+        _ => "Configured in the admin UI before automatic seeding",
+    };
+
+    private string JetPackLastChanged => _jetPackSettings is null
+        ? "Not seeded.  Showing deployment defaults; the settings row seeds on the first actions-role fetch cycle."
+        : $"{_jetPackSettings.UpdatedBy} at {Display.Format(_jetPackSettings.UpdatedAt)}";
+
     private PolicyThresholdValues ThresholdValues =>
         _thresholdSettings?.ToValues() ?? PolicyThresholdValues.FromOptions(PolicyOptions.Value);
 
@@ -809,6 +919,7 @@
     {
         await Display.InitializeAsync().ConfigureAwait(false);
         _settings = await RetentionSettingsStore.GetAsync().ConfigureAwait(false);
+        _jetPackSettings = await JetPackFeedSettingsStore.GetAsync().ConfigureAwait(false);
         _thresholdSettings = await PolicyThresholdSettingsStore.GetAsync().ConfigureAwait(false);
         _postureSettings = await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
@@ -853,6 +964,13 @@
 
     private static string FormatConfidence(double value) =>
         value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string FormatMinutes(TimeSpan value) =>
+        $"{Math.Max(1, (int)Math.Round(value.TotalMinutes, MidpointRounding.AwayFromZero)).ToString(System.Globalization.CultureInfo.InvariantCulture)} minute(s)";
+
+    private static string JetPackIntervalMinutes(JetPackFeedSettings settings) =>
+        Math.Max(1, (int)Math.Round(settings.FetchInterval.TotalMinutes, MidpointRounding.AwayFromZero))
+            .ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private string PeriodValue(RetentionTarget target) =>
         _settings?.GetDays(target)?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;

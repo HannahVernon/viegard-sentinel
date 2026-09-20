@@ -596,6 +596,46 @@ internal static class Mapping
         LastCycleCountsJson = row.LastCycleCountsJson,
     };
 
+    public static JetPackFeedSettingsRow ToRow(this JetPackFeedSettings settings) => new()
+    {
+        Id = settings.Id,
+        FeedUrl = settings.FeedUrl,
+        FetchInterval = settings.FetchInterval,
+        Enabled = settings.Enabled,
+        AddressListName = settings.AddressListName,
+        Version = settings.Version,
+        SeededAt = Utc(settings.SeededAt),
+        UpdatedAt = Utc(settings.UpdatedAt),
+        UpdatedBy = settings.UpdatedBy,
+    };
+
+    public static JetPackFeedSettings ToDomain(this JetPackFeedSettingsRow row) => new()
+    {
+        Id = row.Id,
+        FeedUrl = row.FeedUrl,
+        FetchInterval = row.FetchInterval,
+        Enabled = row.Enabled,
+        AddressListName = row.AddressListName,
+        Version = row.Version,
+        SeededAt = row.SeededAt,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+    };
+
+    public static JetPackDesiredAddressRow ToRow(this JetPackDesiredAddress address) => new()
+    {
+        Address = address.Address,
+        FirstSeenAt = Utc(address.FirstSeenAt),
+        LastSeenAt = Utc(address.LastSeenAt),
+    };
+
+    public static JetPackDesiredAddress ToDomain(this JetPackDesiredAddressRow row) => new()
+    {
+        Address = row.Address,
+        FirstSeenAt = row.FirstSeenAt,
+        LastSeenAt = row.LastSeenAt,
+    };
+
     public static PolicyThresholdSettingsRow ToRow(this PolicyThresholdSettings settings) => new()
     {
         Id = settings.Id,

@@ -119,6 +119,72 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Save_jetpack_requires_step_up_before_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        await fixture.JetPackSettings.UpsertAsync(
+            JetPackSettings(enabled: true),
+            expectedVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = JetPackForm(version: 1, enabled: false);
+
+        var result = await fixture.InvokeSaveJetPackAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.True((await fixture.JetPackSettings.GetAsync())!.Enabled);
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Save_jetpack_rejects_invalid_feed_url_without_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        fixture.Context.Request.Form = JetPackForm(version: 0, feedUrl: "not-a-url");
+
+        var result = await fixture.InvokeSaveJetPackAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains(Uri.EscapeDataString(JetPackFeedSettingsValidator.FeedUrlError), location, StringComparison.Ordinal);
+        Assert.Null(await fixture.JetPackSettings.GetAsync());
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Save_jetpack_persists_values_and_writes_config_audit()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.JetPackSettings.UpsertAsync(
+            JetPackSettings(),
+            expectedVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = JetPackForm(
+            version: 1,
+            feedUrl: "https://jetpack.com/ips-v4.json",
+            fetchIntervalMinutes: 90,
+            enabled: false,
+            addressListName: "jetpack_custom");
+
+        var result = await fixture.InvokeSaveJetPackAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("JetPack%20allowlist%20settings%20saved", location, StringComparison.Ordinal);
+        var settings = await fixture.JetPackSettings.GetAsync();
+        Assert.NotNull(settings);
+        Assert.Equal(TimeSpan.FromMinutes(90), settings!.FetchInterval);
+        Assert.False(settings.Enabled);
+        Assert.Equal("jetpack_custom", settings.AddressListName);
+        Assert.Equal(2, settings.Version);
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("JetPackFeedSettingsChanged", audit.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("\"addressListName\":\"jetpack_servers\"", audit.DetailJson, StringComparison.Ordinal);
+        Assert.Contains("\"addressListName\":\"jetpack_custom\"", audit.DetailJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Create_satellite_requires_step_up_before_mutating()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
@@ -796,6 +862,28 @@ public sealed class AdminConfigurationEndpointsTests
             ["name"] = name,
         });
 
+    private static FormCollection JetPackForm(
+        int version,
+        string feedUrl = JetPackFeedSettings.DefaultFeedUrl,
+        int fetchIntervalMinutes = 60,
+        bool enabled = true,
+        string addressListName = JetPackFeedSettings.DefaultAddressListName)
+    {
+        var values = new Dictionary<string, StringValues>(StringComparer.Ordinal)
+        {
+            ["version"] = version.ToString(CultureInfo.InvariantCulture),
+            ["feedUrl"] = feedUrl,
+            ["fetchIntervalMinutes"] = fetchIntervalMinutes.ToString(CultureInfo.InvariantCulture),
+            ["addressListName"] = addressListName,
+        };
+        if (enabled)
+        {
+            values["enabled"] = "on";
+        }
+
+        return new FormCollection(values);
+    }
+
     private static FormCollection RouterCreateForm(string name, string password) =>
         RouterForm(name, "http://router-a.example.com", MikroTikRouterTransportMode.PlainHttp, "viegard", password, null, enabled: true);
 
@@ -919,6 +1007,20 @@ public sealed class AdminConfigurationEndpointsTests
         UpdatedBy = "test",
     };
 
+    private static JetPackFeedSettings JetPackSettings(
+        string feedUrl = JetPackFeedSettings.DefaultFeedUrl,
+        TimeSpan? fetchInterval = null,
+        bool enabled = true,
+        string addressListName = JetPackFeedSettings.DefaultAddressListName) => new()
+    {
+        FeedUrl = feedUrl,
+        FetchInterval = fetchInterval ?? JetPackFeedSettings.DefaultFetchInterval,
+        Enabled = enabled,
+        AddressListName = addressListName,
+        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedBy = "test",
+    };
+
     private static PolicyPostureSettings PostureSettings(bool dryRun = true, bool manualApprovalMode = true, bool emergencyStop = false) => new()
     {
         DryRun = dryRun,
@@ -980,6 +1082,7 @@ public sealed class AdminConfigurationEndpointsTests
     private sealed record EndpointFixture(
         DefaultHttpContext Context,
         InMemoryRetentionSettingsStore RetentionSettings,
+        InMemoryJetPackFeedSettingsStore JetPackSettings,
         InMemoryPolicyThresholdSettingsStore PolicyThresholds,
         InMemoryPolicyPostureSettingsStore PolicyPosture,
         RecordingAuditLedger AuditLedger,
@@ -1046,6 +1149,7 @@ public sealed class AdminConfigurationEndpointsTests
             var routerProtector = new PlainRouterCredentialProtector();
             var hostUpgrades = new InMemoryHostUpgradeCommandStore();
             var ingestionFilters = new InMemoryIngestionFilterStore();
+            var jetPackSettings = new InMemoryJetPackFeedSettingsStore();
             var policyThresholds = new InMemoryPolicyThresholdSettingsStore();
             var policyPosture = new InMemoryPolicyPostureSettingsStore();
             var satelliteCredentialCookie = new SatelliteRoleCredentialCookie(new NoopDataProtectionProvider());
@@ -1070,6 +1174,7 @@ public sealed class AdminConfigurationEndpointsTests
             return new EndpointFixture(
                 context,
                 new InMemoryRetentionSettingsStore(),
+                jetPackSettings,
                 policyThresholds,
                 policyPosture,
                 auditLedger,
@@ -1094,6 +1199,16 @@ public sealed class AdminConfigurationEndpointsTests
                 Context,
                 Antiforgery,
                 RetentionSettings,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeSaveJetPackAsync() =>
+            AdminConfigurationEndpoints.SaveJetPackAsync(
+                Context,
+                Antiforgery,
+                JetPackSettings,
                 Users,
                 Sessions,
                 AuthAuditor,

@@ -11,6 +11,7 @@ COPY src/Viegard.Sources.Imap/Viegard.Sources.Imap.csproj src/Viegard.Sources.Im
 COPY src/Viegard.Sources.Syslog/Viegard.Sources.Syslog.csproj src/Viegard.Sources.Syslog/
 COPY src/Viegard.Sources.MDaemonLogs/Viegard.Sources.MDaemonLogs.csproj src/Viegard.Sources.MDaemonLogs/
 COPY src/Viegard.Actions.MikroTik/Viegard.Actions.MikroTik.csproj src/Viegard.Actions.MikroTik/
+COPY src/Viegard.Inference.Ollama/Viegard.Inference.Ollama.csproj src/Viegard.Inference.Ollama/
 COPY src/Viegard.PipelineHost/Viegard.PipelineHost.csproj src/Viegard.PipelineHost/
 COPY src/Viegard.AdminApi/Viegard.AdminApi.csproj src/Viegard.AdminApi/
 RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \

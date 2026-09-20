@@ -53,6 +53,10 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<RetentionSettingsRow> RetentionSettings => Set<RetentionSettingsRow>();
 
+    public DbSet<JetPackFeedSettingsRow> JetPackFeedSettings => Set<JetPackFeedSettingsRow>();
+
+    public DbSet<JetPackDesiredAddressRow> JetPackDesiredAddresses => Set<JetPackDesiredAddressRow>();
+
     public DbSet<PolicyThresholdSettingsRow> PolicyThresholdSettings => Set<PolicyThresholdSettingsRow>();
 
     public DbSet<PolicyPostureSettingsRow> PolicyPostureSettings => Set<PolicyPostureSettingsRow>();
@@ -280,6 +284,26 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Retention.RetentionSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<JetPackFeedSettingsRow>(entity =>
+        {
+            entity.ToTable("jetpack_feed_settings", table =>
+                table.HasCheckConstraint("CK_jetpack_feed_settings_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.FeedUrl).HasMaxLength(Viegard.Application.Configuration.JetPackFeedSettings.MaxFeedUrlLength);
+            entity.Property(e => e.AddressListName).HasMaxLength(Viegard.Application.Configuration.JetPackFeedSettings.MaxAddressListNameLength);
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.JetPackFeedSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<JetPackDesiredAddressRow>(entity =>
+        {
+            entity.ToTable("jetpack_desired_addresses");
+            entity.HasKey(e => e.Address);
+            entity.Property(e => e.Address).HasColumnType("text");
+            entity.Property(e => e.FirstSeenAt).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.LastSeenAt).HasColumnType("timestamp with time zone");
         });
 
         modelBuilder.Entity<PolicyThresholdSettingsRow>(entity =>

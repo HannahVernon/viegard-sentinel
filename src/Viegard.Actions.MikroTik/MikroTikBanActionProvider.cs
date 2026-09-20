@@ -777,36 +777,17 @@ public sealed class MikroTikBanActionProvider(
             Json);
 
     private static string AddressListUrl(MikroTikRouter router) =>
-        $"{router.BaseUrl.TrimEnd('/')}/rest/ip/firewall/address-list";
+        MikroTikAddressListClient.AddressListUrl(router);
 
     private static string AddressListQueryUrl(MikroTikRouter router, string ip) =>
-        $"{AddressListUrl(router)}?list={Uri.EscapeDataString(AddressListName)}&address={Uri.EscapeDataString(ip)}";
+        $"{MikroTikAddressListClient.AddressListQueryUrl(router, AddressListName)}&address={Uri.EscapeDataString(ip)}";
 
     private static string AddressListEntryUrl(MikroTikRouter router, string id) =>
-        // RouterOS entry ids ('*' + hex) must appear verbatim in the path:
-        // the router does not decode a percent-encoded asterisk (%2A) when
-        // matching ids and answers 400.  Ids are validated by
-        // IsValidEntryId before they reach this URL.
-        $"{AddressListUrl(router)}/{id}";
+        MikroTikAddressListClient.AddressListEntryUrl(router, id);
 
     /// <summary>RouterOS .id values are an asterisk followed by hex digits.</summary>
-    public static bool IsValidEntryId([NotNullWhen(true)] string? id)
-    {
-        if (string.IsNullOrEmpty(id) || id[0] != '*' || id.Length < 2)
-        {
-            return false;
-        }
-
-        for (var index = 1; index < id.Length; index++)
-        {
-            if (!Uri.IsHexDigit(id[index]))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    public static bool IsValidEntryId([NotNullWhen(true)] string? id) =>
+        MikroTikAddressListClient.IsValidEntryId(id);
 
     private static (List<string> Ids, int ReturnedEntries) ExtractRemovableEntryIds(string json, string targetIp)
     {

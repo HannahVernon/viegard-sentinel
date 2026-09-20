@@ -390,6 +390,36 @@ public sealed class RetentionSettingsRow
     public string? LastCycleCountsJson { get; set; }
 }
 
+public sealed class JetPackFeedSettingsRow
+{
+    public int Id { get; set; }
+
+    public string FeedUrl { get; set; } = string.Empty;
+
+    public TimeSpan FetchInterval { get; set; }
+
+    public bool Enabled { get; set; }
+
+    public string AddressListName { get; set; } = string.Empty;
+
+    public int Version { get; set; }
+
+    public DateTimeOffset? SeededAt { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+}
+
+public sealed class JetPackDesiredAddressRow
+{
+    public string Address { get; set; } = string.Empty;
+
+    public DateTimeOffset FirstSeenAt { get; set; }
+
+    public DateTimeOffset LastSeenAt { get; set; }
+}
+
 public sealed class PolicyThresholdSettingsRow
 {
     public int Id { get; set; }

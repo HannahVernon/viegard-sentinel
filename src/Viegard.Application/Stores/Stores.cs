@@ -31,6 +31,10 @@ public interface IEventStore
 
     ValueTask<NormalizedEvent?> GetAsync(Guid id, CancellationToken cancellationToken = default);
 
+    ValueTask<IReadOnlyDictionary<Guid, NormalizedEvent>> GetManyAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default);
+
     ValueTask<KeysetPage<NormalizedEvent>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
@@ -52,6 +56,10 @@ public interface IIncidentStore
     ValueTask UpsertAsync(Incident incident, CancellationToken cancellationToken = default);
 
     ValueTask<Incident?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+
+    ValueTask<IReadOnlyDictionary<Guid, Incident>> GetManyAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default);
 
     ValueTask<Incident?> FindOpenByCorrelationKeyAsync(string correlationKey, CancellationToken cancellationToken = default);
 
@@ -78,6 +86,10 @@ public interface IClassificationStore
     ValueTask AddAsync(Classification classification, CancellationToken cancellationToken = default);
 
     ValueTask<Classification?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+
+    ValueTask<IReadOnlyDictionary<Guid, Classification>> GetManyAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default);
 
     ValueTask<IReadOnlyList<Classification>> ListForSubjectAsync(
         ClassificationSubjectKind subjectKind,

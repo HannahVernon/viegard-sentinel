@@ -1271,6 +1271,58 @@ th[aria-sort="descending"] button.client-sort::after {
     box-sizing: border-box;
 }
 
+.decision-inline-review {
+    margin-top: 0.45rem;
+}
+
+.decision-inline-actions {
+    display: flex;
+    gap: 0.45rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.decision-inline-form,
+.decision-inline-form button,
+.decision-inline-review .step-up-trigger {
+    margin-top: 0;
+}
+
+.decision-inline-review .step-up-fallback {
+    margin-left: 0;
+}
+
+.rationale-toggle {
+    width: 2rem;
+    height: 2rem;
+    margin-top: 0;
+    padding: 0;
+    background: var(--bg-raised);
+    color: var(--ink);
+    border: 1px solid var(--panel-border);
+    border-radius: 0.4rem;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.rationale-toggle:hover {
+    border-color: var(--accent);
+    color: var(--accent-strong);
+    background: var(--bg-raised);
+}
+
+.rationale-detail-row td {
+    white-space: normal;
+}
+
+.rationale-detail-text {
+    margin-top: 0.45rem;
+    color: var(--ink);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
 td code {
     color: var(--ink);
 }

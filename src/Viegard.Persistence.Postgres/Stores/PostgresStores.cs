@@ -101,6 +101,32 @@ public sealed class PostgresEventStore(IDbContextFactory<ViegardDbContext> facto
         return row.ToDomain(sourceKey, sourceType ?? "unknown");
     }
 
+    public async ValueTask<IReadOnlyDictionary<Guid, NormalizedEvent>> GetManyAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        if (ids.Count == 0)
+        {
+            return new Dictionary<Guid, NormalizedEvent>();
+        }
+
+        var distinctIds = ids.Distinct().ToArray();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.Events.AsNoTracking()
+            .Where(r => distinctIds.Contains(r.Id))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var items = new Dictionary<Guid, NormalizedEvent>(rows.Count);
+        foreach (var row in rows)
+        {
+            var (sourceKey, sourceType) = await resolver.GetSourceAsync(row.SourceId, cancellationToken).ConfigureAwait(false);
+            items[row.Id] = row.ToDomain(sourceKey, sourceType ?? "unknown");
+        }
+
+        return items;
+    }
+
     public async ValueTask<KeysetPage<NormalizedEvent>> ListPageAsync(
         Guid? beforeId,
         int pageSize,
@@ -275,6 +301,25 @@ public sealed class PostgresIncidentStore(IDbContextFactory<ViegardDbContext> fa
         await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         var row = await db.Incidents.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, cancellationToken).ConfigureAwait(false);
         return row?.ToDomain();
+    }
+
+    public async ValueTask<IReadOnlyDictionary<Guid, Incident>> GetManyAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        if (ids.Count == 0)
+        {
+            return new Dictionary<Guid, Incident>();
+        }
+
+        var distinctIds = ids.Distinct().ToArray();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.Incidents.AsNoTracking()
+            .Where(r => distinctIds.Contains(r.Id))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return rows.ToDictionary(row => row.Id, row => row.ToDomain());
     }
 
     public async ValueTask<Incident?> FindOpenByCorrelationKeyAsync(string correlationKey, CancellationToken cancellationToken = default)
@@ -483,6 +528,32 @@ public sealed class PostgresClassificationStore(IDbContextFactory<ViegardDbConte
 
         var classifierKey = await resolver.GetClassifierAsync(row.ClassifierId, cancellationToken).ConfigureAwait(false);
         return row.ToDomain(classifierKey);
+    }
+
+    public async ValueTask<IReadOnlyDictionary<Guid, Classification>> GetManyAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        if (ids.Count == 0)
+        {
+            return new Dictionary<Guid, Classification>();
+        }
+
+        var distinctIds = ids.Distinct().ToArray();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.Classifications.AsNoTracking()
+            .Where(r => distinctIds.Contains(r.Id))
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var items = new Dictionary<Guid, Classification>(rows.Count);
+        foreach (var row in rows)
+        {
+            var classifierKey = await resolver.GetClassifierAsync(row.ClassifierId, cancellationToken).ConfigureAwait(false);
+            items[row.Id] = row.ToDomain(classifierKey);
+        }
+
+        return items;
     }
 
     public async ValueTask<IReadOnlyList<Classification>> ListForSubjectAsync(

@@ -189,8 +189,34 @@
                         </td>
                         <td>@ClassificationSummary(row.Classification)</td>
                         <td>@AdminText.OneLine(row.TriggeredBy, TriggeredByListMaxChars)</td>
-                        <td>@AdminText.OneLine(row.Decision.Rationale, RationaleListMaxChars)</td>
+                        <td>
+                            @if (HasRationale(row.Decision))
+                            {
+                                <button
+                                    type="button"
+                                    class="rationale-toggle"
+                                    data-rationale-toggle="@row.Decision.Id.ToString("N")"
+                                    aria-expanded="false"
+                                    aria-controls="@($"decision-rationale-{row.Decision.Id:N}")"
+                                    aria-label="Show rationale">
+                                    +
+                                </button>
+                            }
+                            else
+                            {
+                                <span class="small">-</span>
+                            }
+                        </td>
                     </tr>
+                    @if (HasRationale(row.Decision))
+                    {
+                        <tr id="@($"decision-rationale-{row.Decision.Id:N}")" class="details-row rationale-detail-row" data-rationale-detail="@row.Decision.Id.ToString("N")" hidden>
+                            <td colspan="8">
+                                <strong>Rationale</strong>
+                                <div class="rationale-detail-text">@row.Decision.Rationale</div>
+                            </td>
+                        </tr>
+                    }
                 }
             </tbody>
         </table>
@@ -223,7 +249,6 @@
 
     private const int DefaultBulkSeverity = 3;
     private const int TriggeredByListMaxChars = 96;
-    private const int RationaleListMaxChars = 120;
 
     private int _take = KeysetPagination.DefaultPageSize;
 
@@ -420,6 +445,9 @@
             _ => "badge badge-amber",
         };
     }
+
+    private static bool HasRationale(Decision decision) =>
+        !string.IsNullOrWhiteSpace(decision.Rationale);
 
     private async Task<IReadOnlyList<DecisionRow>> BuildRowsAsync(IReadOnlyList<Decision> decisions)
     {

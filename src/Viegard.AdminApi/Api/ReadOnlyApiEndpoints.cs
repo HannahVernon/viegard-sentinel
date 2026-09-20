@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Errors;
 using Viegard.Application.Audit;
+using Viegard.Application.Configuration;
 using Viegard.Application.Stores;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Decisions;
@@ -37,6 +38,10 @@ public static class ReadOnlyApiEndpoints
         api.MapGet("/decisions", ListDecisionsAsync);
         api.MapGet("/decisions/{id:guid}", GetDecisionAsync);
         api.MapGet("/classifications/{id:guid}", GetClassificationAsync);
+        api.MapGet("/advisor/summary", GetAdvisorSummaryAsync);
+        api.MapGet("/advisor/consults", ListAdvisorConsultsAsync);
+        api.MapGet("/advisor/consults/by-classification/{id:guid}", GetAdvisorConsultByClassificationAsync);
+        api.MapGet("/advisor/consults/{id:guid}", GetAdvisorConsultAsync);
         api.MapGet("/audit", ListAuditAsync);
         api.MapGet("/bans", ListBansAsync);
     }
@@ -152,6 +157,94 @@ public static class ReadOnlyApiEndpoints
         HttpContext context)
     {
         var found = await classifications.GetAsync(id, context.RequestAborted).ConfigureAwait(false);
+        return found is null ? NotFound() : Results.Json(found, Json);
+    }
+
+    internal static async Task<IResult> GetAdvisorSummaryAsync(
+        HttpContext context,
+        ILocalModelAdvisorConsultStore consults,
+        ILocalModelAdvisorSettingsStore settingsStore)
+    {
+        var settings = await settingsStore.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        var now = DateTimeOffset.UtcNow;
+        var definitions = new (string Label, DateTimeOffset Since)[]
+        {
+            ("1h", now.AddHours(-1)),
+            ("24h", now.AddDays(-1)),
+            ("7d", now.AddDays(-7)),
+            ("all", DateTimeOffset.UnixEpoch),
+        };
+
+        var windows = new List<object>(definitions.Length);
+        foreach (var (label, since) in definitions)
+        {
+            var counts = await consults.GetOutcomeCountsAsync(since, context.RequestAborted).ConfigureAwait(false);
+            var latency = await consults.GetLatencyStatsAsync(since, context.RequestAborted).ConfigureAwait(false);
+            var byOutcome = counts.ToDictionary(c => c.Outcome, c => c.Count);
+            long Count(AdvisorConsultOutcome outcome) => byOutcome.GetValueOrDefault(outcome);
+            var escalated = Count(AdvisorConsultOutcome.Escalated);
+            var noChange = Count(AdvisorConsultOutcome.NoChange);
+            var considered = escalated + noChange;
+            windows.Add(new
+            {
+                window = label,
+                since,
+                escalated,
+                noChange,
+                providerFailed = Count(AdvisorConsultOutcome.ProviderFailed),
+                invalidOutput = Count(AdvisorConsultOutcome.InvalidOutput),
+                skippedOutOfBand = Count(AdvisorConsultOutcome.SkippedOutOfBand),
+                total = byOutcome.Values.Sum(),
+                failures = Count(AdvisorConsultOutcome.ProviderFailed) + Count(AdvisorConsultOutcome.InvalidOutput),
+                escalationRate = considered == 0 ? (double?)null : escalated / (double)considered,
+                latency = new { count = latency.Count, p50Ms = latency.P50, p95Ms = latency.P95 },
+            });
+        }
+
+        var configuration = new
+        {
+            enabled = settings?.Enabled ?? false,
+            endpoint = settings?.Endpoint ?? LocalModelAdvisorSettings.DefaultEndpoint,
+            model = settings?.Model ?? LocalModelAdvisorSettings.DefaultModel,
+        };
+        return Results.Json(new { configuration, windows }, Json);
+    }
+
+    internal static async Task<IResult> ListAdvisorConsultsAsync(
+        HttpContext context,
+        ILocalModelAdvisorConsultStore consults)
+    {
+        var request = context.Request.Query;
+        var take = int.TryParse(request["take"], out var parsedTake)
+            ? Math.Clamp(parsedTake, 1, MaxTake)
+            : DefaultTake;
+        Guid? cursor = Guid.TryParse(request["cursor"], out var parsedCursor) ? parsedCursor : null;
+        var outcome = ListFilterParser.ParseEnum<AdvisorConsultOutcome>(request["outcome"]);
+        var page = await consults.ListPageAsync(cursor, take, outcome, context.RequestAborted).ConfigureAwait(false);
+        return Results.Json(new
+        {
+            items = page.Items,
+            nextCursor = page.NextCursor,
+            totalCount = page.TotalCount,
+            preceding = page.Preceding,
+        }, Json);
+    }
+
+    internal static async Task<IResult> GetAdvisorConsultAsync(
+        Guid id,
+        ILocalModelAdvisorConsultStore consults,
+        HttpContext context)
+    {
+        var found = await consults.GetByIdAsync(id, context.RequestAborted).ConfigureAwait(false);
+        return found is null ? NotFound() : Results.Json(found, Json);
+    }
+
+    internal static async Task<IResult> GetAdvisorConsultByClassificationAsync(
+        Guid id,
+        ILocalModelAdvisorConsultStore consults,
+        HttpContext context)
+    {
+        var found = await consults.GetByClassificationIdAsync(id, context.RequestAborted).ConfigureAwait(false);
         return found is null ? NotFound() : Results.Json(found, Json);
     }
 

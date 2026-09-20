@@ -41,6 +41,38 @@ public sealed class LocalModelAdvisorConsultStoreTests
         Assert.Equal(4, (await store.GetRecentAsync(10)).Count);
     }
 
+    [Fact]
+    public async Task In_memory_store_pages_and_filters_by_outcome_and_gets_by_id()
+    {
+        var store = new InMemoryLocalModelAdvisorConsultStore();
+        var now = new DateTimeOffset(2026, 9, 20, 7, 0, 0, TimeSpan.Zero);
+        var escalated = Record(ViegardId.New(), AdvisorConsultOutcome.Escalated, now.AddMinutes(-1), 100, finalSeverity: 8);
+        await store.AppendAsync(escalated);
+        await store.AppendAsync(Record(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-2), 200));
+        await store.AppendAsync(Record(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-3), 300));
+        await store.AppendAsync(Record(ViegardId.New(), AdvisorConsultOutcome.ProviderFailed, now.AddMinutes(-4), 400, failureKind: "Timeout"));
+
+        var firstPage = await store.ListPageAsync(beforeId: null, pageSize: 2, outcome: null);
+        Assert.Equal(2, firstPage.Items.Count);
+        Assert.Equal(4, firstPage.TotalCount);
+        Assert.NotNull(firstPage.NextCursor);
+
+        var secondPage = await store.ListPageAsync(firstPage.NextCursor, pageSize: 2, outcome: null);
+        Assert.Equal(2, secondPage.Items.Count);
+        Assert.Null(secondPage.NextCursor);
+        Assert.Equal(2, secondPage.Preceding);
+
+        var noChangeOnly = await store.ListPageAsync(beforeId: null, pageSize: 10, outcome: AdvisorConsultOutcome.NoChange);
+        Assert.Equal(2, noChangeOnly.Items.Count);
+        Assert.All(noChangeOnly.Items, r => Assert.Equal(AdvisorConsultOutcome.NoChange, r.Outcome));
+        Assert.Equal(2, noChangeOnly.TotalCount);
+
+        var byId = await store.GetByIdAsync(escalated.Id);
+        Assert.NotNull(byId);
+        Assert.Equal(AdvisorConsultOutcome.Escalated, byId!.Outcome);
+        Assert.Null(await store.GetByIdAsync(ViegardId.New()));
+    }
+
     private static AdvisorConsultRecord Record(
         Guid classificationId,
         AdvisorConsultOutcome outcome,

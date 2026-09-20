@@ -1,3 +1,4 @@
+using Viegard.Application.Stores;
 using Viegard.Domain;
 
 namespace Viegard.Application.Configuration;
@@ -48,7 +49,15 @@ public interface ILocalModelAdvisorConsultStore
 {
     Task AppendAsync(AdvisorConsultRecord record, CancellationToken cancellationToken = default);
 
+    Task<AdvisorConsultRecord?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
     Task<AdvisorConsultRecord?> GetByClassificationIdAsync(Guid classificationId, CancellationToken cancellationToken = default);
+
+    Task<KeysetPage<AdvisorConsultRecord>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        AdvisorConsultOutcome? outcome,
+        CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<AdvisorOutcomeCount>> GetOutcomeCountsAsync(DateTimeOffset since, CancellationToken cancellationToken = default);
 

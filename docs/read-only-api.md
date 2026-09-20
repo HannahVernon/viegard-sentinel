@@ -30,6 +30,10 @@ Path | Returns
 `GET /api/v1/decisions` | Policy decisions
 `GET /api/v1/decisions/{id}` | One decision with its classification embedded
 `GET /api/v1/classifications/{id}` | One classification
+`GET /api/v1/advisor/summary` | Local-model advisor configuration and outcome counts, escalation rate, failures, and latency over 1h/24h/7d/all-time windows
+`GET /api/v1/advisor/consults` | Local-model advisor consult records (append-only observability rows)
+`GET /api/v1/advisor/consults/{id}` | One advisor consult record
+`GET /api/v1/advisor/consults/by-classification/{id}` | The advisor consult recorded for a classification, if any
 `GET /api/v1/audit` | Audit ledger records
 `GET /api/v1/bans` | Active bans and the 50 most recent ban actions
 `GET /status/queues` | Queue and instance health (display-formatted)
@@ -49,6 +53,7 @@ Parameter | Meaning
 `minSeverity`, `maxSeverity` | Decisions only: classification severity bounds (1-10)
 `unreviewed` | Decisions only: `1` restricts to unreviewed decisions
 `stage` | Audit only: pipeline stage name
+`outcome` | Advisor consults also accept an outcome name (`Escalated`, `NoChange`, `ProviderFailed`, `InvalidOutput`, `SkippedOutOfBand`)
 
 List responses share one shape:
 

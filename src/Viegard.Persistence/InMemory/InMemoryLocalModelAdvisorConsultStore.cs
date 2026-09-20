@@ -1,4 +1,5 @@
 using Viegard.Application.Configuration;
+using Viegard.Application.Stores;
 
 namespace Viegard.Persistence.InMemory;
 
@@ -18,6 +19,14 @@ public sealed class InMemoryLocalModelAdvisorConsultStore : ILocalModelAdvisorCo
         return Task.CompletedTask;
     }
 
+    public Task<AdvisorConsultRecord?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            return Task.FromResult(_records.FirstOrDefault(r => r.Id == id));
+        }
+    }
+
     public Task<AdvisorConsultRecord?> GetByClassificationIdAsync(Guid classificationId, CancellationToken cancellationToken = default)
     {
         lock (_sync)
@@ -26,6 +35,24 @@ public sealed class InMemoryLocalModelAdvisorConsultStore : ILocalModelAdvisorCo
                 .Where(r => r.ClassificationId == classificationId)
                 .OrderByDescending(r => r.CreatedAt)
                 .FirstOrDefault());
+        }
+    }
+
+    public Task<KeysetPage<AdvisorConsultRecord>> ListPageAsync(
+        Guid? beforeId,
+        int pageSize,
+        AdvisorConsultOutcome? outcome,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            IEnumerable<AdvisorConsultRecord> source = _records;
+            if (outcome is not null)
+            {
+                source = source.Where(r => r.Outcome == outcome.Value);
+            }
+
+            return Task.FromResult(InMemoryPaging.Page(source, beforeId, pageSize, r => r.Id));
         }
     }
 

@@ -33,9 +33,11 @@ public sealed class OllamaInferenceProvider(
         try
         {
             var prompt = promptAssembler.Assemble(request.Template ?? LocalModelAdvisorPrompt.Template, request.Variables);
+            var endpoint = request.Endpoint ?? settings.Endpoint;
+            var model = request.Model ?? settings.Model;
             var payload = new
             {
-                model = settings.Model,
+                model,
                 messages = new[]
                 {
                     new { role = "system", content = prompt },
@@ -54,7 +56,7 @@ public sealed class OllamaInferenceProvider(
 
             using var content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json");
             using var response = await httpClient
-                .PostAsync(new Uri(new Uri(settings.Endpoint), "/api/chat"), content, timeoutCts.Token)
+                .PostAsync(new Uri(new Uri(endpoint), "/api/chat"), content, timeoutCts.Token)
                 .ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
@@ -89,7 +91,7 @@ public sealed class OllamaInferenceProvider(
             var modelId = document.RootElement.TryGetProperty("model", out var modelElement)
                 && modelElement.ValueKind == JsonValueKind.String
                     ? modelElement.GetString()
-                    : settings.Model;
+                    : model;
             stopwatch.Stop();
             return InferenceResult.Success(rawOutput, modelId, stopwatch.Elapsed);
         }

@@ -326,6 +326,10 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.Model).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxModelLength);
             entity.Property(e => e.KeepAlive).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxKeepAliveLength);
             entity.Property(e => e.ResponseCacheTtlHours).HasDefaultValue(72);
+            entity.Property(e => e.SecondModelEndpoint)
+                .HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxEndpointLength)
+                .HasDefaultValue(Viegard.Application.Configuration.LocalModelAdvisorSettings.DefaultSecondModelEndpoint);
+            entity.Property(e => e.SecondModel).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxModelLength);
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxUpdatedByLength);
         });
 
@@ -377,6 +381,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.Category).HasColumnType("text");
             entity.Property(e => e.FailureKind).HasColumnType("text");
             entity.Property(e => e.ModelId).HasColumnType("text");
+            entity.Property(e => e.EnsembleDetailJson).HasColumnType("jsonb");
         });
 
         modelBuilder.Entity<PolicyThresholdSettingsRow>(entity =>
@@ -519,6 +524,10 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
         modelBuilder.Entity<MikroTikRouterRow>()
             .Property(e => e.PinnedCertificateSha256)
             .HasColumnName("pinned_cert_sha256");
+
+        modelBuilder.Entity<LocalModelAdvisorConsultRow>()
+            .Property(e => e.EnsembleDetailJson)
+            .HasColumnName("ensemble_detail");
     }
 
     private static string ToSnakeCase(string name) =>

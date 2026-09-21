@@ -62,7 +62,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         // 180d window) age into purge eligibility ~24h after the run that
         // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_category_bands, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -1295,6 +1295,56 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Local_model_advisor_settings_store_round_trips_ensemble_fields()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresLocalModelAdvisorSettingsStore(factory, _dataSource!);
+        var now = new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero);
+
+        var seeded = await store.SeedIfMissingAsync(
+            new LocalModelAdvisorOptions
+            {
+                Enabled = true,
+                Endpoint = "http://127.0.0.1:11434/",
+                Model = "qwen-test:latest",
+                Temperature = 0.1,
+                TimeoutMs = 9000,
+                KeepAlive = "10m",
+                InvokeConfidenceMin = 0.4,
+                InvokeConfidenceMax = 0.8,
+                MaxSeverityDelta = 2,
+                MaxConfidenceDelta = 0.15,
+                ResponseCacheEnabled = true,
+                ResponseCacheTtlHours = 48,
+                EnsembleEnabled = true,
+                SecondModelEndpoint = "http://127.0.0.2:11434/",
+                SecondModel = "qwen-second:latest",
+            },
+            now);
+
+        Assert.NotNull(seeded);
+        Assert.True(seeded!.EnsembleEnabled);
+        Assert.Equal("http://127.0.0.2:11434", seeded.SecondModelEndpoint);
+        Assert.Equal("qwen-second:latest", seeded.SecondModel);
+
+        var updated = await store.UpsertAsync(
+            seeded with
+            {
+                EnsembleEnabled = false,
+                SecondModelEndpoint = "",
+                SecondModel = "",
+            },
+            expectedVersion: seeded.Version,
+            updatedBy: "operator",
+            updatedAt: now.AddMinutes(1));
+
+        Assert.True(updated.Succeeded);
+        Assert.False(updated.Settings!.EnsembleEnabled);
+        Assert.Equal(LocalModelAdvisorSettings.DefaultSecondModelEndpoint, updated.Settings.SecondModelEndpoint);
+        Assert.Equal(string.Empty, updated.Settings.SecondModel);
+    }
+
+    [PostgresFact]
     public async Task Local_model_advisor_category_band_store_round_trips_and_detects_conflicts()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -1425,6 +1475,9 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.NotNull(byId);
         Assert.Equal(escalated.Id, byId!.Id);
         Assert.True(byId.ServedFromCache);
+        Assert.NotNull(byId.EnsembleDetail);
+        Assert.Equal("average", byId.EnsembleDetail!.Rule);
+        Assert.Equal(2, byId.EnsembleDetail.Models.Count);
         Assert.Null(await store.GetByIdAsync(ViegardId.New()));
 
         var firstPage = await store.ListPageAsync(beforeId: null, pageSize: 2, outcome: null);
@@ -2320,6 +2373,14 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             FailureKind = failureKind,
             ModelId = "qwen-test:latest",
             ServedFromCache = servedFromCache,
+            EnsembleDetail = servedFromCache
+                ? new AdvisorEnsembleDetail(
+                    "average",
+                    [
+                        new AdvisorEnsembleModelOutput("qwen-primary:latest", "http://primary.example", 7, 0.7, true),
+                        new AdvisorEnsembleModelOutput("qwen-second:latest", "http://second.example", 9, 0.9, true),
+                    ])
+                : null,
             CreatedAt = createdAt,
         };
 

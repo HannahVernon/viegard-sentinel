@@ -57,6 +57,9 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 max_confidence_delta,
                 response_cache_enabled,
                 response_cache_ttl_hours,
+                ensemble_enabled,
+                second_model_endpoint,
+                second_model,
                 version,
                 seeded_at,
                 updated_at,
@@ -76,6 +79,9 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 {seed.MaxConfidenceDelta},
                 {seed.ResponseCacheEnabled},
                 {seed.ResponseCacheTtlHours},
+                {seed.EnsembleEnabled},
+                {seed.SecondModelEndpoint},
+                {seed.SecondModel},
                 {seed.Version},
                 {seed.SeededAt},
                 {seed.UpdatedAt},
@@ -152,6 +158,9 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 .SetProperty(r => r.MaxConfidenceDelta, normalized.MaxConfidenceDelta)
                 .SetProperty(r => r.ResponseCacheEnabled, normalized.ResponseCacheEnabled)
                 .SetProperty(r => r.ResponseCacheTtlHours, normalized.ResponseCacheTtlHours)
+                .SetProperty(r => r.EnsembleEnabled, normalized.EnsembleEnabled)
+                .SetProperty(r => r.SecondModelEndpoint, normalized.SecondModelEndpoint)
+                .SetProperty(r => r.SecondModel, normalized.SecondModel)
                 .SetProperty(r => r.Version, expectedVersion + 1)
                 .SetProperty(r => r.UpdatedAt, utcUpdatedAt)
                 .SetProperty(r => r.UpdatedBy, normalizedUpdatedBy),
@@ -233,11 +242,19 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
         _ = LocalModelAdvisorSettingsValidator.TryNormalizeKeepAlive(settings.KeepAlive, out var keepAlive, out var keepAliveError)
             ? true
             : throw new InvalidOperationException(keepAliveError);
+        _ = LocalModelAdvisorSettingsValidator.TryNormalizeSecondModelEndpoint(settings.SecondModelEndpoint, settings.EnsembleEnabled, out var secondModelEndpoint, out var secondModelEndpointError)
+            ? true
+            : throw new InvalidOperationException(secondModelEndpointError);
+        _ = LocalModelAdvisorSettingsValidator.TryNormalizeSecondModel(settings.SecondModel, settings.EnsembleEnabled, out var secondModel, out var secondModelError)
+            ? true
+            : throw new InvalidOperationException(secondModelError);
         return settings with
         {
             Endpoint = endpoint,
             Model = model,
             KeepAlive = keepAlive,
+            SecondModelEndpoint = secondModelEndpoint,
+            SecondModel = secondModel,
         };
     }
 }

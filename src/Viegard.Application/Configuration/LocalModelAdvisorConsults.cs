@@ -40,8 +40,19 @@ public sealed record AdvisorConsultRecord
 
     public bool ServedFromCache { get; init; }
 
+    public AdvisorEnsembleDetail? EnsembleDetail { get; init; }
+
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
+
+public sealed record AdvisorEnsembleDetail(string Rule, IReadOnlyList<AdvisorEnsembleModelOutput> Models);
+
+public sealed record AdvisorEnsembleModelOutput(
+    string ModelId,
+    string Endpoint,
+    int? Severity,
+    double? Confidence,
+    bool Valid);
 
 public sealed record AdvisorOutcomeCount(AdvisorConsultOutcome Outcome, long Count);
 

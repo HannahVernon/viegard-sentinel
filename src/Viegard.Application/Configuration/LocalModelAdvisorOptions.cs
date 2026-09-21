@@ -30,6 +30,12 @@ public sealed class LocalModelAdvisorOptions
     public bool ResponseCacheEnabled { get; set; }
 
     public int ResponseCacheTtlHours { get; set; } = 72;
+
+    public bool EnsembleEnabled { get; set; }
+
+    public string SecondModelEndpoint { get; set; } = LocalModelAdvisorSettings.DefaultSecondModelEndpoint;
+
+    public string SecondModel { get; set; } = string.Empty;
 }
 
 public sealed class LocalModelAdvisorOptionsValidator : IValidateOptions<LocalModelAdvisorOptions>

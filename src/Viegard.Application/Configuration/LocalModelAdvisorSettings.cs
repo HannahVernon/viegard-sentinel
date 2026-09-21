@@ -15,6 +15,7 @@ public sealed record LocalModelAdvisorSettings
     public const int MaxUpdatedByLength = 128;
     public const string DefaultEndpoint = "http://127.0.0.1:11434";
     public const string DefaultModel = "qwen2.5:7b-instruct";
+    public const string DefaultSecondModelEndpoint = DefaultEndpoint;
     public const string DefaultKeepAlive = "5m";
     public const string SystemSeedActor = "system:local-model-advisor-seed";
 
@@ -44,6 +45,12 @@ public sealed record LocalModelAdvisorSettings
 
     public int ResponseCacheTtlHours { get; init; } = 72;
 
+    public bool EnsembleEnabled { get; init; }
+
+    public string SecondModelEndpoint { get; init; } = DefaultSecondModelEndpoint;
+
+    public string SecondModel { get; init; } = string.Empty;
+
     public int Version { get; init; }
 
     public DateTimeOffset? SeededAt { get; init; }
@@ -71,6 +78,9 @@ public sealed record LocalModelAdvisorSettings
             MaxConfidenceDelta = options.MaxConfidenceDelta,
             ResponseCacheEnabled = options.ResponseCacheEnabled,
             ResponseCacheTtlHours = options.ResponseCacheTtlHours,
+            EnsembleEnabled = options.EnsembleEnabled,
+            SecondModelEndpoint = options.SecondModelEndpoint,
+            SecondModel = options.SecondModel,
             Version = 1,
             SeededAt = utc,
             UpdatedAt = utc,
@@ -90,6 +100,8 @@ public static class LocalModelAdvisorSettingsValidator
     public const string MaxSeverityDeltaError = "Local-model advisor max severity delta must be between 0 and 10.";
     public const string MaxConfidenceDeltaError = "Local-model advisor max confidence delta must be between 0 and 1.";
     public const string ResponseCacheTtlError = "Local-model advisor response cache TTL must be between 1 and 2160 hours.";
+    public const string SecondModelEndpointError = "Local-model advisor second model endpoint must be an absolute http or https URL.";
+    public const string SecondModelError = "Local-model advisor second model is required when ensemble is enabled, must not exceed 128 characters, and must not contain control characters.";
 
     public static bool TryValidate(LocalModelAdvisorSettings settings, out string error)
     {
@@ -142,6 +154,24 @@ public static class LocalModelAdvisorSettingsValidator
             return false;
         }
 
+        if (!TryNormalizeOptionalEndpoint(
+                settings.SecondModelEndpoint,
+                required: settings.EnsembleEnabled,
+                out _,
+                out error))
+        {
+            return false;
+        }
+
+        if (!TryNormalizeOptionalModel(
+                settings.SecondModel,
+                required: settings.EnsembleEnabled,
+                out _,
+                out error))
+        {
+            return false;
+        }
+
         if (settings.Id != LocalModelAdvisorSettings.FixedId)
         {
             error = "Local-model advisor settings row has an invalid id.";
@@ -157,6 +187,12 @@ public static class LocalModelAdvisorSettingsValidator
         error = string.Empty;
         return true;
     }
+
+    public static bool TryNormalizeSecondModelEndpoint(string? value, bool required, out string normalized, out string error) =>
+        TryNormalizeOptionalEndpoint(value, required, out normalized, out error);
+
+    public static bool TryNormalizeSecondModel(string? value, bool required, out string normalized, out string error) =>
+        TryNormalizeOptionalModel(value, required, out normalized, out error);
 
     public static string NormalizeUpdatedBy(string updatedBy)
     {
@@ -225,6 +261,44 @@ public static class LocalModelAdvisorSettingsValidator
         normalized = candidate.Length == 0 ? LocalModelAdvisorSettings.DefaultKeepAlive : candidate;
         error = string.Empty;
         return true;
+    }
+
+    private static bool TryNormalizeOptionalEndpoint(string? value, bool required, out string normalized, out string error)
+    {
+        if (!required && string.IsNullOrWhiteSpace(value))
+        {
+            normalized = LocalModelAdvisorSettings.DefaultSecondModelEndpoint;
+            error = string.Empty;
+            return true;
+        }
+
+        if (TryNormalizeEndpoint(value, out normalized, out _))
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        error = SecondModelEndpointError;
+        return false;
+    }
+
+    private static bool TryNormalizeOptionalModel(string? value, bool required, out string normalized, out string error)
+    {
+        if (!required && string.IsNullOrWhiteSpace(value))
+        {
+            normalized = string.Empty;
+            error = string.Empty;
+            return true;
+        }
+
+        if (TryNormalizeModel(value, out normalized, out _))
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        error = SecondModelError;
+        return false;
     }
 }
 

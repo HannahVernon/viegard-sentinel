@@ -30,8 +30,8 @@ Path | Returns
 `GET /api/v1/decisions` | Policy decisions
 `GET /api/v1/decisions/{id}` | One decision with its classification embedded
 `GET /api/v1/classifications/{id}` | One classification
-`GET /api/v1/advisor/summary` | Local-model advisor configuration (enabled, endpoint, model, temperature, timeout, invocation band, clamp deltas, response cache enabled/TTL, settings version), per-category `categoryOverrides`, `activePromptTemplate`, and outcome counts, cache hits, escalation rate, failures, and latency over 1h/24h/7d/all-time windows
-`GET /api/v1/advisor/consults` | Local-model advisor consult records (append-only observability rows)
+`GET /api/v1/advisor/summary` | Local-model advisor configuration (enabled, endpoint, model, temperature, timeout, invocation band, clamp deltas, response cache enabled/TTL, ensemble enabled, second model endpoint/model, settings version), per-category `categoryOverrides`, `activePromptTemplate`, and outcome counts, cache hits, escalation rate, failures, and latency over 1h/24h/7d/all-time windows
+`GET /api/v1/advisor/consults` | Local-model advisor consult records (append-only observability rows, including nullable ensemble detail)
 `GET /api/v1/advisor/consults/{id}` | One advisor consult record
 `GET /api/v1/advisor/consults/by-classification/{id}` | The advisor consult recorded for a classification, if any
 `GET /api/v1/audit` | Audit ledger records
@@ -70,9 +70,15 @@ per-category advisor override rows.  Each row includes `category`,
 nullable `enabled`, nullable invocation-band and clamp fields, `version`,
 and `updatedAt`; null override fields inherit the global configuration.
 
-The summary `configuration` object includes `responseCacheEnabled` and
-`responseCacheTtlHours`.  Each window includes `cacheHits`, counted from
-consult records where the real outcome remains `Escalated` or `NoChange`
-and `servedFromCache` is true.
+The summary `configuration` object includes `responseCacheEnabled`,
+`responseCacheTtlHours`, `ensembleEnabled`, `secondModelEndpoint`, and
+`secondModel`.  Each window includes `cacheHits`, counted from consult
+records where the real outcome remains `Escalated` or `NoChange` and
+`servedFromCache` is true.
+
+Advisor consult records include `ensembleDetail` when the consult used the
+two-model ensemble.  The detail contains the applied `rule` (`average`) and
+one row per model with `modelId`, `endpoint`, nullable `severity`, nullable
+`confidence`, and `valid`; it is `null` for non-ensemble consults.
 
 The same response includes `activePromptTemplate` with `templateId`, `revision`, and `createdAt` for the active database prompt revision, or `null` before the prompt seed exists.

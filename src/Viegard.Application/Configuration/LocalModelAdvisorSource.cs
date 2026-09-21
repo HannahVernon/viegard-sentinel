@@ -94,7 +94,10 @@ public sealed record LocalModelAdvisorValues(
     int MaxSeverityDelta,
     double MaxConfidenceDelta,
     bool ResponseCacheEnabled = false,
-    int ResponseCacheTtlHours = 72)
+    int ResponseCacheTtlHours = 72,
+    bool EnsembleEnabled = false,
+    string SecondModelEndpoint = LocalModelAdvisorSettings.DefaultSecondModelEndpoint,
+    string SecondModel = "")
 {
     public static LocalModelAdvisorValues FromOptions(LocalModelAdvisorOptions options)
     {
@@ -102,6 +105,8 @@ public sealed record LocalModelAdvisorValues(
         _ = LocalModelAdvisorSettingsValidator.TryNormalizeEndpoint(options.Endpoint, out var endpoint, out _);
         _ = LocalModelAdvisorSettingsValidator.TryNormalizeModel(options.Model, out var model, out _);
         _ = LocalModelAdvisorSettingsValidator.TryNormalizeKeepAlive(options.KeepAlive, out var keepAlive, out _);
+        _ = LocalModelAdvisorSettingsValidator.TryNormalizeSecondModelEndpoint(options.SecondModelEndpoint, options.EnsembleEnabled, out var secondModelEndpoint, out _);
+        _ = LocalModelAdvisorSettingsValidator.TryNormalizeSecondModel(options.SecondModel, options.EnsembleEnabled, out var secondModel, out _);
         return new LocalModelAdvisorValues(
             options.Enabled,
             endpoint,
@@ -114,7 +119,10 @@ public sealed record LocalModelAdvisorValues(
             options.MaxSeverityDelta,
             options.MaxConfidenceDelta,
             options.ResponseCacheEnabled,
-            options.ResponseCacheTtlHours);
+            options.ResponseCacheTtlHours,
+            options.EnsembleEnabled,
+            secondModelEndpoint,
+            secondModel);
     }
 
     public static LocalModelAdvisorValues FromSettings(LocalModelAdvisorSettings settings)
@@ -123,6 +131,8 @@ public sealed record LocalModelAdvisorValues(
         _ = LocalModelAdvisorSettingsValidator.TryNormalizeEndpoint(settings.Endpoint, out var endpoint, out _);
         _ = LocalModelAdvisorSettingsValidator.TryNormalizeModel(settings.Model, out var model, out _);
         _ = LocalModelAdvisorSettingsValidator.TryNormalizeKeepAlive(settings.KeepAlive, out var keepAlive, out _);
+        _ = LocalModelAdvisorSettingsValidator.TryNormalizeSecondModelEndpoint(settings.SecondModelEndpoint, settings.EnsembleEnabled, out var secondModelEndpoint, out _);
+        _ = LocalModelAdvisorSettingsValidator.TryNormalizeSecondModel(settings.SecondModel, settings.EnsembleEnabled, out var secondModel, out _);
         return new LocalModelAdvisorValues(
             settings.Enabled,
             endpoint,
@@ -135,7 +145,10 @@ public sealed record LocalModelAdvisorValues(
             settings.MaxSeverityDelta,
             settings.MaxConfidenceDelta,
             settings.ResponseCacheEnabled,
-            settings.ResponseCacheTtlHours);
+            settings.ResponseCacheTtlHours,
+            settings.EnsembleEnabled,
+            secondModelEndpoint,
+            secondModel);
     }
 }
 
@@ -153,6 +166,9 @@ public sealed record LocalModelAdvisorSnapshot(
     double MaxConfidenceDelta,
     bool ResponseCacheEnabled,
     int ResponseCacheTtlHours,
+    bool EnsembleEnabled,
+    string SecondModelEndpoint,
+    string SecondModel,
     int Version)
 {
     public static LocalModelAdvisorSnapshot Unseeded { get; } = new(
@@ -169,6 +185,9 @@ public sealed record LocalModelAdvisorSnapshot(
         0.20,
         false,
         72,
+        false,
+        LocalModelAdvisorSettings.DefaultSecondModelEndpoint,
+        string.Empty,
         0);
 
     public static LocalModelAdvisorSnapshot Seeded(LocalModelAdvisorSettings settings)
@@ -189,6 +208,9 @@ public sealed record LocalModelAdvisorSnapshot(
             values.MaxConfidenceDelta,
             values.ResponseCacheEnabled,
             values.ResponseCacheTtlHours,
+            values.EnsembleEnabled,
+            values.SecondModelEndpoint,
+            values.SecondModel,
             settings.Version);
     }
 
@@ -206,6 +228,9 @@ public sealed record LocalModelAdvisorSnapshot(
                 MaxSeverityDelta,
                 MaxConfidenceDelta,
                 ResponseCacheEnabled,
-                ResponseCacheTtlHours)
+                ResponseCacheTtlHours,
+                EnsembleEnabled,
+                SecondModelEndpoint,
+                SecondModel)
             : LocalModelAdvisorValues.FromOptions(fallbackOptions);
 }

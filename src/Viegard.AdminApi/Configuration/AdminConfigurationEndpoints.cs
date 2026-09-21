@@ -1464,9 +1464,12 @@ public static class AdminConfigurationEndpoints
         out string error)
     {
         settings = new LocalModelAdvisorSettings();
+        var ensembleEnabled = form.ContainsKey("ensembleEnabled");
         if (!LocalModelAdvisorSettingsValidator.TryNormalizeEndpoint(form["endpoint"].ToString(), out var endpoint, out error)
             || !LocalModelAdvisorSettingsValidator.TryNormalizeModel(form["model"].ToString(), out var model, out error)
-            || !LocalModelAdvisorSettingsValidator.TryNormalizeKeepAlive(form["keepAlive"].ToString(), out var keepAlive, out error))
+            || !LocalModelAdvisorSettingsValidator.TryNormalizeKeepAlive(form["keepAlive"].ToString(), out var keepAlive, out error)
+            || !LocalModelAdvisorSettingsValidator.TryNormalizeSecondModelEndpoint(form["secondModelEndpoint"].ToString(), ensembleEnabled, out var secondModelEndpoint, out error)
+            || !LocalModelAdvisorSettingsValidator.TryNormalizeSecondModel(form["secondModel"].ToString(), ensembleEnabled, out var secondModel, out error))
         {
             return false;
         }
@@ -1522,6 +1525,9 @@ public static class AdminConfigurationEndpoints
             MaxConfidenceDelta = maxConfidenceDelta,
             ResponseCacheEnabled = form.ContainsKey("responseCacheEnabled"),
             ResponseCacheTtlHours = responseCacheTtlHours,
+            EnsembleEnabled = ensembleEnabled,
+            SecondModelEndpoint = secondModelEndpoint,
+            SecondModel = secondModel,
         };
         if (!LocalModelAdvisorSettingsValidator.TryValidate(settings, out error))
         {

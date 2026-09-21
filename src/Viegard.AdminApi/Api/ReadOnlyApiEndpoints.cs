@@ -222,6 +222,9 @@ public static class ReadOnlyApiEndpoints
             maxConfidenceDelta = effective.MaxConfidenceDelta,
             responseCacheEnabled = effective.ResponseCacheEnabled,
             responseCacheTtlHours = effective.ResponseCacheTtlHours,
+            ensembleEnabled = effective.EnsembleEnabled,
+            secondModelEndpoint = effective.SecondModelEndpoint,
+            secondModel = effective.SecondModel,
             version = effective.Version,
             updatedAt = effective.UpdatedAt,
         };

@@ -95,6 +95,9 @@ public sealed class ReadOnlyApiEndpointsTests
                 MaxConfidenceDelta = 0.15,
                 ResponseCacheEnabled = true,
                 ResponseCacheTtlHours = 48,
+                EnsembleEnabled = true,
+                SecondModelEndpoint = "http://second.example:11434",
+                SecondModel = "qwen-second:latest",
             },
             expectedVersion: 0,
             updatedBy: "tester",
@@ -139,6 +142,9 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.Equal(0.15, config.GetProperty("maxConfidenceDelta").GetDouble());
         Assert.True(config.GetProperty("responseCacheEnabled").GetBoolean());
         Assert.Equal(48, config.GetProperty("responseCacheTtlHours").GetInt32());
+        Assert.True(config.GetProperty("ensembleEnabled").GetBoolean());
+        Assert.Equal("http://second.example:11434", config.GetProperty("secondModelEndpoint").GetString());
+        Assert.Equal("qwen-second:latest", config.GetProperty("secondModel").GetString());
         Assert.Equal(1, config.GetProperty("version").GetInt32());
 
         var activePromptTemplate = json.GetProperty("activePromptTemplate");
@@ -194,7 +200,15 @@ public sealed class ReadOnlyApiEndpointsTests
     public async Task GetAdvisorConsult_returns_record_by_id_and_by_classification_and_404s()
     {
         var consults = new InMemoryLocalModelAdvisorConsultStore();
-        var record = Consult(AdvisorConsultOutcome.Escalated, DateTimeOffset.UtcNow.AddMinutes(-1), 150);
+        var record = Consult(AdvisorConsultOutcome.Escalated, DateTimeOffset.UtcNow.AddMinutes(-1), 150) with
+        {
+            EnsembleDetail = new AdvisorEnsembleDetail(
+                "average",
+                [
+                    new AdvisorEnsembleModelOutput("qwen-primary:latest", "http://primary.example", 7, 0.7, true),
+                    new AdvisorEnsembleModelOutput("qwen-second:latest", "http://second.example", 9, 0.9, true),
+                ]),
+        };
         await consults.AppendAsync(record);
 
         var byIdContext = Context(string.Empty);
@@ -203,6 +217,9 @@ public sealed class ReadOnlyApiEndpointsTests
             byIdContext);
         Assert.Equal(record.Id.ToString(), byId.GetProperty("id").GetString());
         Assert.Equal("Escalated", byId.GetProperty("outcome").GetString());
+        var detail = byId.GetProperty("ensembleDetail");
+        Assert.Equal("average", detail.GetProperty("rule").GetString());
+        Assert.Equal(2, detail.GetProperty("models").GetArrayLength());
 
         var byClassContext = Context(string.Empty);
         var byClass = await ExecuteAsync(

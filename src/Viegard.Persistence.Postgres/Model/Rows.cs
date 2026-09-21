@@ -450,6 +450,12 @@ public sealed class LocalModelAdvisorSettingsRow
 
     public int ResponseCacheTtlHours { get; set; }
 
+    public bool EnsembleEnabled { get; set; }
+
+    public string SecondModelEndpoint { get; set; } = string.Empty;
+
+    public string SecondModel { get; set; } = string.Empty;
+
     public int Version { get; set; }
 
     public DateTimeOffset? SeededAt { get; set; }
@@ -550,6 +556,8 @@ public sealed class LocalModelAdvisorConsultRow
     public string? ModelId { get; set; }
 
     public bool ServedFromCache { get; set; }
+
+    public string? EnsembleDetailJson { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 }

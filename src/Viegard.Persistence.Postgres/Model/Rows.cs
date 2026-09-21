@@ -455,6 +455,27 @@ public sealed class LocalModelAdvisorSettingsRow
     public string UpdatedBy { get; set; } = string.Empty;
 }
 
+public sealed class LocalModelAdvisorCategoryBandRow
+{
+    public string Category { get; set; } = string.Empty;
+
+    public bool? Enabled { get; set; }
+
+    public double? InvokeConfidenceMin { get; set; }
+
+    public double? InvokeConfidenceMax { get; set; }
+
+    public int? MaxSeverityDelta { get; set; }
+
+    public double? MaxConfidenceDelta { get; set; }
+
+    public int Version { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+}
+
 public sealed class LocalModelAdvisorConsultRow
 {
     public Guid Id { get; set; }

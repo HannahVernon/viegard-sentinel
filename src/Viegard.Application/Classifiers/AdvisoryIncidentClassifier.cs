@@ -16,6 +16,7 @@ public sealed class AdvisoryIncidentClassifier(
     IIncidentStore incidentStore,
     IEventStore eventStore,
     LocalModelAdvisorSource advisorSource,
+    LocalModelAdvisorCategoryBandSource categoryBandSource,
     IOptions<LocalModelAdvisorOptions> options,
     IInferenceProvider inferenceProvider,
     ClassificationOutputValidator outputValidator,
@@ -41,7 +42,9 @@ public sealed class AdvisoryIncidentClassifier(
 
         try
         {
-            var settings = advisorSource.CurrentValues(options.Value);
+            var settings = categoryBandSource.Resolve(
+                advisorSource.CurrentValues(options.Value),
+                baseClassification.Category);
             if (!settings.Enabled
                 || baseClassification.Confidence < settings.InvokeConfidenceMin
                 || baseClassification.Confidence > settings.InvokeConfidenceMax)

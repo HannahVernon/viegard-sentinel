@@ -37,6 +37,12 @@ public static class AdminConfigurationEndpoints
         app.MapPost("/configuration/local-model-advisor", SaveLocalModelAdvisorAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
+        app.MapPost("/configuration/local-model-advisor/category-bands", SaveLocalModelAdvisorCategoryBandAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/local-model-advisor/category-bands/delete", DeleteLocalModelAdvisorCategoryBandAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
         app.MapPost("/configuration/satellites/create", CreateSatelliteAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
@@ -253,6 +259,135 @@ public static class AdminConfigurationEndpoints
             result.Settings,
             context.RequestAborted).ConfigureAwait(false);
         return Redirect(LocalModelAdvisorConfigurationPath, status: "Local-model advisor settings saved.");
+    }
+
+    internal static async Task<IResult> SaveLocalModelAdvisorCategoryBandAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ILocalModelAdvisorSettingsStore advisorSettings,
+        ILocalModelAdvisorCategoryBandStore categoryBands,
+        IOptions<LocalModelAdvisorOptions> advisorOptions,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Step-up verification is required before editing local-model advisor category overrides.");
+        }
+
+        if (!int.TryParse(form["version"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedVersion)
+            || expectedVersion < 0)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor category override version was not valid.  Reload the page and try again.");
+        }
+
+        var globalSettings = await advisorSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        var globalValues = globalSettings is null
+            ? LocalModelAdvisorValues.FromOptions(advisorOptions.Value)
+            : LocalModelAdvisorValues.FromSettings(globalSettings);
+        if (!TryReadLocalModelAdvisorCategoryBand(form, globalValues, out var candidate, out var error))
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: error);
+        }
+
+        var before = await categoryBands.GetAsync(candidate.Category, context.RequestAborted).ConfigureAwait(false);
+        var result = await categoryBands.UpsertAsync(
+            candidate,
+            expectedVersion,
+            user.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor category override was changed by another session.  Review the current values and save again.");
+        }
+
+        await configAuditor.RecordLocalModelAdvisorCategoryBandWriteAsync(
+            user.Username,
+            candidate.Category,
+            before,
+            result.Band,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(LocalModelAdvisorConfigurationPath, status: $"Local-model advisor override saved for {candidate.Category}.");
+    }
+
+    internal static async Task<IResult> DeleteLocalModelAdvisorCategoryBandAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ILocalModelAdvisorCategoryBandStore categoryBands,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Step-up verification is required before deleting local-model advisor category overrides.");
+        }
+
+        if (!LocalModelAdvisorCategoryBandValidator.TryNormalizeCategory(form["category"].ToString(), out var category, out var error))
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: error);
+        }
+
+        if (!int.TryParse(form["version"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedVersion)
+            || expectedVersion < 0)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor category override version was not valid.  Reload the page and try again.");
+        }
+
+        var before = await categoryBands.GetAsync(category, context.RequestAborted).ConfigureAwait(false);
+        var result = await categoryBands.DeleteAsync(
+            category,
+            expectedVersion,
+            user.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+        if (result.Status == LocalModelAdvisorCategoryBandDeleteStatus.Conflict)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor category override was changed by another session.  Review the current values and try again.");
+        }
+
+        if (result.Status == LocalModelAdvisorCategoryBandDeleteStatus.NotFound)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor category override was not found.  Reload the page and try again.");
+        }
+
+        await configAuditor.RecordLocalModelAdvisorCategoryBandWriteAsync(
+            user.Username,
+            category,
+            before,
+            null,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(LocalModelAdvisorConfigurationPath, status: $"Local-model advisor override deleted for {category}.");
     }
 
     internal static async Task<IResult> CreateSatelliteAsync(
@@ -1268,6 +1403,124 @@ public static class AdminConfigurationEndpoints
             return false;
         }
 
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryReadLocalModelAdvisorCategoryBand(
+        IFormCollection form,
+        LocalModelAdvisorValues global,
+        out LocalModelAdvisorCategoryBand band,
+        out string error)
+    {
+        band = new LocalModelAdvisorCategoryBand { Category = "unknown" };
+        if (!LocalModelAdvisorCategoryBandValidator.TryNormalizeCategory(form["category"].ToString(), out var category, out error))
+        {
+            return false;
+        }
+
+        if (!TryReadNullableBool(form["enabled"].ToString(), out var enabled, out error)
+            || !TryReadNullableDouble(form["invokeConfidenceMin"].ToString(), LocalModelAdvisorSettingsValidator.ConfidenceBandError, out var invokeConfidenceMin, out error)
+            || !TryReadNullableDouble(form["invokeConfidenceMax"].ToString(), LocalModelAdvisorSettingsValidator.ConfidenceBandError, out var invokeConfidenceMax, out error)
+            || !TryReadNullableInt(form["maxSeverityDelta"].ToString(), LocalModelAdvisorSettingsValidator.MaxSeverityDeltaError, out var maxSeverityDelta, out error)
+            || !TryReadNullableDouble(form["maxConfidenceDelta"].ToString(), LocalModelAdvisorSettingsValidator.MaxConfidenceDeltaError, out var maxConfidenceDelta, out error))
+        {
+            return false;
+        }
+
+        band = new LocalModelAdvisorCategoryBand
+        {
+            Category = category,
+            Enabled = enabled,
+            InvokeConfidenceMin = invokeConfidenceMin,
+            InvokeConfidenceMax = invokeConfidenceMax,
+            MaxSeverityDelta = maxSeverityDelta,
+            MaxConfidenceDelta = maxConfidenceDelta,
+        };
+        if (!LocalModelAdvisorCategoryBandValidator.TryValidateEffective(band, global, out error))
+        {
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryReadNullableBool(string value, out bool? result, out string error)
+    {
+        var candidate = value.Trim();
+        result = null;
+        if (candidate.Length == 0 || string.Equals(candidate, "inherit", StringComparison.OrdinalIgnoreCase))
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        if (string.Equals(candidate, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(candidate, "on", StringComparison.OrdinalIgnoreCase))
+        {
+            result = true;
+            error = string.Empty;
+            return true;
+        }
+
+        if (string.Equals(candidate, "false", StringComparison.OrdinalIgnoreCase))
+        {
+            result = false;
+            error = string.Empty;
+            return true;
+        }
+
+        error = "Local-model advisor category enabled override must be inherit, true, or false.";
+        return false;
+    }
+
+    private static bool TryReadNullableDouble(
+        string value,
+        string parseError,
+        out double? result,
+        out string error)
+    {
+        var candidate = value.Trim();
+        result = null;
+        if (candidate.Length == 0)
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        if (!double.TryParse(candidate, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+        {
+            error = parseError;
+            return false;
+        }
+
+        result = parsed;
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryReadNullableInt(
+        string value,
+        string parseError,
+        out int? result,
+        out string error)
+    {
+        var candidate = value.Trim();
+        result = null;
+        if (candidate.Length == 0)
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        if (!int.TryParse(candidate, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed))
+        {
+            error = parseError;
+            return false;
+        }
+
+        result = parsed;
         error = string.Empty;
         return true;
     }

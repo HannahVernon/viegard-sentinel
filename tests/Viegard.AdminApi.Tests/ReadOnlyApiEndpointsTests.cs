@@ -96,10 +96,24 @@ public sealed class ReadOnlyApiEndpointsTests
             expectedVersion: 0,
             updatedBy: "tester",
             updatedAt: now);
+        var categoryBands = new InMemoryLocalModelAdvisorCategoryBandStore();
+        await categoryBands.UpsertAsync(
+            new LocalModelAdvisorCategoryBand
+            {
+                Category = "path-traversal",
+                Enabled = false,
+                InvokeConfidenceMin = null,
+                InvokeConfidenceMax = 0.75,
+                MaxSeverityDelta = 1,
+                MaxConfidenceDelta = null,
+            },
+            expectedVersion: 0,
+            updatedBy: "tester",
+            updatedAt: now);
         var context = Context(string.Empty);
 
         var json = await ExecuteAsync(
-            await ReadOnlyApiEndpoints.GetAdvisorSummaryAsync(context, consults, settings),
+            await ReadOnlyApiEndpoints.GetAdvisorSummaryAsync(context, consults, settings, categoryBands),
             context);
 
         var config = json.GetProperty("configuration");
@@ -113,6 +127,15 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.Equal(2, config.GetProperty("maxSeverityDelta").GetInt32());
         Assert.Equal(0.15, config.GetProperty("maxConfidenceDelta").GetDouble());
         Assert.Equal(1, config.GetProperty("version").GetInt32());
+
+        var categoryOverride = Assert.Single(json.GetProperty("categoryOverrides").EnumerateArray());
+        Assert.Equal("path-traversal", categoryOverride.GetProperty("category").GetString());
+        Assert.False(categoryOverride.GetProperty("enabled").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, categoryOverride.GetProperty("invokeConfidenceMin").ValueKind);
+        Assert.Equal(0.75, categoryOverride.GetProperty("invokeConfidenceMax").GetDouble());
+        Assert.Equal(1, categoryOverride.GetProperty("maxSeverityDelta").GetInt32());
+        Assert.Equal(JsonValueKind.Null, categoryOverride.GetProperty("maxConfidenceDelta").ValueKind);
+        Assert.Equal(1, categoryOverride.GetProperty("version").GetInt32());
 
         var oneHour = json.GetProperty("windows").EnumerateArray().Single(w => w.GetProperty("window").GetString() == "1h");
         Assert.Equal(1, oneHour.GetProperty("escalated").GetInt64());

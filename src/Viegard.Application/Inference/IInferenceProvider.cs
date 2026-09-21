@@ -51,6 +51,10 @@ public sealed record InferenceRequest
     public double? Temperature { get; init; }
 
     public TimeSpan? Timeout { get; init; }
+
+    public string? Endpoint { get; init; }
+
+    public string? Model { get; init; }
 }
 
 /// <summary>Why an inference attempt failed.</summary>

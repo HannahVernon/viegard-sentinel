@@ -19,6 +19,8 @@ public sealed class LocalModelAdvisorSettingsTests
         { Valid() with { MaxConfidenceDelta = 1.1 }, LocalModelAdvisorSettingsValidator.MaxConfidenceDeltaError },
         { Valid() with { ResponseCacheTtlHours = 0 }, LocalModelAdvisorSettingsValidator.ResponseCacheTtlError },
         { Valid() with { ResponseCacheTtlHours = 2161 }, LocalModelAdvisorSettingsValidator.ResponseCacheTtlError },
+        { Valid() with { EnsembleEnabled = true, SecondModel = "" }, LocalModelAdvisorSettingsValidator.SecondModelError },
+        { Valid() with { EnsembleEnabled = true, SecondModelEndpoint = "not-a-url", SecondModel = "qwen-second:latest" }, LocalModelAdvisorSettingsValidator.SecondModelEndpointError },
     };
 
     [Fact]
@@ -56,6 +58,9 @@ public sealed class LocalModelAdvisorSettingsTests
             MaxConfidenceDelta = 0.1,
             ResponseCacheEnabled = true,
             ResponseCacheTtlHours = 24,
+            EnsembleEnabled = true,
+            SecondModelEndpoint = "http://127.0.0.2:11434/",
+            SecondModel = "qwen-second:latest",
         }, seededAt);
 
         Assert.NotNull(seeded);
@@ -64,6 +69,9 @@ public sealed class LocalModelAdvisorSettingsTests
         Assert.Equal("qwen-test:latest", seeded.Model);
         Assert.True(seeded.ResponseCacheEnabled);
         Assert.Equal(24, seeded.ResponseCacheTtlHours);
+        Assert.True(seeded.EnsembleEnabled);
+        Assert.Equal("http://127.0.0.2:11434", seeded.SecondModelEndpoint);
+        Assert.Equal("qwen-second:latest", seeded.SecondModel);
         Assert.Equal(1, seeded.Version);
         Assert.Equal(seededAt, seeded.SeededAt);
 
@@ -85,6 +93,20 @@ public sealed class LocalModelAdvisorSettingsTests
 
         Assert.False(conflict.Succeeded);
         Assert.Equal("qwen-test:latest", conflict.Settings!.Model);
+    }
+
+    [Fact]
+    public void Validator_allows_blank_second_model_fields_when_ensemble_is_disabled()
+    {
+        var settings = Valid() with
+        {
+            EnsembleEnabled = false,
+            SecondModelEndpoint = "",
+            SecondModel = "",
+        };
+
+        Assert.True(LocalModelAdvisorSettingsValidator.TryValidate(settings, out var error));
+        Assert.Equal(string.Empty, error);
     }
 
     private static LocalModelAdvisorSettings Valid() => new()

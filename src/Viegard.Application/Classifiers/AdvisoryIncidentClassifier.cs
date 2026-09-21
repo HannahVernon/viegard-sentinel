@@ -102,8 +102,12 @@ public sealed class AdvisoryIncidentClassifier(
                 Timeout = TimeSpan.FromMilliseconds(settings.TimeoutMs),
             };
 
+            var ensembleEnabled = IsEnsembleEnabled(settings);
+            var cacheModelIdentity = ensembleEnabled
+                ? BuildEnsembleCacheIdentity(settings)
+                : settings.Model;
             var cacheKey = settings.ResponseCacheEnabled
-                ? LocalModelAdvisorResponseCacheKey.Build(activeTemplate.Version, settings.Model, variables)
+                ? LocalModelAdvisorResponseCacheKey.Build(activeTemplate.Version, cacheModelIdentity, variables)
                 : null;
             if (cacheKey is not null && await TryGetCachedOutputAsync(cacheKey, cancellationToken).ConfigureAwait(false) is { } cached)
             {
@@ -123,62 +127,109 @@ public sealed class AdvisoryIncidentClassifier(
                 return ClassificationOutcome.Success(cachedAdjusted);
             }
 
-            var stopwatch = Stopwatch.StartNew();
-            var inference = await inferenceProvider.InferAsync(request, cancellationToken).ConfigureAwait(false);
-            stopwatch.Stop();
-            var latencyMs = ToLatencyMs(inference.Latency ?? stopwatch.Elapsed);
-            if (!inference.Succeeded)
+            if (!ensembleEnabled)
             {
-                await RecordConsultAsync(BuildRecord(
-                    baseClassification,
-                    AdvisorConsultOutcome.ProviderFailed,
-                    finalSeverity: baseClassification.Severity,
-                    finalConfidence: baseClassification.Confidence,
-                    latencyMs: latencyMs,
-                    failureKind: inference.FailureKind?.ToString(),
-                    modelId: inference.ModelId ?? settings.Model), cancellationToken).ConfigureAwait(false);
-                return baseOutcome;
-            }
+                var stopwatch = Stopwatch.StartNew();
+                var inference = await inferenceProvider.InferAsync(request, cancellationToken).ConfigureAwait(false);
+                stopwatch.Stop();
+                var latencyMs = ToLatencyMs(inference.Latency ?? stopwatch.Elapsed);
+                if (!inference.Succeeded)
+                {
+                    await RecordConsultAsync(BuildRecord(
+                        baseClassification,
+                        AdvisorConsultOutcome.ProviderFailed,
+                        finalSeverity: baseClassification.Severity,
+                        finalConfidence: baseClassification.Confidence,
+                        latencyMs: latencyMs,
+                        failureKind: inference.FailureKind?.ToString(),
+                        modelId: inference.ModelId ?? settings.Model), cancellationToken).ConfigureAwait(false);
+                    return baseOutcome;
+                }
 
-            var validation = outputValidator.Validate(inference.RawOutput);
-            if (!validation.Succeeded || validation.Output is null)
-            {
+                var validation = outputValidator.Validate(inference.RawOutput);
+                if (!validation.Succeeded || validation.Output is null)
+                {
+                    await RecordConsultAsync(BuildRecord(
+                        baseClassification,
+                        AdvisorConsultOutcome.InvalidOutput,
+                        finalSeverity: baseClassification.Severity,
+                        finalConfidence: baseClassification.Confidence,
+                        latencyMs: latencyMs,
+                        failureKind: null,
+                        modelId: inference.ModelId ?? settings.Model), cancellationToken).ConfigureAwait(false);
+                    return baseOutcome;
+                }
+
+                var modelId = inference.ModelId ?? settings.Model;
+                if (cacheKey is not null)
+                {
+                    await TrySetCachedOutputAsync(
+                        cacheKey,
+                        modelId,
+                        activeTemplate.Version,
+                        validation.Output,
+                        settings.ResponseCacheTtlHours,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                var adjusted = ApplyEscalateOnlyClamp(baseClassification, validation.Output, modelId, settings, activeTemplate.Version);
+                var outcome = adjusted.Severity > baseClassification.Severity || adjusted.Confidence > baseClassification.Confidence
+                    ? AdvisorConsultOutcome.Escalated
+                    : AdvisorConsultOutcome.NoChange;
                 await RecordConsultAsync(BuildRecord(
                     baseClassification,
-                    AdvisorConsultOutcome.InvalidOutput,
-                    finalSeverity: baseClassification.Severity,
-                    finalConfidence: baseClassification.Confidence,
+                    outcome,
+                    finalSeverity: adjusted.Severity,
+                    finalConfidence: adjusted.Confidence,
                     latencyMs: latencyMs,
                     failureKind: null,
-                    modelId: inference.ModelId ?? settings.Model), cancellationToken).ConfigureAwait(false);
+                    modelId: modelId), cancellationToken).ConfigureAwait(false);
+                return ClassificationOutcome.Success(adjusted);
+            }
+
+            var ensemble = await ConsultEnsembleAsync(request, settings, cancellationToken).ConfigureAwait(false);
+            if (ensemble.Output is null)
+            {
+                var failedOutcome = ensemble.AllProviderFailed
+                    ? AdvisorConsultOutcome.ProviderFailed
+                    : AdvisorConsultOutcome.InvalidOutput;
+                await RecordConsultAsync(BuildRecord(
+                    baseClassification,
+                    failedOutcome,
+                    finalSeverity: baseClassification.Severity,
+                    finalConfidence: baseClassification.Confidence,
+                    latencyMs: ensemble.LatencyMs,
+                    failureKind: ensemble.FailureKind,
+                    modelId: ensemble.ModelId,
+                    ensembleDetail: ensemble.Detail), cancellationToken).ConfigureAwait(false);
                 return baseOutcome;
             }
 
-            var modelId = inference.ModelId ?? settings.Model;
             if (cacheKey is not null)
             {
                 await TrySetCachedOutputAsync(
                     cacheKey,
-                    modelId,
+                    ensemble.ModelId,
                     activeTemplate.Version,
-                    validation.Output,
+                    ensemble.Output,
                     settings.ResponseCacheTtlHours,
                     cancellationToken).ConfigureAwait(false);
             }
 
-            var adjusted = ApplyEscalateOnlyClamp(baseClassification, validation.Output, modelId, settings, activeTemplate.Version);
-            var outcome = adjusted.Severity > baseClassification.Severity || adjusted.Confidence > baseClassification.Confidence
+            var ensembleAdjusted = ApplyEscalateOnlyClamp(baseClassification, ensemble.Output, ensemble.ModelId, settings, activeTemplate.Version);
+            var ensembleOutcome = ensembleAdjusted.Severity > baseClassification.Severity || ensembleAdjusted.Confidence > baseClassification.Confidence
                 ? AdvisorConsultOutcome.Escalated
                 : AdvisorConsultOutcome.NoChange;
             await RecordConsultAsync(BuildRecord(
                 baseClassification,
-                outcome,
-                finalSeverity: adjusted.Severity,
-                finalConfidence: adjusted.Confidence,
-                latencyMs: latencyMs,
+                ensembleOutcome,
+                finalSeverity: ensembleAdjusted.Severity,
+                finalConfidence: ensembleAdjusted.Confidence,
+                latencyMs: ensemble.LatencyMs,
                 failureKind: null,
-                modelId: modelId), cancellationToken).ConfigureAwait(false);
-            return ClassificationOutcome.Success(adjusted);
+                modelId: ensemble.ModelId,
+                ensembleDetail: ensemble.Detail), cancellationToken).ConfigureAwait(false);
+            return ClassificationOutcome.Success(ensembleAdjusted);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -249,6 +300,127 @@ public sealed class AdvisoryIncidentClassifier(
         }
     }
 
+    private async Task<EnsembleConsultResult> ConsultEnsembleAsync(
+        InferenceRequest primaryRequest,
+        LocalModelAdvisorValues settings,
+        CancellationToken cancellationToken)
+    {
+        var primary = await ConsultModelAsync(
+            primaryRequest,
+            settings.Model,
+            settings.Endpoint,
+            cancellationToken).ConfigureAwait(false);
+        var secondary = await ConsultModelAsync(
+            primaryRequest with
+            {
+                Endpoint = settings.SecondModelEndpoint,
+                Model = settings.SecondModel,
+            },
+            settings.SecondModel,
+            settings.SecondModelEndpoint,
+            cancellationToken).ConfigureAwait(false);
+        var attempts = new[] { primary, secondary };
+        var valid = attempts.Where(a => a.Output is not null).ToList();
+        var modelId = BuildEnsembleModelId(primary.ModelId, secondary.ModelId);
+        var detail = new AdvisorEnsembleDetail(
+            "average",
+            attempts.Select(a => new AdvisorEnsembleModelOutput(
+                    a.ModelId,
+                    a.Endpoint,
+                    a.Output?.Severity,
+                    a.Output?.Confidence,
+                    a.Output is not null))
+                .ToList());
+
+        if (valid.Count == 0)
+        {
+            var allProviderFailed = attempts.All(a => a.ProviderFailed);
+            return new EnsembleConsultResult(
+                null,
+                modelId,
+                detail,
+                attempts.Sum(a => a.LatencyMs ?? 0),
+                allProviderFailed,
+                allProviderFailed ? string.Join(",", attempts.Select(a => a.FailureKind).Where(k => k is not null)) : null);
+        }
+
+        var output = valid.Count == 1
+            ? valid[0].Output!
+            : AverageOutputs(valid[0].Output!, valid[1].Output!);
+        return new EnsembleConsultResult(
+            output,
+            modelId,
+            detail,
+            attempts.Sum(a => a.LatencyMs ?? 0),
+            false,
+            null);
+    }
+
+    private async Task<ModelConsultAttempt> ConsultModelAsync(
+        InferenceRequest request,
+        string configuredModelId,
+        string endpoint,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var inference = await inferenceProvider.InferAsync(request, cancellationToken).ConfigureAwait(false);
+        stopwatch.Stop();
+        var latencyMs = ToLatencyMs(inference.Latency ?? stopwatch.Elapsed);
+        var modelId = inference.ModelId ?? configuredModelId;
+        if (!inference.Succeeded)
+        {
+            return new ModelConsultAttempt(
+                modelId,
+                endpoint,
+                null,
+                latencyMs,
+                true,
+                inference.FailureKind?.ToString());
+        }
+
+        var validation = outputValidator.Validate(inference.RawOutput);
+        return validation.Succeeded && validation.Output is not null
+            ? new ModelConsultAttempt(modelId, endpoint, validation.Output, latencyMs, false, null)
+            : new ModelConsultAttempt(modelId, endpoint, null, latencyMs, false, null);
+    }
+
+    private static ValidatedClassificationOutput AverageOutputs(
+        ValidatedClassificationOutput first,
+        ValidatedClassificationOutput second) => new()
+        {
+            Category = first.Category,
+            Severity = (int)Math.Round((first.Severity + second.Severity) / 2.0, MidpointRounding.AwayFromZero),
+            Confidence = (first.Confidence + second.Confidence) / 2.0,
+            Reasons = MergeReasons(first.Reasons, second.Reasons),
+        };
+
+    private static IReadOnlyList<string> MergeReasons(
+        IReadOnlyList<string> first,
+        IReadOnlyList<string> second)
+    {
+        var reasons = new List<string>(MaxReasons);
+        foreach (var reason in first.Concat(second).Where(r => !string.IsNullOrWhiteSpace(r)))
+        {
+            if (reasons.Count >= MaxReasons)
+            {
+                break;
+            }
+
+            reasons.Add(reason.Trim());
+        }
+
+        return reasons;
+    }
+
+    private static bool IsEnsembleEnabled(LocalModelAdvisorValues settings) =>
+        settings.EnsembleEnabled && !string.IsNullOrWhiteSpace(settings.SecondModel);
+
+    private static string BuildEnsembleCacheIdentity(LocalModelAdvisorValues settings) =>
+        $"ensemble:avg|{settings.Model}@{settings.Endpoint}|{settings.SecondModel}@{settings.SecondModelEndpoint}";
+
+    private static string BuildEnsembleModelId(string primaryModelId, string secondaryModelId) =>
+        $"ensemble:avg({primaryModelId}|{secondaryModelId})";
+
     private static AdvisorConsultRecord BuildRecord(
         Classification baseClassification,
         AdvisorConsultOutcome outcome,
@@ -257,7 +429,8 @@ public sealed class AdvisoryIncidentClassifier(
         int? latencyMs,
         string? failureKind,
         string? modelId,
-        bool servedFromCache = false) => new()
+        bool servedFromCache = false,
+        AdvisorEnsembleDetail? ensembleDetail = null) => new()
     {
         ClassificationId = baseClassification.Id,
         IncidentId = baseClassification.SubjectId,
@@ -271,8 +444,25 @@ public sealed class AdvisoryIncidentClassifier(
         FailureKind = failureKind,
         ModelId = modelId,
         ServedFromCache = servedFromCache,
+        EnsembleDetail = ensembleDetail,
         CreatedAt = DateTimeOffset.UtcNow,
     };
+
+    private sealed record ModelConsultAttempt(
+        string ModelId,
+        string Endpoint,
+        ValidatedClassificationOutput? Output,
+        int? LatencyMs,
+        bool ProviderFailed,
+        string? FailureKind);
+
+    private sealed record EnsembleConsultResult(
+        ValidatedClassificationOutput? Output,
+        string ModelId,
+        AdvisorEnsembleDetail Detail,
+        int? LatencyMs,
+        bool AllProviderFailed,
+        string? FailureKind);
 
     private static int ToLatencyMs(TimeSpan latency) =>
         Math.Max(0, (int)Math.Round(latency.TotalMilliseconds, MidpointRounding.AwayFromZero));

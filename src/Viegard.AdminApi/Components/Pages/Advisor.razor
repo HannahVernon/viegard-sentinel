@@ -15,6 +15,7 @@
             <dt>State</dt><dd><span class="@(_settings?.Enabled == true ? "badge badge-green" : "badge")">@(_settings?.Enabled == true ? "Enabled" : "Disabled")</span></dd>
             <dt>Endpoint</dt><dd>@(_settings?.Endpoint ?? LocalModelAdvisorSettings.DefaultEndpoint)</dd>
             <dt>Model</dt><dd>@(_settings?.Model ?? LocalModelAdvisorSettings.DefaultModel)</dd>
+            <dt>Ensemble</dt><dd>@(_settings?.EnsembleEnabled == true ? $"On, second model {_settings.SecondModel}" : "Off")</dd>
         </dl>
         <p><a href="/configuration#local-model-advisor">Edit local-model advisor configuration</a></p>
     </section>
@@ -77,6 +78,7 @@
                         <th>Confidence</th>
                         <th>Latency</th>
                         <th>Model</th>
+                        <th>Ensemble detail</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -91,6 +93,7 @@
                             <td>@FormatConfidence(consult.BaseConfidence) &rarr; @FormatConfidence(consult.FinalConfidence)</td>
                             <td>@FormatLatency(consult.LatencyMs)</td>
                             <td>@(consult.ModelId ?? "-")</td>
+                            <td>@FormatEnsembleDetail(consult.EnsembleDetail)</td>
                         </tr>
                     }
                 </tbody>
@@ -155,6 +158,23 @@
 
     private static string FormatConfidence(double confidence) =>
         confidence.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string FormatEnsembleDetail(AdvisorEnsembleDetail? detail)
+    {
+        if (detail is null || detail.Models.Count == 0)
+        {
+            return "-";
+        }
+
+        var valid = detail.Models.Where(m => m.Valid).ToList();
+        var agreed = valid.Count == 2
+            && valid[0].Severity == valid[1].Severity
+            && valid[0].Confidence == valid[1].Confidence;
+        var agreement = valid.Count == 2 ? (agreed ? "agreed" : "disagreed") : "single valid output";
+        var models = string.Join("; ", detail.Models.Select(m =>
+            $"{m.ModelId}: {(m.Valid ? $"{m.Severity}/{FormatConfidence(m.Confidence!.Value)}" : "invalid")}"));
+        return $"{detail.Rule}, {agreement}: {models}";
+    }
 
     private static string OutcomeLabel(AdvisorConsultOutcome outcome) => outcome switch
     {

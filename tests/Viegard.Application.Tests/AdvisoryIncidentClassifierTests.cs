@@ -274,6 +274,91 @@ public sealed class AdvisoryIncidentClassifierTests
     }
 
     [Fact]
+    public async Task Ensemble_enabled_averages_valid_outputs_then_applies_clamp()
+    {
+        var fixture = await CreateFixtureAsync(Settings(
+            maxSeverityDelta: 3,
+            maxConfidenceDelta: 0.15,
+            ensembleEnabled: true,
+            secondModelEndpoint: "http://127.0.0.2:11434",
+            secondModel: "qwen-second:latest"));
+        fixture.Provider.Results.Enqueue(InferenceResult.Success(Output(7, 0.7, "primary reason"), "qwen-primary:latest", TimeSpan.FromMilliseconds(5)));
+        fixture.Provider.Results.Enqueue(InferenceResult.Success(Output(9, 0.9, "second reason"), "qwen-second:latest", TimeSpan.FromMilliseconds(6)));
+
+        var outcome = await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+
+        var classification = Assert.IsType<Classification>(outcome.Classification);
+        Assert.Equal(8, classification.Severity);
+        Assert.Equal(0.75, classification.Confidence, precision: 10);
+        Assert.Equal(2, fixture.Provider.CallCount);
+        Assert.Null(fixture.Provider.Requests[0].Endpoint);
+        Assert.Null(fixture.Provider.Requests[0].Model);
+        Assert.Equal("http://127.0.0.2:11434", fixture.Provider.Requests[1].Endpoint);
+        Assert.Equal("qwen-second:latest", fixture.Provider.Requests[1].Model);
+        var record = Assert.Single(fixture.Diagnostics.Records);
+        Assert.Equal("ensemble:avg(qwen-primary:latest|qwen-second:latest)", record.ModelId);
+        Assert.NotNull(record.EnsembleDetail);
+        Assert.Equal("average", record.EnsembleDetail!.Rule);
+        Assert.Equal(2, record.EnsembleDetail.Models.Count);
+        Assert.All(record.EnsembleDetail.Models, model => Assert.True(model.Valid));
+    }
+
+    [Fact]
+    public async Task Ensemble_one_invalid_output_falls_back_to_valid_model_output()
+    {
+        var fixture = await CreateFixtureAsync(Settings(
+            ensembleEnabled: true,
+            secondModelEndpoint: "http://127.0.0.2:11434",
+            secondModel: "qwen-second:latest"));
+        fixture.Provider.Results.Enqueue(InferenceResult.Success("not json", "qwen-primary:latest", TimeSpan.FromMilliseconds(5)));
+        fixture.Provider.Results.Enqueue(InferenceResult.Success(Output(8, 0.8, "valid second"), "qwen-second:latest", TimeSpan.FromMilliseconds(6)));
+
+        var outcome = await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+
+        var classification = Assert.IsType<Classification>(outcome.Classification);
+        Assert.Equal(8, classification.Severity);
+        Assert.Equal(0.8, classification.Confidence, precision: 10);
+        var record = Assert.Single(fixture.Diagnostics.Records);
+        Assert.Equal(AdvisorConsultOutcome.Escalated, record.Outcome);
+        Assert.False(record.EnsembleDetail!.Models[0].Valid);
+        Assert.True(record.EnsembleDetail.Models[1].Valid);
+    }
+
+    [Fact]
+    public async Task Ensemble_both_invalid_outputs_records_invalid_output()
+    {
+        var fixture = await CreateFixtureAsync(Settings(
+            ensembleEnabled: true,
+            secondModelEndpoint: "http://127.0.0.2:11434",
+            secondModel: "qwen-second:latest"));
+        fixture.Provider.Results.Enqueue(InferenceResult.Success("not json", "qwen-primary:latest", TimeSpan.FromMilliseconds(5)));
+        fixture.Provider.Results.Enqueue(InferenceResult.Success("also not json", "qwen-second:latest", TimeSpan.FromMilliseconds(6)));
+
+        var outcome = await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+
+        var classification = Assert.IsType<Classification>(outcome.Classification);
+        Assert.Null(classification.Model);
+        var record = Assert.Single(fixture.Diagnostics.Records);
+        Assert.Equal(AdvisorConsultOutcome.InvalidOutput, record.Outcome);
+        Assert.NotNull(record.EnsembleDetail);
+        Assert.All(record.EnsembleDetail!.Models, model => Assert.False(model.Valid));
+    }
+
+    [Fact]
+    public async Task Ensemble_disabled_consults_only_primary_with_no_request_override()
+    {
+        var fixture = await CreateFixtureAsync(Settings(ensembleEnabled: false, secondModel: "qwen-second:latest"));
+        fixture.Provider.RawOutput = Output(7, 0.7, "primary only");
+
+        await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+
+        Assert.Equal(1, fixture.Provider.CallCount);
+        Assert.Null(fixture.Provider.LastRequest!.Endpoint);
+        Assert.Null(fixture.Provider.LastRequest.Model);
+        Assert.Null(Assert.Single(fixture.Diagnostics.Records).EnsembleDetail);
+    }
+
+    [Fact]
     public async Task Prompt_assembler_fences_prompt_injection_evidence_as_untrusted_data()
     {
         var fixture = await CreateFixtureAsync(
@@ -344,7 +429,10 @@ public sealed class AdvisoryIncidentClassifierTests
         int maxSeverityDelta = 3,
         double maxConfidenceDelta = 0.2,
         bool responseCacheEnabled = false,
-        int responseCacheTtlHours = 72) => new()
+        int responseCacheTtlHours = 72,
+        bool ensembleEnabled = false,
+        string secondModelEndpoint = LocalModelAdvisorSettings.DefaultSecondModelEndpoint,
+        string secondModel = "") => new()
     {
         Enabled = enabled,
         Endpoint = LocalModelAdvisorSettings.DefaultEndpoint,
@@ -358,6 +446,9 @@ public sealed class AdvisoryIncidentClassifierTests
         MaxConfidenceDelta = maxConfidenceDelta,
         ResponseCacheEnabled = responseCacheEnabled,
         ResponseCacheTtlHours = responseCacheTtlHours,
+        EnsembleEnabled = ensembleEnabled,
+        SecondModelEndpoint = secondModelEndpoint,
+        SecondModel = secondModel,
         UpdatedAt = DateTimeOffset.UtcNow,
         UpdatedBy = "test",
     };
@@ -471,12 +562,22 @@ public sealed class AdvisoryIncidentClassifierTests
 
         public InferenceResult? Result { get; set; }
 
+        public Queue<InferenceResult> Results { get; } = new();
+
         public InferenceRequest? LastRequest { get; private set; }
+
+        public List<InferenceRequest> Requests { get; } = [];
 
         public Task<InferenceResult> InferAsync(InferenceRequest request, CancellationToken cancellationToken = default)
         {
             CallCount++;
             LastRequest = request;
+            Requests.Add(request);
+            if (Results.Count > 0)
+            {
+                return Task.FromResult(Results.Dequeue());
+            }
+
             return Task.FromResult(Result ?? InferenceResult.Success(RawOutput, ModelId, TimeSpan.FromMilliseconds(5)));
         }
     }

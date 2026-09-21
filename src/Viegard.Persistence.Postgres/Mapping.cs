@@ -653,6 +653,9 @@ internal static class Mapping
         MaxConfidenceDelta = settings.MaxConfidenceDelta,
         ResponseCacheEnabled = settings.ResponseCacheEnabled,
         ResponseCacheTtlHours = settings.ResponseCacheTtlHours,
+        EnsembleEnabled = settings.EnsembleEnabled,
+        SecondModelEndpoint = settings.SecondModelEndpoint,
+        SecondModel = settings.SecondModel,
         Version = settings.Version,
         SeededAt = Utc(settings.SeededAt),
         UpdatedAt = Utc(settings.UpdatedAt),
@@ -674,6 +677,9 @@ internal static class Mapping
         MaxConfidenceDelta = row.MaxConfidenceDelta,
         ResponseCacheEnabled = row.ResponseCacheEnabled,
         ResponseCacheTtlHours = row.ResponseCacheTtlHours,
+        EnsembleEnabled = row.EnsembleEnabled,
+        SecondModelEndpoint = row.SecondModelEndpoint,
+        SecondModel = row.SecondModel,
         Version = row.Version,
         SeededAt = row.SeededAt,
         UpdatedAt = row.UpdatedAt,
@@ -774,6 +780,7 @@ internal static class Mapping
         FailureKind = record.FailureKind,
         ModelId = record.ModelId,
         ServedFromCache = record.ServedFromCache,
+        EnsembleDetailJson = record.EnsembleDetail is null ? null : ToJson(record.EnsembleDetail),
         CreatedAt = Utc(record.CreatedAt),
     };
 
@@ -792,6 +799,7 @@ internal static class Mapping
         FailureKind = row.FailureKind,
         ModelId = row.ModelId,
         ServedFromCache = row.ServedFromCache,
+        EnsembleDetail = row.EnsembleDetailJson is null ? null : FromJson<AdvisorEnsembleDetail>(row.EnsembleDetailJson),
         CreatedAt = row.CreatedAt,
     };
 

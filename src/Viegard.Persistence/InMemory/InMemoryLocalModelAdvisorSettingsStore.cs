@@ -102,6 +102,9 @@ public sealed class InMemoryLocalModelAdvisorSettingsStore : ILocalModelAdvisorS
                 MaxConfidenceDelta = normalized.MaxConfidenceDelta,
                 ResponseCacheEnabled = normalized.ResponseCacheEnabled,
                 ResponseCacheTtlHours = normalized.ResponseCacheTtlHours,
+                EnsembleEnabled = normalized.EnsembleEnabled,
+                SecondModelEndpoint = normalized.SecondModelEndpoint,
+                SecondModel = normalized.SecondModel,
                 Version = _settings.Version + 1,
                 UpdatedAt = updatedAt.ToUniversalTime(),
                 UpdatedBy = LocalModelAdvisorSettingsValidator.NormalizeUpdatedBy(updatedBy),
@@ -179,11 +182,19 @@ public sealed class InMemoryLocalModelAdvisorSettingsStore : ILocalModelAdvisorS
         _ = LocalModelAdvisorSettingsValidator.TryNormalizeKeepAlive(settings.KeepAlive, out var keepAlive, out var keepAliveError)
             ? true
             : throw new InvalidOperationException(keepAliveError);
+        _ = LocalModelAdvisorSettingsValidator.TryNormalizeSecondModelEndpoint(settings.SecondModelEndpoint, settings.EnsembleEnabled, out var secondModelEndpoint, out var secondModelEndpointError)
+            ? true
+            : throw new InvalidOperationException(secondModelEndpointError);
+        _ = LocalModelAdvisorSettingsValidator.TryNormalizeSecondModel(settings.SecondModel, settings.EnsembleEnabled, out var secondModel, out var secondModelError)
+            ? true
+            : throw new InvalidOperationException(secondModelError);
         return settings with
         {
             Endpoint = endpoint,
             Model = model,
             KeepAlive = keepAlive,
+            SecondModelEndpoint = secondModelEndpoint,
+            SecondModel = secondModel,
         };
     }
 }

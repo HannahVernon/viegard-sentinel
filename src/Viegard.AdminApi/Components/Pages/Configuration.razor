@@ -662,6 +662,21 @@
                     <td>@(LocalModelAdvisorCurrentSettings.ResponseCacheEnabled ? "On" : "Off"), @LocalModelAdvisorCurrentSettings.ResponseCacheTtlHours.ToString(System.Globalization.CultureInfo.InvariantCulture) hour(s)</td>
                     <td>When on, equivalent recent prompts reuse the raw validated model output and re-apply current clamp settings.</td>
                 </tr>
+                <tr>
+                    <td><code>Ensemble</code></td>
+                    <td>@(LocalModelAdvisorCurrentSettings.EnsembleEnabled ? "On" : "Off")</td>
+                    <td>When on, a second local model is consulted and the raw pre-clamp outputs are averaged.</td>
+                </tr>
+                <tr>
+                    <td><code>SecondModelEndpoint</code></td>
+                    <td><code>@LocalModelAdvisorCurrentSettings.SecondModelEndpoint</code></td>
+                    <td>Absolute http or https base URL for the second model's Ollama service.</td>
+                </tr>
+                <tr>
+                    <td><code>SecondModel</code></td>
+                    <td><code>@(string.IsNullOrWhiteSpace(LocalModelAdvisorCurrentSettings.SecondModel) ? "-" : LocalModelAdvisorCurrentSettings.SecondModel)</code></td>
+                    <td>Ollama model name used for the second advisory assessment.</td>
+                </tr>
             </tbody>
         </table>
 
@@ -726,6 +741,21 @@
                     Response cache TTL (hours)
                     <input name="responseCacheTtlHours" type="number" min="1" max="2160" step="1" value="@LocalModelAdvisorCurrentSettings.ResponseCacheTtlHours.ToString(System.Globalization.CultureInfo.InvariantCulture)" required />
                     <span class="small">Default is 72 hours.  Existing entries expire at their saved expiry time.</span>
+                </label>
+                <label class="checkbox-label">
+                    <input name="ensembleEnabled" type="checkbox" checked="@LocalModelAdvisorCurrentSettings.EnsembleEnabled" />
+                    Ensemble enabled
+                    <span class="small">When checked, the advisor averages primary and second model outputs before applying the escalation-only clamp.</span>
+                </label>
+                <label>
+                    Second model endpoint
+                    <input name="secondModelEndpoint" maxlength="@LocalModelAdvisorSettings.MaxEndpointLength" value="@LocalModelAdvisorCurrentSettings.SecondModelEndpoint" />
+                    <span class="small">Absolute http or https URL for the second model.  Required only when ensemble is enabled.</span>
+                </label>
+                <label>
+                    Second model
+                    <input name="secondModel" maxlength="@LocalModelAdvisorSettings.MaxModelLength" value="@LocalModelAdvisorCurrentSettings.SecondModel" />
+                    <span class="small">Ollama model name for the second consult.  Required only when ensemble is enabled.</span>
                 </label>
                 <button type="submit">Save local-model advisor settings</button>
             </form>

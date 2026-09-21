@@ -30,6 +30,19 @@ public sealed class LocalModelAdvisorResponseCacheTests
     }
 
     [Fact]
+    public void Cache_key_changes_between_single_model_and_ensemble_identity()
+    {
+        var variables = Variables();
+        var single = LocalModelAdvisorResponseCacheKey.Build("template-v1", "model-a", variables);
+        var ensemble = LocalModelAdvisorResponseCacheKey.Build(
+            "template-v1",
+            "ensemble:avg|model-a@http://127.0.0.1:11434|model-b@http://127.0.0.2:11434",
+            variables);
+
+        Assert.NotEqual(single, ensemble);
+    }
+
+    [Fact]
     public async Task In_memory_store_returns_only_non_expired_entries_and_prunes_expired()
     {
         var store = new InMemoryLocalModelAdvisorResponseCacheStore();

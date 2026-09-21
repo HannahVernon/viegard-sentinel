@@ -34,6 +34,35 @@ public sealed class OllamaInferenceProviderTests
         Assert.Contains("\"format\":", handler.LastRequestBody, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Request_endpoint_and_model_override_settings_when_present()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+                {"message":{"role":"assistant","content":"{}"}}
+                """),
+        });
+        var provider = await CreateProviderAsync(handler);
+
+        var overrideResult = await provider.InferAsync(Request() with
+        {
+            Endpoint = "http://second.example",
+            Model = "qwen-second:latest",
+        });
+
+        Assert.True(overrideResult.Succeeded);
+        Assert.Equal("http://second.example/api/chat", handler.LastRequestUri!.AbsoluteUri);
+        Assert.Contains("\"model\":\"qwen-second:latest\"", handler.LastRequestBody, StringComparison.Ordinal);
+        Assert.Equal("qwen-second:latest", overrideResult.ModelId);
+
+        var fallbackResult = await provider.InferAsync(Request());
+
+        Assert.True(fallbackResult.Succeeded);
+        Assert.Equal("http://ollama.example/api/chat", handler.LastRequestUri!.AbsoluteUri);
+        Assert.Contains("\"model\":\"qwen-test:latest\"", handler.LastRequestBody, StringComparison.Ordinal);
+        Assert.Equal("qwen-test:latest", fallbackResult.ModelId);
+    }
 
     [Fact]
     public async Task Infer_uses_request_template_when_provided_and_static_template_when_null()

@@ -15,6 +15,7 @@ public static class PipelineWorkerRegistration
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PolicyThresholdSeedWorker>());
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PolicyPostureSeedWorker>());
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, LocalModelAdvisorSeedWorker>());
+            services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, LocalModelAdvisorPromptTemplateSeedWorker>());
             services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, RetentionWorker>());
         }
 

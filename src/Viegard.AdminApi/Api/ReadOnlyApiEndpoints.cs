@@ -164,10 +164,12 @@ public static class ReadOnlyApiEndpoints
         HttpContext context,
         ILocalModelAdvisorConsultStore consults,
         ILocalModelAdvisorSettingsStore settingsStore,
-        ILocalModelAdvisorCategoryBandStore categoryBands)
+        ILocalModelAdvisorCategoryBandStore categoryBands,
+        ILocalModelAdvisorPromptTemplateStore promptTemplates)
     {
         var settings = await settingsStore.GetAsync(context.RequestAborted).ConfigureAwait(false);
         var bands = await categoryBands.ListAsync(context.RequestAborted).ConfigureAwait(false);
+        var activePromptRevision = await promptTemplates.GetActiveAsync(Viegard.Application.Classifiers.AdvisoryIncidentClassifier.PromptTemplateId, context.RequestAborted).ConfigureAwait(false);
         var now = DateTimeOffset.UtcNow;
         var definitions = new (string Label, DateTimeOffset Since)[]
         {
@@ -230,7 +232,15 @@ public static class ReadOnlyApiEndpoints
             version = band.Version,
             updatedAt = band.UpdatedAt,
         }).ToList();
-        return Results.Json(new { configuration, categoryOverrides, windows }, Json);
+        var activePromptTemplate = activePromptRevision is null
+            ? null
+            : new
+            {
+                templateId = activePromptRevision.TemplateId,
+                revision = activePromptRevision.Revision,
+                createdAt = activePromptRevision.CreatedAt,
+            };
+        return Results.Json(new { configuration, categoryOverrides, activePromptTemplate, windows }, Json);
     }
 
     internal static async Task<IResult> ListAdvisorConsultsAsync(

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Viegard.AdminApi.Api;
+using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
 using Viegard.Domain;
 using Viegard.Domain.Classifications;
@@ -96,6 +97,14 @@ public sealed class ReadOnlyApiEndpointsTests
             expectedVersion: 0,
             updatedBy: "tester",
             updatedAt: now);
+        var promptTemplates = new InMemoryLocalModelAdvisorPromptTemplateStore();
+        var activePrompt = await promptTemplates.CreateRevisionAsync(
+            AdvisoryIncidentClassifier.PromptTemplateId,
+            LocalModelAdvisorPrompt.Template.SystemInstructions,
+            LocalModelAdvisorPrompt.Template.ApplicationInstructions,
+            "test",
+            "tester",
+            now);
         var categoryBands = new InMemoryLocalModelAdvisorCategoryBandStore();
         await categoryBands.UpsertAsync(
             new LocalModelAdvisorCategoryBand
@@ -113,7 +122,7 @@ public sealed class ReadOnlyApiEndpointsTests
         var context = Context(string.Empty);
 
         var json = await ExecuteAsync(
-            await ReadOnlyApiEndpoints.GetAdvisorSummaryAsync(context, consults, settings, categoryBands),
+            await ReadOnlyApiEndpoints.GetAdvisorSummaryAsync(context, consults, settings, categoryBands, promptTemplates),
             context);
 
         var config = json.GetProperty("configuration");
@@ -127,6 +136,10 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.Equal(2, config.GetProperty("maxSeverityDelta").GetInt32());
         Assert.Equal(0.15, config.GetProperty("maxConfidenceDelta").GetDouble());
         Assert.Equal(1, config.GetProperty("version").GetInt32());
+
+        var activePromptTemplate = json.GetProperty("activePromptTemplate");
+        Assert.Equal(AdvisoryIncidentClassifier.PromptTemplateId, activePromptTemplate.GetProperty("templateId").GetString());
+        Assert.Equal(activePrompt.Revision, activePromptTemplate.GetProperty("revision").GetInt32());
 
         var categoryOverride = Assert.Single(json.GetProperty("categoryOverrides").EnumerateArray());
         Assert.Equal("path-traversal", categoryOverride.GetProperty("category").GetString());

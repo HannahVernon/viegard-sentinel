@@ -702,6 +702,32 @@ internal static class Mapping
         UpdatedBy = row.UpdatedBy,
     };
 
+
+    public static LocalModelAdvisorPromptTemplateRow ToRow(this LocalModelAdvisorPromptTemplateRevision revision) => new()
+    {
+        Id = revision.Id,
+        TemplateId = revision.TemplateId,
+        Revision = revision.Revision,
+        SystemInstructions = revision.SystemInstructions,
+        ApplicationInstructions = revision.ApplicationInstructions,
+        IsActive = revision.IsActive,
+        Note = revision.Note,
+        CreatedAt = Utc(revision.CreatedAt),
+        CreatedBy = revision.CreatedBy,
+    };
+
+    public static LocalModelAdvisorPromptTemplateRevision ToDomain(this LocalModelAdvisorPromptTemplateRow row) => new()
+    {
+        Id = row.Id,
+        TemplateId = row.TemplateId,
+        Revision = row.Revision,
+        SystemInstructions = row.SystemInstructions,
+        ApplicationInstructions = row.ApplicationInstructions,
+        IsActive = row.IsActive,
+        Note = row.Note,
+        CreatedAt = row.CreatedAt,
+        CreatedBy = row.CreatedBy,
+    };
     public static LocalModelAdvisorConsultRow ToRow(this AdvisorConsultRecord record) => new()
     {
         Id = record.Id,

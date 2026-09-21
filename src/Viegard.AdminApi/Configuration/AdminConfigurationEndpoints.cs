@@ -43,6 +43,12 @@ public static class AdminConfigurationEndpoints
         app.MapPost("/configuration/local-model-advisor/category-bands/delete", DeleteLocalModelAdvisorCategoryBandAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
+        app.MapPost("/configuration/local-model-advisor/prompt-template", SaveLocalModelAdvisorPromptTemplateAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/local-model-advisor/prompt-template/activate", ActivateLocalModelAdvisorPromptTemplateAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
         app.MapPost("/configuration/satellites/create", CreateSatelliteAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
@@ -388,6 +394,117 @@ public static class AdminConfigurationEndpoints
             null,
             context.RequestAborted).ConfigureAwait(false);
         return Redirect(LocalModelAdvisorConfigurationPath, status: $"Local-model advisor override deleted for {category}.");
+    }
+
+    internal static async Task<IResult> SaveLocalModelAdvisorPromptTemplateAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ILocalModelAdvisorPromptTemplateStore promptTemplates,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Step-up verification is required before editing the local-model advisor prompt template.");
+        }
+
+        if (!TryReadLocalModelAdvisorPromptTemplate(form, out var templateId, out var systemInstructions, out var applicationInstructions, out var note, out var error))
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: error);
+        }
+
+        var before = await promptTemplates.GetActiveAsync(templateId, context.RequestAborted).ConfigureAwait(false);
+        LocalModelAdvisorPromptTemplateRevision created;
+        try
+        {
+            created = await promptTemplates.CreateRevisionAsync(
+                    templateId,
+                    systemInstructions,
+                    applicationInstructions,
+                    note,
+                    user.Username,
+                    DateTimeOffset.UtcNow,
+                    context.RequestAborted)
+                .ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: ex.Message);
+        }
+
+        await configAuditor.RecordLocalModelAdvisorPromptTemplateWriteAsync(
+            user.Username,
+            created.TemplateId,
+            created.Revision,
+            "CreateRevision",
+            before,
+            created,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(LocalModelAdvisorConfigurationPath, status: $"Local-model advisor prompt template revision {created.Revision.ToString(CultureInfo.InvariantCulture)} saved and activated.");
+    }
+
+    internal static async Task<IResult> ActivateLocalModelAdvisorPromptTemplateAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ILocalModelAdvisorPromptTemplateStore promptTemplates,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Step-up verification is required before activating a local-model advisor prompt template revision.");
+        }
+
+        if (!Guid.TryParse(form["id"].ToString(), out var id) || id == Guid.Empty)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor prompt template revision id was not valid.  Reload the page and try again.");
+        }
+
+        var result = await promptTemplates.ActivateAsync(id, context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded || result.After is null)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor prompt template revision was not found.  Reload the page and try again.");
+        }
+
+        await configAuditor.RecordLocalModelAdvisorPromptTemplateWriteAsync(
+            user.Username,
+            result.After.TemplateId,
+            result.After.Revision,
+            "ActivateRevision",
+            result.Before,
+            result.After,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(LocalModelAdvisorConfigurationPath, status: $"Local-model advisor prompt template revision {result.After.Revision.ToString(CultureInfo.InvariantCulture)} activated.");
     }
 
     internal static async Task<IResult> CreateSatelliteAsync(
@@ -1522,6 +1639,30 @@ public static class AdminConfigurationEndpoints
 
         result = parsed;
         error = string.Empty;
+        return true;
+    }
+
+    private static bool TryReadLocalModelAdvisorPromptTemplate(
+        IFormCollection form,
+        out string templateId,
+        out string systemInstructions,
+        out string applicationInstructions,
+        out string? note,
+        out string error)
+    {
+        templateId = string.Empty;
+        systemInstructions = string.Empty;
+        applicationInstructions = string.Empty;
+        note = null;
+        if (!LocalModelAdvisorPromptTemplateValidator.TryNormalizeTemplateId(form["templateId"].ToString(), out templateId, out error)
+            || !LocalModelAdvisorPromptTemplateValidator.TryNormalizeInstructions(form["systemInstructions"].ToString(), out systemInstructions, out error)
+            || !LocalModelAdvisorPromptTemplateValidator.TryNormalizeInstructions(form["applicationInstructions"].ToString(), out applicationInstructions, out error)
+            || !LocalModelAdvisorPromptTemplateValidator.TryNormalizeNote(form["note"].ToString(), out note, out error)
+            || !LocalModelAdvisorPromptTemplateValidator.TryValidate(templateId, systemInstructions, applicationInstructions, note, out error))
+        {
+            return false;
+        }
+
         return true;
     }
 

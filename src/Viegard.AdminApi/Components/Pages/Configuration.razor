@@ -4,6 +4,7 @@
 @inject IJetPackFeedSettingsStore JetPackFeedSettingsStore
 @inject ILocalModelAdvisorSettingsStore LocalModelAdvisorSettingsStore
 @inject ILocalModelAdvisorCategoryBandStore LocalModelAdvisorCategoryBandStore
+@inject ILocalModelAdvisorPromptTemplateStore LocalModelAdvisorPromptTemplateStore
 @inject IPolicyThresholdSettingsStore PolicyThresholdSettingsStore
 @inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
 @inject IIngestionFilterStore IngestionFilters
@@ -614,7 +615,7 @@
             <dt>Settings row</dt><dd>@LocalModelAdvisorSettingsState</dd>
             <dt>Version</dt><dd>@(_localModelAdvisorSettings?.Version.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")</dd>
             <dt>Last changed</dt><dd>@LocalModelAdvisorLastChanged</dd>
-            <dt>Prompt template</dt><dd><code>@AdvisoryIncidentClassifier.PromptTemplateVersion</code></dd>
+            <dt>Prompt template</dt><dd><code>@ActivePromptTemplateVersion</code></dd>
         </dl>
 
         @if (_localModelAdvisorSettings is null)
@@ -719,6 +720,80 @@
             <div class="step-up-strip">
                 <span>Editing local-model advisor settings requires step-up verification.</span>
                 <StepUpPrompt ReturnTo="/configuration#local-model-advisor" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-local-model-advisor" />
+            </div>
+        }
+
+        <h3>Prompt template</h3>
+        <p class="small">Prompt revisions are append-only.  Saving creates a new active revision; activating a prior row changes only the active pointer.</p>
+        <p class="small">Allowed placeholders: @AllowedPromptPlaceholders.  The template must include <code>{output_schema}</code>.</p>
+        @if (_localModelAdvisorPromptTemplateRevisions.Count == 0)
+        {
+            <p class="message">No database prompt revision is active.  The code template is being used until the seed worker creates revision 1.</p>
+        }
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Revision</th>
+                    <th>Created</th>
+                    <th>Created by</th>
+                    <th>Active</th>
+                    <th>Note</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var revision in _localModelAdvisorPromptTemplateRevisions)
+                {
+                    <tr>
+                        <td>@revision.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture)</td>
+                        <td>@Display.Format(revision.CreatedAt)</td>
+                        <td>@revision.CreatedBy</td>
+                        <td>@(revision.IsActive ? "Yes" : "No")</td>
+                        <td>@revision.Note</td>
+                        <td class="actions-cell">
+                            @if (_stepUpFresh && !revision.IsActive)
+                            {
+                                <form method="post" action="/configuration/local-model-advisor/prompt-template/activate">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="id" value='@revision.Id.ToString("N")' />
+                                    <button type="submit">Activate</button>
+                                </form>
+                            }
+                            else if (!_stepUpFresh)
+                            {
+                                <span class="small">Step-up required</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/local-model-advisor/prompt-template" class="edit-form">
+                <AntiforgeryToken />
+                <input type="hidden" name="templateId" value="@AdvisoryIncidentClassifier.PromptTemplateId" />
+                <label>
+                    System instructions
+                    <textarea name="systemInstructions" maxlength="@LocalModelAdvisorPromptTemplateRevision.MaxInstructionsLength" rows="8" required>@PromptSystemInstructions</textarea>
+                </label>
+                <label>
+                    Application instructions
+                    <textarea name="applicationInstructions" maxlength="@LocalModelAdvisorPromptTemplateRevision.MaxInstructionsLength" rows="8" required>@PromptApplicationInstructions</textarea>
+                </label>
+                <label>
+                    Admin note
+                    <input name="note" maxlength="@LocalModelAdvisorPromptTemplateRevision.MaxNoteLength" placeholder="Reason for this revision" />
+                </label>
+                <button type="submit">Save prompt template revision</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Editing the local-model advisor prompt template requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#local-model-advisor" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-local-model-advisor-prompt" />
             </div>
         }
     </section>
@@ -1067,6 +1142,7 @@
     private JetPackFeedSettings? _jetPackSettings;
     private LocalModelAdvisorSettings? _localModelAdvisorSettings;
     private IReadOnlyList<LocalModelAdvisorCategoryBand> _localModelAdvisorCategoryBands = [];
+    private IReadOnlyList<LocalModelAdvisorPromptTemplateRevision> _localModelAdvisorPromptTemplateRevisions = [];
     private PolicyThresholdSettings? _thresholdSettings;
     private PolicyPostureSettings? _postureSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
@@ -1133,6 +1209,23 @@
         _ => "Configured in the admin UI before automatic seeding",
     };
 
+    private LocalModelAdvisorPromptTemplateRevision? ActivePromptTemplateRevision =>
+        _localModelAdvisorPromptTemplateRevisions.FirstOrDefault(r => r.IsActive);
+
+    private string ActivePromptTemplateVersion =>
+        ActivePromptTemplateRevision is { } revision
+            ? $"{AdvisoryIncidentClassifier.PromptTemplateVersion}#r{revision.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+            : AdvisoryIncidentClassifier.PromptTemplateVersion;
+
+    private string PromptSystemInstructions =>
+        ActivePromptTemplateRevision?.SystemInstructions ?? LocalModelAdvisorPrompt.Template.SystemInstructions;
+
+    private string PromptApplicationInstructions =>
+        ActivePromptTemplateRevision?.ApplicationInstructions ?? LocalModelAdvisorPrompt.Template.ApplicationInstructions;
+
+    private string AllowedPromptPlaceholders =>
+        string.Join(", ", LocalModelAdvisorPromptTemplateValidator.AllowedPlaceholders.Order(StringComparer.Ordinal).Select(p => "{" + p + "}"));
+
     private string LocalModelAdvisorLastChanged => _localModelAdvisorSettings is null
         ? "Not seeded.  Showing deployment defaults; the settings row seeds on next maintenance startup."
         : $"{_localModelAdvisorSettings.UpdatedBy} at {Display.Format(_localModelAdvisorSettings.UpdatedAt)}";
@@ -1181,6 +1274,7 @@
         _jetPackSettings = await JetPackFeedSettingsStore.GetAsync().ConfigureAwait(false);
         _localModelAdvisorSettings = await LocalModelAdvisorSettingsStore.GetAsync().ConfigureAwait(false);
         _localModelAdvisorCategoryBands = await LocalModelAdvisorCategoryBandStore.ListAsync().ConfigureAwait(false);
+        _localModelAdvisorPromptTemplateRevisions = await LocalModelAdvisorPromptTemplateStore.ListAsync(AdvisoryIncidentClassifier.PromptTemplateId).ConfigureAwait(false);
         _thresholdSettings = await PolicyThresholdSettingsStore.GetAsync().ConfigureAwait(false);
         _postureSettings = await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();

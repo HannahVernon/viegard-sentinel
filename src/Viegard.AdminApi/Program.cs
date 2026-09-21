@@ -135,6 +135,7 @@ builder.Services.AddSingleton<RouterConnectivityTester>();
 builder.Services.AddSingleton<DecisionTargetResolver>();
 builder.Services.AddSingleton<LocalModelAdvisorSource>();
 builder.Services.AddSingleton<LocalModelAdvisorCategoryBandSource>();
+builder.Services.AddSingleton<LocalModelAdvisorPromptTemplateSource>();
 builder.Services.AddSingleton<Viegard.Application.Inference.Validation.ClassificationOutputValidator>();
 builder.Services.AddSingleton(new HttpClient());
 builder.Services.AddViegardOllamaInference();
@@ -254,6 +255,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IJetPackDesiredAddressStore, InMemoryJetPackDesiredAddressStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorSettingsStore, InMemoryLocalModelAdvisorSettingsStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorCategoryBandStore, InMemoryLocalModelAdvisorCategoryBandStore>();
+        builder.Services.AddSingleton<ILocalModelAdvisorPromptTemplateStore, InMemoryLocalModelAdvisorPromptTemplateStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorConsultStore, InMemoryLocalModelAdvisorConsultStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();

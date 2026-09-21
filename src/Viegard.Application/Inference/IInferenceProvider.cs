@@ -1,3 +1,5 @@
+using Viegard.Application.Inference.Prompts;
+
 namespace Viegard.Application.Inference;
 
 /// <summary>
@@ -36,6 +38,8 @@ public sealed record InferenceRequest
 {
     /// <summary>Identifier of the versioned prompt template to use.</summary>
     public required string TemplateId { get; init; }
+
+    public PromptTemplate? Template { get; init; }
 
     public required IReadOnlyList<PromptVariable> Variables { get; init; }
 

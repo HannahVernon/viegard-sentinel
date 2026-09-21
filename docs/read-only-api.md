@@ -36,6 +36,7 @@ Path | Returns
 `GET /api/v1/advisor/consults/by-classification/{id}` | The advisor consult recorded for a classification, if any
 `GET /api/v1/audit` | Audit ledger records
 `GET /api/v1/bans` | Active bans and the 50 most recent ban actions
+`GET /api/v1/instances` | Registered instances with deployed version and commit, roles, host, queues reported, last telemetry capture, and staleness light
 `GET /status/queues` | Queue and instance health (display-formatted)
 `GET /status/upgrades` | Recent host upgrade commands (display-formatted)
 `GET /status/bans` | Bans (display-formatted for the live UI)
@@ -53,7 +54,7 @@ Parameter | Meaning
 `minSeverity`, `maxSeverity` | Decisions only: classification severity bounds (1-10)
 `unreviewed` | Decisions only: `1` restricts to unreviewed decisions
 `stage` | Audit only: pipeline stage name
-`outcome` | Advisor consults also accept an outcome name (`Escalated`, `NoChange`, `ProviderFailed`, `InvalidOutput`, `SkippedOutOfBand`)
+`outcome` | Advisor consults also accept an outcome name (`Escalated`, `DeEscalated`, `NoChange`, `ProviderFailed`, `InvalidOutput`, `SkippedOutOfBand`)
 
 List responses share one shape:
 
@@ -82,3 +83,12 @@ one row per model with `modelId`, `endpoint`, nullable `severity`, nullable
 `confidence`, and `valid`; it is `null` for non-ensemble consults.
 
 The same response includes `activePromptTemplate` with `templateId`, `revision`, and `createdAt` for the active database prompt revision, or `null` before the prompt seed exists.
+
+`GET /api/v1/instances` returns `{ generatedAt, worstLight, instances }`.  Each
+instance row mirrors the Admin UI Instances view: `instanceId`, full `version`
+and `commitSha` (nullable), a nine-character `shortCommit` label, `roles`,
+`hostName`, nullable `upgradeTarget`, `startedAt`, `reportedAt`, the
+`queuesReported` array, nullable `lastCapturedAt`, and a `stalenessLight`
+traffic-light value (`Green`/`Amber`/`Red`, or `null` for a registry-only row
+with no queue telemetry).  The commit fields are the deployed-commit signal
+used for deployment verification.

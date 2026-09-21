@@ -86,6 +86,9 @@ public sealed class PostgresLocalModelAdvisorCategoryBandStore(
                 .SetProperty(r => r.InvokeConfidenceMax, normalized.InvokeConfidenceMax)
                 .SetProperty(r => r.MaxSeverityDelta, normalized.MaxSeverityDelta)
                 .SetProperty(r => r.MaxConfidenceDelta, normalized.MaxConfidenceDelta)
+                .SetProperty(r => r.DeEscalationEnabled, normalized.DeEscalationEnabled)
+                .SetProperty(r => r.MaxDownwardSeverityDelta, normalized.MaxDownwardSeverityDelta)
+                .SetProperty(r => r.MaxDownwardConfidenceDelta, normalized.MaxDownwardConfidenceDelta)
                 .SetProperty(r => r.Version, expectedVersion + 1)
                 .SetProperty(r => r.UpdatedAt, utcUpdatedAt)
                 .SetProperty(r => r.UpdatedBy, normalizedUpdatedBy),

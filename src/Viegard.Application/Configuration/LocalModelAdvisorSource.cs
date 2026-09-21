@@ -98,7 +98,12 @@ public sealed record LocalModelAdvisorValues(
     bool EnsembleEnabled = false,
     string SecondModelEndpoint = LocalModelAdvisorSettings.DefaultSecondModelEndpoint,
     string SecondModel = "",
-    AdvisorInjectionAction InjectionAction = AdvisorInjectionAction.SkipAdvisor)
+    AdvisorInjectionAction InjectionAction = AdvisorInjectionAction.SkipAdvisor,
+    bool DeEscalationEnabled = false,
+    int MaxDownwardSeverityDelta = 1,
+    double MaxDownwardConfidenceDelta = 0.10,
+    double DeEscalationMinModelConfidence = 0.70,
+    int DeEscalationProtectedSeverity = 7)
 {
     public static LocalModelAdvisorValues FromOptions(LocalModelAdvisorOptions options)
     {
@@ -124,7 +129,12 @@ public sealed record LocalModelAdvisorValues(
             options.EnsembleEnabled,
             secondModelEndpoint,
             secondModel,
-            options.InjectionAction);
+            options.InjectionAction,
+            options.DeEscalationEnabled,
+            options.MaxDownwardSeverityDelta,
+            options.MaxDownwardConfidenceDelta,
+            options.DeEscalationMinModelConfidence,
+            options.DeEscalationProtectedSeverity);
     }
 
     public static LocalModelAdvisorValues FromSettings(LocalModelAdvisorSettings settings)
@@ -151,7 +161,12 @@ public sealed record LocalModelAdvisorValues(
             settings.EnsembleEnabled,
             secondModelEndpoint,
             secondModel,
-            settings.InjectionAction);
+            settings.InjectionAction,
+            settings.DeEscalationEnabled,
+            settings.MaxDownwardSeverityDelta,
+            settings.MaxDownwardConfidenceDelta,
+            settings.DeEscalationMinModelConfidence,
+            settings.DeEscalationProtectedSeverity);
     }
 }
 
@@ -173,6 +188,11 @@ public sealed record LocalModelAdvisorSnapshot(
     string SecondModelEndpoint,
     string SecondModel,
     AdvisorInjectionAction InjectionAction,
+    bool DeEscalationEnabled,
+    int MaxDownwardSeverityDelta,
+    double MaxDownwardConfidenceDelta,
+    double DeEscalationMinModelConfidence,
+    int DeEscalationProtectedSeverity,
     int Version)
 {
     public static LocalModelAdvisorSnapshot Unseeded { get; } = new(
@@ -193,6 +213,11 @@ public sealed record LocalModelAdvisorSnapshot(
         LocalModelAdvisorSettings.DefaultSecondModelEndpoint,
         string.Empty,
         AdvisorInjectionAction.SkipAdvisor,
+        false,
+        1,
+        0.10,
+        0.70,
+        7,
         0);
 
     public static LocalModelAdvisorSnapshot Seeded(LocalModelAdvisorSettings settings)
@@ -217,6 +242,11 @@ public sealed record LocalModelAdvisorSnapshot(
             values.SecondModelEndpoint,
             values.SecondModel,
             values.InjectionAction,
+            values.DeEscalationEnabled,
+            values.MaxDownwardSeverityDelta,
+            values.MaxDownwardConfidenceDelta,
+            values.DeEscalationMinModelConfidence,
+            values.DeEscalationProtectedSeverity,
             settings.Version);
     }
 
@@ -238,6 +268,11 @@ public sealed record LocalModelAdvisorSnapshot(
                 EnsembleEnabled,
                 SecondModelEndpoint,
                 SecondModel,
-                InjectionAction)
+                InjectionAction,
+                DeEscalationEnabled,
+                MaxDownwardSeverityDelta,
+                MaxDownwardConfidenceDelta,
+                DeEscalationMinModelConfidence,
+                DeEscalationProtectedSeverity)
             : LocalModelAdvisorValues.FromOptions(fallbackOptions);
 }

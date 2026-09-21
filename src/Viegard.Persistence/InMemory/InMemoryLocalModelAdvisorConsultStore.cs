@@ -153,7 +153,7 @@ public sealed class InMemoryLocalModelAdvisorConsultStore : ILocalModelAdvisorCo
     }
 
     private static bool IsSuccessfulCall(AdvisorConsultOutcome outcome) =>
-        outcome is AdvisorConsultOutcome.Escalated or AdvisorConsultOutcome.NoChange;
+        outcome is AdvisorConsultOutcome.Escalated or AdvisorConsultOutcome.DeEscalated or AdvisorConsultOutcome.NoChange;
 
     private static AdvisorConsultRecord Normalize(AdvisorConsultRecord record) => record with
     {

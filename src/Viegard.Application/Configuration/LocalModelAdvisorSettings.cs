@@ -53,6 +53,16 @@ public sealed record LocalModelAdvisorSettings
 
     public AdvisorInjectionAction InjectionAction { get; init; } = AdvisorInjectionAction.SkipAdvisor;
 
+    public bool DeEscalationEnabled { get; init; }
+
+    public int MaxDownwardSeverityDelta { get; init; } = 1;
+
+    public double MaxDownwardConfidenceDelta { get; init; } = 0.10;
+
+    public double DeEscalationMinModelConfidence { get; init; } = 0.70;
+
+    public int DeEscalationProtectedSeverity { get; init; } = 7;
+
     public int Version { get; init; }
 
     public DateTimeOffset? SeededAt { get; init; }
@@ -84,6 +94,11 @@ public sealed record LocalModelAdvisorSettings
             SecondModelEndpoint = options.SecondModelEndpoint,
             SecondModel = options.SecondModel,
             InjectionAction = options.InjectionAction,
+            DeEscalationEnabled = options.DeEscalationEnabled,
+            MaxDownwardSeverityDelta = options.MaxDownwardSeverityDelta,
+            MaxDownwardConfidenceDelta = options.MaxDownwardConfidenceDelta,
+            DeEscalationMinModelConfidence = options.DeEscalationMinModelConfidence,
+            DeEscalationProtectedSeverity = options.DeEscalationProtectedSeverity,
             Version = 1,
             SeededAt = utc,
             UpdatedAt = utc,
@@ -106,6 +121,10 @@ public static class LocalModelAdvisorSettingsValidator
     public const string SecondModelEndpointError = "Local-model advisor second model endpoint must be an absolute http or https URL.";
     public const string SecondModelError = "Local-model advisor second model is required when ensemble is enabled, must not exceed 128 characters, and must not contain control characters.";
     public const string InjectionActionError = "Local-model advisor injection action must be RecordOnly or SkipAdvisor.";
+    public const string MaxDownwardSeverityDeltaError = "Local-model advisor max downward severity delta must be between 0 and 10.";
+    public const string MaxDownwardConfidenceDeltaError = "Local-model advisor max downward confidence delta must be between 0 and 1.";
+    public const string DeEscalationMinModelConfidenceError = "Local-model advisor de-escalation minimum model confidence must be between 0 and 1.";
+    public const string DeEscalationProtectedSeverityError = "Local-model advisor de-escalation protected severity must be between 0 and 10.";
 
     public static bool TryValidate(LocalModelAdvisorSettings settings, out string error)
     {
@@ -179,6 +198,30 @@ public static class LocalModelAdvisorSettingsValidator
         if (!Enum.IsDefined(settings.InjectionAction))
         {
             error = InjectionActionError;
+            return false;
+        }
+
+        if (settings.MaxDownwardSeverityDelta is < 0 or > 10)
+        {
+            error = MaxDownwardSeverityDeltaError;
+            return false;
+        }
+
+        if (!double.IsFinite(settings.MaxDownwardConfidenceDelta) || settings.MaxDownwardConfidenceDelta is < 0.0 or > 1.0)
+        {
+            error = MaxDownwardConfidenceDeltaError;
+            return false;
+        }
+
+        if (!double.IsFinite(settings.DeEscalationMinModelConfidence) || settings.DeEscalationMinModelConfidence is < 0.0 or > 1.0)
+        {
+            error = DeEscalationMinModelConfidenceError;
+            return false;
+        }
+
+        if (settings.DeEscalationProtectedSeverity is < 0 or > 10)
+        {
+            error = DeEscalationProtectedSeverityError;
             return false;
         }
 

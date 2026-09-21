@@ -241,6 +241,7 @@
     {
         AdvisorConsultOutcome.SkippedOutOfBand => "Skipped out of band",
         AdvisorConsultOutcome.Escalated => "Escalated",
+        AdvisorConsultOutcome.DeEscalated => "De-escalated",
         AdvisorConsultOutcome.NoChange => "No change",
         AdvisorConsultOutcome.ProviderFailed => "Provider failed",
         AdvisorConsultOutcome.InvalidOutput => "Invalid output",
@@ -250,6 +251,7 @@
     private static string AdvisorOutcomeCss(AdvisorConsultOutcome outcome) => outcome switch
     {
         AdvisorConsultOutcome.Escalated => "badge badge-amber",
+        AdvisorConsultOutcome.DeEscalated => "badge badge-blue",
         AdvisorConsultOutcome.NoChange => "badge badge-green",
         AdvisorConsultOutcome.ProviderFailed or AdvisorConsultOutcome.InvalidOutput => "badge badge-red",
         _ => "badge",

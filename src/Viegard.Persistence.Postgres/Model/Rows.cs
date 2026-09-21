@@ -458,6 +458,16 @@ public sealed class LocalModelAdvisorSettingsRow
 
     public int InjectionAction { get; set; }
 
+    public bool DeEscalationEnabled { get; set; }
+
+    public int MaxDownwardSeverityDelta { get; set; }
+
+    public double MaxDownwardConfidenceDelta { get; set; }
+
+    public double DeEscalationMinModelConfidence { get; set; }
+
+    public int DeEscalationProtectedSeverity { get; set; }
+
     public int Version { get; set; }
 
     public DateTimeOffset? SeededAt { get; set; }
@@ -480,6 +490,12 @@ public sealed class LocalModelAdvisorCategoryBandRow
     public int? MaxSeverityDelta { get; set; }
 
     public double? MaxConfidenceDelta { get; set; }
+
+    public bool? DeEscalationEnabled { get; set; }
+
+    public int? MaxDownwardSeverityDelta { get; set; }
+
+    public double? MaxDownwardConfidenceDelta { get; set; }
 
     public int Version { get; set; }
 

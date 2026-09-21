@@ -61,6 +61,11 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 second_model_endpoint,
                 second_model,
                 injection_action,
+                de_escalation_enabled,
+                max_downward_severity_delta,
+                max_downward_confidence_delta,
+                de_escalation_min_model_confidence,
+                de_escalation_protected_severity,
                 version,
                 seeded_at,
                 updated_at,
@@ -84,6 +89,11 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 {seed.SecondModelEndpoint},
                 {seed.SecondModel},
                 {(int)seed.InjectionAction},
+                {seed.DeEscalationEnabled},
+                {seed.MaxDownwardSeverityDelta},
+                {seed.MaxDownwardConfidenceDelta},
+                {seed.DeEscalationMinModelConfidence},
+                {seed.DeEscalationProtectedSeverity},
                 {seed.Version},
                 {seed.SeededAt},
                 {seed.UpdatedAt},
@@ -164,6 +174,11 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 .SetProperty(r => r.SecondModelEndpoint, normalized.SecondModelEndpoint)
                 .SetProperty(r => r.SecondModel, normalized.SecondModel)
                 .SetProperty(r => r.InjectionAction, (int)normalized.InjectionAction)
+                .SetProperty(r => r.DeEscalationEnabled, normalized.DeEscalationEnabled)
+                .SetProperty(r => r.MaxDownwardSeverityDelta, normalized.MaxDownwardSeverityDelta)
+                .SetProperty(r => r.MaxDownwardConfidenceDelta, normalized.MaxDownwardConfidenceDelta)
+                .SetProperty(r => r.DeEscalationMinModelConfidence, normalized.DeEscalationMinModelConfidence)
+                .SetProperty(r => r.DeEscalationProtectedSeverity, normalized.DeEscalationProtectedSeverity)
                 .SetProperty(r => r.Version, expectedVersion + 1)
                 .SetProperty(r => r.UpdatedAt, utcUpdatedAt)
                 .SetProperty(r => r.UpdatedBy, normalizedUpdatedBy),

@@ -17,6 +17,8 @@ public sealed class LocalModelAdvisorSettingsTests
         { Valid() with { InvokeConfidenceMin = -0.01 }, LocalModelAdvisorSettingsValidator.ConfidenceBandError },
         { Valid() with { MaxSeverityDelta = 11 }, LocalModelAdvisorSettingsValidator.MaxSeverityDeltaError },
         { Valid() with { MaxConfidenceDelta = 1.1 }, LocalModelAdvisorSettingsValidator.MaxConfidenceDeltaError },
+        { Valid() with { ResponseCacheTtlHours = 0 }, LocalModelAdvisorSettingsValidator.ResponseCacheTtlError },
+        { Valid() with { ResponseCacheTtlHours = 2161 }, LocalModelAdvisorSettingsValidator.ResponseCacheTtlError },
     };
 
     [Fact]
@@ -52,12 +54,16 @@ public sealed class LocalModelAdvisorSettingsTests
             InvokeConfidenceMax = 0.8,
             MaxSeverityDelta = 2,
             MaxConfidenceDelta = 0.1,
+            ResponseCacheEnabled = true,
+            ResponseCacheTtlHours = 24,
         }, seededAt);
 
         Assert.NotNull(seeded);
         Assert.True(seeded!.Enabled);
         Assert.Equal("http://127.0.0.1:11434", seeded.Endpoint);
         Assert.Equal("qwen-test:latest", seeded.Model);
+        Assert.True(seeded.ResponseCacheEnabled);
+        Assert.Equal(24, seeded.ResponseCacheTtlHours);
         Assert.Equal(1, seeded.Version);
         Assert.Equal(seededAt, seeded.SeededAt);
 
@@ -93,6 +99,8 @@ public sealed class LocalModelAdvisorSettingsTests
         InvokeConfidenceMax = 0.85,
         MaxSeverityDelta = 3,
         MaxConfidenceDelta = 0.20,
+        ResponseCacheEnabled = false,
+        ResponseCacheTtlHours = 72,
         UpdatedAt = DateTimeOffset.UtcNow,
         UpdatedBy = "test",
     };

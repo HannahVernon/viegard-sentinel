@@ -190,6 +190,90 @@ public sealed class AdvisoryIncidentClassifierTests
     }
 
     [Fact]
+    public async Task Response_cache_miss_calls_provider_and_writes_entry()
+    {
+        var fixture = await CreateFixtureAsync(Settings(responseCacheEnabled: true));
+        fixture.Provider.RawOutput = Output(severity: 7, confidence: 0.7, "higher confidence");
+
+        await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+
+        Assert.Equal(1, fixture.Provider.CallCount);
+        Assert.NotNull(fixture.Provider.LastRequest);
+        var cacheKey = LocalModelAdvisorResponseCacheKey.Build(
+            LocalModelAdvisorPrompt.Template.Version,
+            LocalModelAdvisorSettings.DefaultModel,
+            fixture.Provider.LastRequest!.Variables);
+        var cached = await fixture.CacheStore.GetAsync(cacheKey, DateTimeOffset.UtcNow);
+        Assert.NotNull(cached);
+        Assert.Equal(7, cached!.Severity);
+        Assert.Equal(0.7, cached.Confidence, precision: 10);
+    }
+
+    [Fact]
+    public async Task Response_cache_hit_skips_provider_and_records_served_from_cache()
+    {
+        var fixture = await CreateFixtureAsync(Settings(responseCacheEnabled: true));
+        fixture.Provider.RawOutput = Output(severity: 7, confidence: 0.7, "higher confidence");
+
+        await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+        fixture.Provider.RawOutput = Output(severity: 9, confidence: 0.9, "should not be called");
+        var second = await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+
+        Assert.Equal(1, fixture.Provider.CallCount);
+        var classification = Assert.IsType<Classification>(second.Classification);
+        Assert.Equal(7, classification.Severity);
+        Assert.Equal(0.7, classification.Confidence, precision: 10);
+        Assert.Equal([false, true], fixture.Diagnostics.Records.Select(r => r.ServedFromCache).ToArray());
+        Assert.Equal(AdvisorConsultOutcome.Escalated, fixture.Diagnostics.Records[1].Outcome);
+    }
+
+    [Fact]
+    public async Task Response_cache_hit_reapplies_current_clamp_settings()
+    {
+        var cacheStore = new ForcedHitCacheStore(new LocalModelAdvisorResponseCacheEntry
+        {
+            CacheKey = "forced",
+            ModelId = LocalModelAdvisorSettings.DefaultModel,
+            TemplateVersion = LocalModelAdvisorPrompt.Template.Version,
+            Severity = 10,
+            Confidence = 1.0,
+            Reasons = ["cached raw output"],
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+        });
+        var fixture = await CreateFixtureAsync(
+            Settings(maxSeverityDelta: 1, maxConfidenceDelta: 0.1, responseCacheEnabled: true),
+            cacheStore: cacheStore);
+        var updated = await fixture.SettingsStore.UpsertAsync(
+            Settings(maxSeverityDelta: 3, maxConfidenceDelta: 0.3, responseCacheEnabled: true),
+            expectedVersion: 1,
+            updatedBy: "test",
+            updatedAt: DateTimeOffset.UtcNow);
+        Assert.True(updated.Succeeded);
+        await fixture.Source.RefreshAsync();
+
+        var second = await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+
+        Assert.Equal(0, fixture.Provider.CallCount);
+        var classification = Assert.IsType<Classification>(second.Classification);
+        Assert.Equal(9, classification.Severity);
+        Assert.Equal(0.9, classification.Confidence, precision: 10);
+        Assert.True(fixture.Diagnostics.Records[^1].ServedFromCache);
+    }
+
+    [Fact]
+    public async Task Response_cache_disabled_always_calls_provider_and_does_not_cache()
+    {
+        var fixture = await CreateFixtureAsync(Settings(responseCacheEnabled: false));
+
+        await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+        await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+
+        Assert.Equal(2, fixture.Provider.CallCount);
+        Assert.All(fixture.Diagnostics.Records, r => Assert.False(r.ServedFromCache));
+    }
+
+    [Fact]
     public async Task Prompt_assembler_fences_prompt_injection_evidence_as_untrusted_data()
     {
         var fixture = await CreateFixtureAsync(
@@ -214,7 +298,8 @@ public sealed class AdvisoryIncidentClassifierTests
         double evidenceScore = 3.0,
         string evidenceDescription = "Rule http.path-traversal: decoded URI contains parent-directory traversal.",
         RecordingDiagnostics? diagnostics = null,
-        LocalModelAdvisorCategoryBand? categoryBand = null)
+        LocalModelAdvisorCategoryBand? categoryBand = null,
+        ILocalModelAdvisorResponseCacheStore? cacheStore = null)
     {
         var incidentStore = new InMemoryIncidentStore();
         var eventStore = new InMemoryEventStore();
@@ -231,6 +316,7 @@ public sealed class AdvisoryIncidentClassifierTests
         var categoryBandSource = new LocalModelAdvisorCategoryBandSource(bandStore);
         await categoryBandSource.RefreshAsync();
         var provider = new FakeInferenceProvider();
+        cacheStore ??= new InMemoryLocalModelAdvisorResponseCacheStore();
         diagnostics ??= new RecordingDiagnostics();
         var classifier = new AdvisoryIncidentClassifier(
             new DeterministicIncidentClassifier(incidentStore, Options.Create(new ClassifierOptions())),
@@ -242,12 +328,13 @@ public sealed class AdvisoryIncidentClassifierTests
             Options.Create(new LocalModelAdvisorOptions()),
             provider,
             new ClassificationOutputValidator(),
-            diagnostics);
+            diagnostics,
+            cacheStore);
         var eventId = Guid.NewGuid();
         var incident = Incident(eventId, evidenceDescription, evidenceScore);
         await eventStore.AddAsync(HostileEvent(eventId));
         await incidentStore.UpsertAsync(incident);
-        return new Fixture(classifier, provider, incident, diagnostics);
+        return new Fixture(classifier, provider, incident, diagnostics, cacheStore, store, source);
     }
 
     private static LocalModelAdvisorSettings Settings(
@@ -255,7 +342,9 @@ public sealed class AdvisoryIncidentClassifierTests
         double invokeConfidenceMin = 0.5,
         double invokeConfidenceMax = 0.85,
         int maxSeverityDelta = 3,
-        double maxConfidenceDelta = 0.2) => new()
+        double maxConfidenceDelta = 0.2,
+        bool responseCacheEnabled = false,
+        int responseCacheTtlHours = 72) => new()
     {
         Enabled = enabled,
         Endpoint = LocalModelAdvisorSettings.DefaultEndpoint,
@@ -267,6 +356,8 @@ public sealed class AdvisoryIncidentClassifierTests
         InvokeConfidenceMax = invokeConfidenceMax,
         MaxSeverityDelta = maxSeverityDelta,
         MaxConfidenceDelta = maxConfidenceDelta,
+        ResponseCacheEnabled = responseCacheEnabled,
+        ResponseCacheTtlHours = responseCacheTtlHours,
         UpdatedAt = DateTimeOffset.UtcNow,
         UpdatedBy = "test",
     };
@@ -326,7 +417,25 @@ public sealed class AdvisoryIncidentClassifierTests
         AdvisoryIncidentClassifier Classifier,
         FakeInferenceProvider Provider,
         Incident Incident,
-        RecordingDiagnostics Diagnostics);
+        RecordingDiagnostics Diagnostics,
+        ILocalModelAdvisorResponseCacheStore CacheStore,
+        InMemoryLocalModelAdvisorSettingsStore SettingsStore,
+        LocalModelAdvisorSource Source);
+
+    private sealed class ForcedHitCacheStore(LocalModelAdvisorResponseCacheEntry entry) : ILocalModelAdvisorResponseCacheStore
+    {
+        public ValueTask<LocalModelAdvisorResponseCacheEntry?> GetAsync(
+            string cacheKey,
+            DateTimeOffset now,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<LocalModelAdvisorResponseCacheEntry?>(entry);
+
+        public ValueTask SetAsync(LocalModelAdvisorResponseCacheEntry entry, CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
+
+        public ValueTask<int> PruneExpiredAsync(DateTimeOffset now, CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(0);
+    }
 
     private sealed class RecordingDiagnostics : ILocalModelAdvisorDiagnostics
     {

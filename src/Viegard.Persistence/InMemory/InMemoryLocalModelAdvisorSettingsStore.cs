@@ -100,6 +100,8 @@ public sealed class InMemoryLocalModelAdvisorSettingsStore : ILocalModelAdvisorS
                 InvokeConfidenceMax = normalized.InvokeConfidenceMax,
                 MaxSeverityDelta = normalized.MaxSeverityDelta,
                 MaxConfidenceDelta = normalized.MaxConfidenceDelta,
+                ResponseCacheEnabled = normalized.ResponseCacheEnabled,
+                ResponseCacheTtlHours = normalized.ResponseCacheTtlHours,
                 Version = _settings.Version + 1,
                 UpdatedAt = updatedAt.ToUniversalTime(),
                 UpdatedBy = LocalModelAdvisorSettingsValidator.NormalizeUpdatedBy(updatedBy),

@@ -154,6 +154,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ILocalModelAdvisorSettingsStore, InMemoryLocalModelAdvisorSettingsStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorCategoryBandStore, InMemoryLocalModelAdvisorCategoryBandStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorPromptTemplateStore, InMemoryLocalModelAdvisorPromptTemplateStore>();
+        builder.Services.AddSingleton<ILocalModelAdvisorResponseCacheStore, InMemoryLocalModelAdvisorResponseCacheStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorConsultStore, InMemoryLocalModelAdvisorConsultStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();

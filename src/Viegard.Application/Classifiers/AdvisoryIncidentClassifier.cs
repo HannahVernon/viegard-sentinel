@@ -21,7 +21,8 @@ public sealed class AdvisoryIncidentClassifier(
     IOptions<LocalModelAdvisorOptions> options,
     IInferenceProvider inferenceProvider,
     ClassificationOutputValidator outputValidator,
-    ILocalModelAdvisorDiagnostics? diagnostics = null) : IClassifier
+    ILocalModelAdvisorDiagnostics? diagnostics = null,
+    ILocalModelAdvisorResponseCacheStore? responseCacheStore = null) : IClassifier
 {
     public const string Id = "local-advisor-v1";
     public const string PromptTemplateVersion = "local-model-advisor-v1.0";
@@ -89,16 +90,38 @@ public sealed class AdvisoryIncidentClassifier(
             }
 
             var activeTemplate = promptTemplateSource.Current;
+            var variables = await BuildPromptVariablesAsync(baseClassification, incident, settings, cancellationToken).ConfigureAwait(false);
             var request = new InferenceRequest
             {
                 TemplateId = PromptTemplateId,
                 Template = activeTemplate,
-                Variables = await BuildPromptVariablesAsync(baseClassification, incident, settings, cancellationToken).ConfigureAwait(false),
+                Variables = variables,
                 OutputSchemaId = OutputSchemaId,
                 MaxTokens = 256,
                 Temperature = settings.Temperature,
                 Timeout = TimeSpan.FromMilliseconds(settings.TimeoutMs),
             };
+
+            var cacheKey = settings.ResponseCacheEnabled
+                ? LocalModelAdvisorResponseCacheKey.Build(activeTemplate.Version, settings.Model, variables)
+                : null;
+            if (cacheKey is not null && await TryGetCachedOutputAsync(cacheKey, cancellationToken).ConfigureAwait(false) is { } cached)
+            {
+                var cachedAdjusted = ApplyEscalateOnlyClamp(baseClassification, cached.ToOutput(), cached.ModelId, settings, activeTemplate.Version);
+                var cachedOutcome = cachedAdjusted.Severity > baseClassification.Severity || cachedAdjusted.Confidence > baseClassification.Confidence
+                    ? AdvisorConsultOutcome.Escalated
+                    : AdvisorConsultOutcome.NoChange;
+                await RecordConsultAsync(BuildRecord(
+                    baseClassification,
+                    cachedOutcome,
+                    finalSeverity: cachedAdjusted.Severity,
+                    finalConfidence: cachedAdjusted.Confidence,
+                    latencyMs: null,
+                    failureKind: null,
+                    modelId: cached.ModelId,
+                    servedFromCache: true), cancellationToken).ConfigureAwait(false);
+                return ClassificationOutcome.Success(cachedAdjusted);
+            }
 
             var stopwatch = Stopwatch.StartNew();
             var inference = await inferenceProvider.InferAsync(request, cancellationToken).ConfigureAwait(false);
@@ -131,7 +154,19 @@ public sealed class AdvisoryIncidentClassifier(
                 return baseOutcome;
             }
 
-            var adjusted = ApplyEscalateOnlyClamp(baseClassification, validation.Output, inference.ModelId ?? settings.Model, settings, activeTemplate.Version);
+            var modelId = inference.ModelId ?? settings.Model;
+            if (cacheKey is not null)
+            {
+                await TrySetCachedOutputAsync(
+                    cacheKey,
+                    modelId,
+                    activeTemplate.Version,
+                    validation.Output,
+                    settings.ResponseCacheTtlHours,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            var adjusted = ApplyEscalateOnlyClamp(baseClassification, validation.Output, modelId, settings, activeTemplate.Version);
             var outcome = adjusted.Severity > baseClassification.Severity || adjusted.Confidence > baseClassification.Confidence
                 ? AdvisorConsultOutcome.Escalated
                 : AdvisorConsultOutcome.NoChange;
@@ -142,7 +177,7 @@ public sealed class AdvisoryIncidentClassifier(
                 finalConfidence: adjusted.Confidence,
                 latencyMs: latencyMs,
                 failureKind: null,
-                modelId: inference.ModelId ?? settings.Model), cancellationToken).ConfigureAwait(false);
+                modelId: modelId), cancellationToken).ConfigureAwait(false);
             return ClassificationOutcome.Success(adjusted);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -164,6 +199,56 @@ public sealed class AdvisoryIncidentClassifier(
         }
     }
 
+    private async ValueTask<LocalModelAdvisorResponseCacheEntry?> TryGetCachedOutputAsync(
+        string cacheKey,
+        CancellationToken cancellationToken)
+    {
+        if (responseCacheStore is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await responseCacheStore.GetAsync(cacheKey, DateTimeOffset.UtcNow, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    private async ValueTask TrySetCachedOutputAsync(
+        string cacheKey,
+        string modelId,
+        string templateVersion,
+        ValidatedClassificationOutput output,
+        int ttlHours,
+        CancellationToken cancellationToken)
+    {
+        if (responseCacheStore is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            await responseCacheStore.SetAsync(
+                LocalModelAdvisorResponseCacheEntry.FromOutput(
+                    cacheKey,
+                    modelId,
+                    templateVersion,
+                    output,
+                    now,
+                    now.AddHours(ttlHours)),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+        }
+    }
+
     private static AdvisorConsultRecord BuildRecord(
         Classification baseClassification,
         AdvisorConsultOutcome outcome,
@@ -171,7 +256,8 @@ public sealed class AdvisoryIncidentClassifier(
         double finalConfidence,
         int? latencyMs,
         string? failureKind,
-        string? modelId) => new()
+        string? modelId,
+        bool servedFromCache = false) => new()
     {
         ClassificationId = baseClassification.Id,
         IncidentId = baseClassification.SubjectId,
@@ -184,6 +270,7 @@ public sealed class AdvisoryIncidentClassifier(
         LatencyMs = latencyMs,
         FailureKind = failureKind,
         ModelId = modelId,
+        ServedFromCache = servedFromCache,
         CreatedAt = DateTimeOffset.UtcNow,
     };
 

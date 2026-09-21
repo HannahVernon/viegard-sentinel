@@ -103,6 +103,15 @@ public sealed class PostgresLocalModelAdvisorConsultStore(IDbContextFactory<Vieg
         return ToLatencyStats(latencies);
     }
 
+    public async Task<long> GetCacheHitCountAsync(DateTimeOffset since, CancellationToken cancellationToken = default)
+    {
+        var cutoff = since.ToUniversalTime();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await db.LocalModelAdvisorConsults.AsNoTracking()
+            .LongCountAsync(r => r.CreatedAt >= cutoff && r.ServedFromCache, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyList<AdvisorConsultRecord>> GetRecentAsync(int limit, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);

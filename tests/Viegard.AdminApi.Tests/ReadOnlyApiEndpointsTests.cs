@@ -78,7 +78,7 @@ public sealed class ReadOnlyApiEndpointsTests
         var consults = new InMemoryLocalModelAdvisorConsultStore();
         var now = DateTimeOffset.UtcNow;
         await consults.AppendAsync(Consult(AdvisorConsultOutcome.Escalated, now.AddMinutes(-5), 100));
-        await consults.AppendAsync(Consult(AdvisorConsultOutcome.NoChange, now.AddMinutes(-6), 200));
+        await consults.AppendAsync(Consult(AdvisorConsultOutcome.NoChange, now.AddMinutes(-6), 200, servedFromCache: true));
         await consults.AppendAsync(Consult(AdvisorConsultOutcome.ProviderFailed, now.AddMinutes(-7), 400, "Timeout"));
         var settings = new InMemoryLocalModelAdvisorSettingsStore();
         await settings.UpsertAsync(
@@ -93,6 +93,8 @@ public sealed class ReadOnlyApiEndpointsTests
                 InvokeConfidenceMax = 0.80,
                 MaxSeverityDelta = 2,
                 MaxConfidenceDelta = 0.15,
+                ResponseCacheEnabled = true,
+                ResponseCacheTtlHours = 48,
             },
             expectedVersion: 0,
             updatedBy: "tester",
@@ -135,6 +137,8 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.Equal(0.80, config.GetProperty("invokeConfidenceMax").GetDouble());
         Assert.Equal(2, config.GetProperty("maxSeverityDelta").GetInt32());
         Assert.Equal(0.15, config.GetProperty("maxConfidenceDelta").GetDouble());
+        Assert.True(config.GetProperty("responseCacheEnabled").GetBoolean());
+        Assert.Equal(48, config.GetProperty("responseCacheTtlHours").GetInt32());
         Assert.Equal(1, config.GetProperty("version").GetInt32());
 
         var activePromptTemplate = json.GetProperty("activePromptTemplate");
@@ -155,6 +159,7 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.Equal(1, oneHour.GetProperty("noChange").GetInt64());
         Assert.Equal(1, oneHour.GetProperty("providerFailed").GetInt64());
         Assert.Equal(1, oneHour.GetProperty("failures").GetInt64());
+        Assert.Equal(1, oneHour.GetProperty("cacheHits").GetInt64());
         Assert.Equal(3, oneHour.GetProperty("total").GetInt64());
         Assert.Equal(0.5, oneHour.GetProperty("escalationRate").GetDouble());
         Assert.Equal(2, oneHour.GetProperty("latency").GetProperty("count").GetInt64());
@@ -215,7 +220,8 @@ public sealed class ReadOnlyApiEndpointsTests
         AdvisorConsultOutcome outcome,
         DateTimeOffset createdAt,
         int? latencyMs,
-        string? failureKind = null) => new()
+        string? failureKind = null,
+        bool servedFromCache = false) => new()
     {
         ClassificationId = ViegardId.New(),
         IncidentId = ViegardId.New(),
@@ -228,6 +234,7 @@ public sealed class ReadOnlyApiEndpointsTests
         LatencyMs = latencyMs,
         FailureKind = failureKind,
         ModelId = "qwen-test:latest",
+        ServedFromCache = servedFromCache,
         CreatedAt = createdAt,
     };
 

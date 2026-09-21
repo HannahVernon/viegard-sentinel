@@ -85,6 +85,15 @@ public sealed class InMemoryLocalModelAdvisorConsultStore : ILocalModelAdvisorCo
         }
     }
 
+    public Task<long> GetCacheHitCountAsync(DateTimeOffset since, CancellationToken cancellationToken = default)
+    {
+        var cutoff = since.ToUniversalTime();
+        lock (_sync)
+        {
+            return Task.FromResult(_records.LongCount(r => r.CreatedAt >= cutoff && r.ServedFromCache));
+        }
+    }
+
     public Task<IReadOnlyList<AdvisorConsultRecord>> GetRecentAsync(int limit, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);

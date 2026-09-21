@@ -92,7 +92,9 @@ public sealed record LocalModelAdvisorValues(
     double InvokeConfidenceMin,
     double InvokeConfidenceMax,
     int MaxSeverityDelta,
-    double MaxConfidenceDelta)
+    double MaxConfidenceDelta,
+    bool ResponseCacheEnabled = false,
+    int ResponseCacheTtlHours = 72)
 {
     public static LocalModelAdvisorValues FromOptions(LocalModelAdvisorOptions options)
     {
@@ -110,7 +112,9 @@ public sealed record LocalModelAdvisorValues(
             options.InvokeConfidenceMin,
             options.InvokeConfidenceMax,
             options.MaxSeverityDelta,
-            options.MaxConfidenceDelta);
+            options.MaxConfidenceDelta,
+            options.ResponseCacheEnabled,
+            options.ResponseCacheTtlHours);
     }
 
     public static LocalModelAdvisorValues FromSettings(LocalModelAdvisorSettings settings)
@@ -129,7 +133,9 @@ public sealed record LocalModelAdvisorValues(
             settings.InvokeConfidenceMin,
             settings.InvokeConfidenceMax,
             settings.MaxSeverityDelta,
-            settings.MaxConfidenceDelta);
+            settings.MaxConfidenceDelta,
+            settings.ResponseCacheEnabled,
+            settings.ResponseCacheTtlHours);
     }
 }
 
@@ -145,6 +151,8 @@ public sealed record LocalModelAdvisorSnapshot(
     double InvokeConfidenceMax,
     int MaxSeverityDelta,
     double MaxConfidenceDelta,
+    bool ResponseCacheEnabled,
+    int ResponseCacheTtlHours,
     int Version)
 {
     public static LocalModelAdvisorSnapshot Unseeded { get; } = new(
@@ -159,6 +167,8 @@ public sealed record LocalModelAdvisorSnapshot(
         0.85,
         3,
         0.20,
+        false,
+        72,
         0);
 
     public static LocalModelAdvisorSnapshot Seeded(LocalModelAdvisorSettings settings)
@@ -177,6 +187,8 @@ public sealed record LocalModelAdvisorSnapshot(
             values.InvokeConfidenceMax,
             values.MaxSeverityDelta,
             values.MaxConfidenceDelta,
+            values.ResponseCacheEnabled,
+            values.ResponseCacheTtlHours,
             settings.Version);
     }
 
@@ -192,6 +204,8 @@ public sealed record LocalModelAdvisorSnapshot(
                 InvokeConfidenceMin,
                 InvokeConfidenceMax,
                 MaxSeverityDelta,
-                MaxConfidenceDelta)
+                MaxConfidenceDelta,
+                ResponseCacheEnabled,
+                ResponseCacheTtlHours)
             : LocalModelAdvisorValues.FromOptions(fallbackOptions);
 }

@@ -62,7 +62,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         // 180d window) age into purge eligibility ~24h after the run that
         // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_category_bands, local_model_advisor_prompt_templates, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_category_bands, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -1411,7 +1411,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var now = new DateTimeOffset(2026, 9, 20, 7, 0, 0, TimeSpan.Zero);
         var classificationId = ViegardId.New();
 
-        var escalated = AdvisorConsultRecord(classificationId, AdvisorConsultOutcome.Escalated, now.AddMinutes(-10), 100, finalSeverity: 8);
+        var escalated = AdvisorConsultRecord(classificationId, AdvisorConsultOutcome.Escalated, now.AddMinutes(-10), 100, finalSeverity: 8, servedFromCache: true);
         await store.AppendAsync(escalated);
         await store.AppendAsync(AdvisorConsultRecord(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-9), 200));
         await store.AppendAsync(AdvisorConsultRecord(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-8), 300));
@@ -1424,6 +1424,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         var byId = await store.GetByIdAsync(escalated.Id);
         Assert.NotNull(byId);
         Assert.Equal(escalated.Id, byId!.Id);
+        Assert.True(byId.ServedFromCache);
         Assert.Null(await store.GetByIdAsync(ViegardId.New()));
 
         var firstPage = await store.ListPageAsync(beforeId: null, pageSize: 2, outcome: null);
@@ -1447,9 +1448,37 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(3, latency.Count);
         Assert.Equal(200, latency.P50);
         Assert.Equal(300, latency.P95);
+        Assert.Equal(1, await store.GetCacheHitCountAsync(now.AddHours(-1)));
 
         Assert.Equal(1, await store.PruneOlderThanAsync(now.AddDays(-1)));
         Assert.Equal(3, (await store.GetRecentAsync(10)).Count);
+    }
+
+    [PostgresFact]
+    public async Task Local_model_advisor_response_cache_store_round_trips_prunes_and_upserts()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresLocalModelAdvisorResponseCacheStore(factory);
+        var now = new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero);
+
+        await store.SetAsync(ResponseCacheEntry("live", now, now.AddHours(1), severity: 7));
+        await store.SetAsync(ResponseCacheEntry("expired", now.AddHours(-2), now.AddHours(-1), severity: 4));
+
+        var restored = await store.GetAsync("live", now);
+        Assert.NotNull(restored);
+        Assert.Equal(7, restored!.Severity);
+        Assert.Equal(["cached reason"], restored.Reasons);
+        Assert.Null(await store.GetAsync("expired", now));
+
+        Assert.Equal(1, await store.PruneExpiredAsync(now));
+        Assert.NotNull(await store.GetAsync("live", now));
+
+        await store.SetAsync(ResponseCacheEntry("live", now, now.AddHours(2), severity: 9));
+        var upserted = await store.GetAsync("live", now);
+        Assert.NotNull(upserted);
+        Assert.Equal(9, upserted!.Severity);
+        await using var db = factory.CreateDbContext();
+        Assert.Equal(1, await db.LocalModelAdvisorResponseCache.CountAsync(r => r.CacheKey == "live"));
     }
 
     [PostgresFact]
@@ -2276,7 +2305,8 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         DateTimeOffset createdAt,
         int? latencyMs,
         int finalSeverity = 6,
-        string? failureKind = null) => new()
+        string? failureKind = null,
+        bool servedFromCache = false) => new()
         {
             ClassificationId = classificationId,
             IncidentId = ViegardId.New(),
@@ -2289,7 +2319,24 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             LatencyMs = latencyMs,
             FailureKind = failureKind,
             ModelId = "qwen-test:latest",
+            ServedFromCache = servedFromCache,
             CreatedAt = createdAt,
+        };
+
+    private static LocalModelAdvisorResponseCacheEntry ResponseCacheEntry(
+        string cacheKey,
+        DateTimeOffset createdAt,
+        DateTimeOffset expiresAt,
+        int severity) => new()
+        {
+            CacheKey = cacheKey,
+            ModelId = "qwen-test:latest",
+            TemplateVersion = AdvisoryIncidentClassifier.PromptTemplateVersion,
+            Severity = severity,
+            Confidence = 0.7,
+            Reasons = ["cached reason"],
+            CreatedAt = createdAt,
+            ExpiresAt = expiresAt,
         };
 
     private static Decision Decision(

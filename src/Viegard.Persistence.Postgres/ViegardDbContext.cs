@@ -65,6 +65,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<LocalModelAdvisorPromptTemplateRow> LocalModelAdvisorPromptTemplates => Set<LocalModelAdvisorPromptTemplateRow>();
 
+    public DbSet<LocalModelAdvisorResponseCacheRow> LocalModelAdvisorResponseCache => Set<LocalModelAdvisorResponseCacheRow>();
+
     public DbSet<PolicyThresholdSettingsRow> PolicyThresholdSettings => Set<PolicyThresholdSettingsRow>();
 
     public DbSet<PolicyPostureSettingsRow> PolicyPostureSettings => Set<PolicyPostureSettingsRow>();
@@ -323,6 +325,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.Endpoint).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxEndpointLength);
             entity.Property(e => e.Model).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxModelLength);
             entity.Property(e => e.KeepAlive).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxKeepAliveLength);
+            entity.Property(e => e.ResponseCacheTtlHours).HasDefaultValue(72);
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxUpdatedByLength);
         });
 
@@ -350,6 +353,20 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.Note).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorPromptTemplateRevision.MaxNoteLength);
             entity.Property(e => e.CreatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorPromptTemplateRevision.MaxCreatedByLength);
         });
+
+        modelBuilder.Entity<LocalModelAdvisorResponseCacheRow>(entity =>
+        {
+            entity.ToTable("local_model_advisor_response_cache");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.HasIndex(e => e.CacheKey).IsUnique();
+            entity.HasIndex(e => e.ExpiresAt);
+            entity.Property(e => e.CacheKey).HasColumnType("text");
+            entity.Property(e => e.ModelId).HasColumnType("text");
+            entity.Property(e => e.TemplateVersion).HasColumnType("text");
+            entity.Property(e => e.ReasonsJson).HasColumnType("jsonb");
+        });
+
         modelBuilder.Entity<LocalModelAdvisorConsultRow>(entity =>
         {
             entity.ToTable("local_model_advisor_consults");

@@ -30,7 +30,7 @@ Path | Returns
 `GET /api/v1/decisions` | Policy decisions
 `GET /api/v1/decisions/{id}` | One decision with its classification embedded
 `GET /api/v1/classifications/{id}` | One classification
-`GET /api/v1/advisor/summary` | Local-model advisor configuration (enabled, endpoint, model, temperature, timeout, invocation band, clamp deltas, settings version) and outcome counts, escalation rate, failures, and latency over 1h/24h/7d/all-time windows
+`GET /api/v1/advisor/summary` | Local-model advisor configuration (enabled, endpoint, model, temperature, timeout, invocation band, clamp deltas, settings version), per-category `categoryOverrides`, and outcome counts, escalation rate, failures, and latency over 1h/24h/7d/all-time windows
 `GET /api/v1/advisor/consults` | Local-model advisor consult records (append-only observability rows)
 `GET /api/v1/advisor/consults/{id}` | One advisor consult record
 `GET /api/v1/advisor/consults/by-classification/{id}` | The advisor consult recorded for a classification, if any
@@ -64,3 +64,8 @@ List responses share one shape:
 Timestamps are ISO 8601 (UTC), enums are strings.  A text search that
 exceeds the shared search budget answers `408` with an explanatory `error`
 field; unknown ids answer `404`.
+
+`GET /api/v1/advisor/summary` returns `categoryOverrides` as an array of
+per-category advisor override rows.  Each row includes `category`,
+nullable `enabled`, nullable invocation-band and clamp fields, `version`,
+and `updatedAt`; null override fields inherit the global configuration.

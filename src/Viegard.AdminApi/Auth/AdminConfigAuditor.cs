@@ -151,6 +151,38 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
         }
     }
 
+    public async ValueTask RecordLocalModelAdvisorCategoryBandWriteAsync(
+        string username,
+        string category,
+        LocalModelAdvisorCategoryBand? before,
+        LocalModelAdvisorCategoryBand? after,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config write by {username}: changed local-model advisor category override '{category}'.",
+                SourceId = "admin:config",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "LocalModelAdvisorCategoryBandChanged",
+                    Username = username,
+                    Category = category,
+                    Before = before,
+                    After = after,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
+
     public async ValueTask RecordIngestionFiltersWriteAsync(
         string username,
         string sourceType,

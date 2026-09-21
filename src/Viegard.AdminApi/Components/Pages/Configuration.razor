@@ -3,6 +3,7 @@
 @inject IRetentionSettingsStore RetentionSettingsStore
 @inject IJetPackFeedSettingsStore JetPackFeedSettingsStore
 @inject ILocalModelAdvisorSettingsStore LocalModelAdvisorSettingsStore
+@inject ILocalModelAdvisorCategoryBandStore LocalModelAdvisorCategoryBandStore
 @inject IPolicyThresholdSettingsStore PolicyThresholdSettingsStore
 @inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
 @inject IIngestionFilterStore IngestionFilters
@@ -100,6 +101,113 @@
             <div class="step-up-strip">
                 <span>Editing retention settings requires step-up verification.</span>
                 <StepUpPrompt ReturnTo="/configuration#retention" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-retention" />
+            </div>
+        }
+
+        <h3>Per-category overrides</h3>
+        <p class="small">Blank override fields inherit the global local-model advisor settings.  Category labels are open-ended; known deterministic categories are suggested below.</p>
+        @if (_localModelAdvisorCategoryBands.Count == 0)
+        {
+            <p>No category overrides are configured.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Enabled</th>
+                        <th>Band</th>
+                        <th>Clamp</th>
+                        <th>Version</th>
+                        <th>Updated</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var band in _localModelAdvisorCategoryBands)
+                    {
+                        <tr>
+                            <td><code>@band.Category</code></td>
+                            <td>@FormatNullableBool(band.Enabled)</td>
+                            <td>@FormatNullableConfidence(band.InvokeConfidenceMin) to @FormatNullableConfidence(band.InvokeConfidenceMax)</td>
+                            <td>Severity @FormatNullableInt(band.MaxSeverityDelta), confidence @FormatNullableConfidence(band.MaxConfidenceDelta)</td>
+                            <td>@band.Version.ToString(System.Globalization.CultureInfo.InvariantCulture)</td>
+                            <td>@band.UpdatedBy at @Display.Format(band.UpdatedAt)</td>
+                            <td class="actions-cell">
+                                @if (_stepUpFresh)
+                                {
+                                    <form method="post" action="/configuration/local-model-advisor/category-bands/delete">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="category" value="@band.Category" />
+                                        <input type="hidden" name="version" value="@band.Version.ToString(System.Globalization.CultureInfo.InvariantCulture)" />
+                                        <button type="submit">Delete</button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <span class="small">Step-up required</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        <h3>Add or edit category override</h3>
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/local-model-advisor/category-bands" class="edit-form">
+                <AntiforgeryToken />
+                <label>
+                    Category
+                    <input name="category" maxlength="@LocalModelAdvisorCategoryBand.MaxCategoryLength" list="local-model-advisor-known-categories" required placeholder="credential-attack" />
+                    <datalist id="local-model-advisor-known-categories">
+                        @foreach (var category in LocalModelAdvisorCategoryBand.KnownCategories)
+                        {
+                            <option value="@category"></option>
+                        }
+                    </datalist>
+                    <span class="small">Enter an existing category to edit it.  Known labels are suggestions, not the full allowed set.</span>
+                </label>
+                <label>
+                    Current version
+                    <input name="version" type="number" min="0" step="1" value="0" required />
+                    <span class="small">Use 0 for a new override.  For edits, use the version shown in the table.</span>
+                </label>
+                <label>
+                    Enabled override
+                    <select name="enabled">
+                        <option value="inherit">inherit</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                    </select>
+                </label>
+                <label>
+                    Invoke confidence minimum
+                    <input name="invokeConfidenceMin" type="number" min="0" max="1" step="0.001" placeholder="inherit" />
+                </label>
+                <label>
+                    Invoke confidence maximum
+                    <input name="invokeConfidenceMax" type="number" min="0" max="1" step="0.001" placeholder="inherit" />
+                </label>
+                <label>
+                    Max severity delta
+                    <input name="maxSeverityDelta" type="number" min="0" max="10" step="1" placeholder="inherit" />
+                </label>
+                <label>
+                    Max confidence delta
+                    <input name="maxConfidenceDelta" type="number" min="0" max="1" step="0.001" placeholder="inherit" />
+                </label>
+                <button type="submit">Save category override</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Editing local-model advisor category overrides requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#local-model-advisor" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-local-model-advisor-bands" />
             </div>
         }
     </section>
@@ -958,6 +1066,7 @@
     private RetentionSettings? _settings;
     private JetPackFeedSettings? _jetPackSettings;
     private LocalModelAdvisorSettings? _localModelAdvisorSettings;
+    private IReadOnlyList<LocalModelAdvisorCategoryBand> _localModelAdvisorCategoryBands = [];
     private PolicyThresholdSettings? _thresholdSettings;
     private PolicyPostureSettings? _postureSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
@@ -1028,6 +1137,19 @@
         ? "Not seeded.  Showing deployment defaults; the settings row seeds on next maintenance startup."
         : $"{_localModelAdvisorSettings.UpdatedBy} at {Display.Format(_localModelAdvisorSettings.UpdatedAt)}";
 
+    private static string FormatNullableBool(bool? value) => value switch
+    {
+        true => "true",
+        false => "false",
+        null => "inherit",
+    };
+
+    private static string FormatNullableConfidence(double? value) =>
+        value is null ? "inherit" : FormatConfidence(value.Value);
+
+    private static string FormatNullableInt(int? value) =>
+        value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "inherit";
+
     private PolicyThresholdValues ThresholdValues =>
         _thresholdSettings?.ToValues() ?? PolicyThresholdValues.FromOptions(PolicyOptions.Value);
 
@@ -1058,6 +1180,7 @@
         _settings = await RetentionSettingsStore.GetAsync().ConfigureAwait(false);
         _jetPackSettings = await JetPackFeedSettingsStore.GetAsync().ConfigureAwait(false);
         _localModelAdvisorSettings = await LocalModelAdvisorSettingsStore.GetAsync().ConfigureAwait(false);
+        _localModelAdvisorCategoryBands = await LocalModelAdvisorCategoryBandStore.ListAsync().ConfigureAwait(false);
         _thresholdSettings = await PolicyThresholdSettingsStore.GetAsync().ConfigureAwait(false);
         _postureSettings = await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();

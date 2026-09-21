@@ -61,7 +61,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         // 180d window) age into purge eligibility ~24h after the run that
         // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_category_bands, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -1291,6 +1291,71 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.NotNull(raced);
         Assert.Contains(raced.EventsDays, new int?[] { 11, 22 });
         Assert.Equal(1, raced.Version);
+    }
+
+    [PostgresFact]
+    public async Task Local_model_advisor_category_band_store_round_trips_and_detects_conflicts()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresLocalModelAdvisorCategoryBandStore(factory);
+        var now = new DateTimeOffset(2026, 9, 21, 8, 0, 0, TimeSpan.Zero);
+
+        var created = await store.UpsertAsync(
+            new LocalModelAdvisorCategoryBand
+            {
+                Category = "path-traversal",
+                Enabled = false,
+                InvokeConfidenceMin = null,
+                InvokeConfidenceMax = 0.75,
+                MaxSeverityDelta = 1,
+                MaxConfidenceDelta = null,
+            },
+            expectedVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: now);
+
+        Assert.True(created.Succeeded);
+        Assert.Equal(1, created.Band!.Version);
+        Assert.False(created.Band.Enabled);
+        Assert.Equal("hannah", created.Band.UpdatedBy);
+
+        var fetched = await store.GetAsync(" path-traversal ");
+        Assert.NotNull(fetched);
+        Assert.Equal("path-traversal", fetched!.Category);
+        Assert.Equal(0.75, fetched.InvokeConfidenceMax);
+        Assert.Single(await store.ListAsync());
+
+        var updated = await store.UpsertAsync(
+            fetched with
+            {
+                Enabled = true,
+                MaxSeverityDelta = 2,
+            },
+            expectedVersion: fetched.Version,
+            updatedBy: "operator",
+            updatedAt: now.AddMinutes(1));
+
+        Assert.True(updated.Succeeded);
+        Assert.Equal(2, updated.Band!.Version);
+        Assert.True(updated.Band.Enabled);
+        Assert.Equal(2, updated.Band.MaxSeverityDelta);
+
+        var conflict = await store.UpsertAsync(
+            updated.Band with { MaxSeverityDelta = 9 },
+            expectedVersion: fetched.Version,
+            updatedBy: "stale",
+            updatedAt: now.AddMinutes(2));
+
+        Assert.False(conflict.Succeeded);
+        Assert.Equal(2, conflict.Band!.Version);
+
+        var deleteConflict = await store.DeleteAsync("path-traversal", fetched.Version, "stale", now.AddMinutes(3));
+        Assert.Equal(LocalModelAdvisorCategoryBandDeleteStatus.Conflict, deleteConflict.Status);
+
+        var deleted = await store.DeleteAsync("path-traversal", updated.Band.Version, "operator", now.AddMinutes(4));
+        Assert.True(deleted.Succeeded);
+        Assert.Null(await store.GetAsync("path-traversal"));
+        Assert.Empty(await store.ListAsync());
     }
 
     [PostgresFact]

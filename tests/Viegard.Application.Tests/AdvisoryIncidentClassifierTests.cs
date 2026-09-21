@@ -81,6 +81,48 @@ public sealed class AdvisoryIncidentClassifierTests
     }
 
     [Fact]
+    public async Task Disabled_category_override_returns_base_and_records_no_consult()
+    {
+        var fixture = await CreateFixtureAsync(
+            Settings(),
+            categoryBand: new LocalModelAdvisorCategoryBand
+            {
+                Category = "path-traversal",
+                Enabled = false,
+            });
+
+        var outcome = await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+
+        var classification = Assert.IsType<Classification>(outcome.Classification);
+        Assert.Null(classification.Model);
+        Assert.Equal(0, fixture.Provider.CallCount);
+        Assert.Empty(fixture.Diagnostics.Records);
+    }
+
+    [Fact]
+    public async Task Category_override_applies_band_and_clamp()
+    {
+        var fixture = await CreateFixtureAsync(
+            Settings(invokeConfidenceMin: 0.7, invokeConfidenceMax: 0.9, maxSeverityDelta: 1, maxConfidenceDelta: 0.05),
+            categoryBand: new LocalModelAdvisorCategoryBand
+            {
+                Category = "path-traversal",
+                InvokeConfidenceMin = 0.5,
+                InvokeConfidenceMax = 0.8,
+                MaxSeverityDelta = 3,
+                MaxConfidenceDelta = 0.2,
+            });
+        fixture.Provider.RawOutput = Output(severity: 9, confidence: 0.9, "higher confidence");
+
+        var outcome = await fixture.Classifier.ClassifyAsync(Subject(fixture.Incident.Id));
+
+        var classification = Assert.IsType<Classification>(outcome.Classification);
+        Assert.Equal(9, classification.Severity);
+        Assert.Equal(0.8, classification.Confidence, precision: 10);
+        Assert.Equal(1, fixture.Provider.CallCount);
+    }
+
+    [Fact]
     public async Task Confidence_outside_band_returns_base_and_does_not_call_provider()
     {
         var fixture = await CreateFixtureAsync(Settings(invokeConfidenceMin: 0.5, invokeConfidenceMax: 0.85), evidenceScore: 5.0);
@@ -171,7 +213,8 @@ public sealed class AdvisoryIncidentClassifierTests
         LocalModelAdvisorSettings settings,
         double evidenceScore = 3.0,
         string evidenceDescription = "Rule http.path-traversal: decoded URI contains parent-directory traversal.",
-        RecordingDiagnostics? diagnostics = null)
+        RecordingDiagnostics? diagnostics = null,
+        LocalModelAdvisorCategoryBand? categoryBand = null)
     {
         var incidentStore = new InMemoryIncidentStore();
         var eventStore = new InMemoryEventStore();
@@ -179,6 +222,14 @@ public sealed class AdvisoryIncidentClassifierTests
         await store.UpsertAsync(settings, 0, "test", DateTimeOffset.UtcNow);
         var source = new LocalModelAdvisorSource(store);
         await source.RefreshAsync();
+        var bandStore = new InMemoryLocalModelAdvisorCategoryBandStore();
+        if (categoryBand is not null)
+        {
+            await bandStore.UpsertAsync(categoryBand, 0, "test", DateTimeOffset.UtcNow);
+        }
+
+        var categoryBandSource = new LocalModelAdvisorCategoryBandSource(bandStore);
+        await categoryBandSource.RefreshAsync();
         var provider = new FakeInferenceProvider();
         diagnostics ??= new RecordingDiagnostics();
         var classifier = new AdvisoryIncidentClassifier(
@@ -186,6 +237,7 @@ public sealed class AdvisoryIncidentClassifierTests
             incidentStore,
             eventStore,
             source,
+            categoryBandSource,
             Options.Create(new LocalModelAdvisorOptions()),
             provider,
             new ClassificationOutputValidator(),

@@ -95,6 +95,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IJetPackFeedSettingsStore, PostgresJetPackFeedSettingsStore>();
         services.AddSingleton<IJetPackDesiredAddressStore, PostgresJetPackDesiredAddressStore>();
         services.AddSingleton<ILocalModelAdvisorSettingsStore, PostgresLocalModelAdvisorSettingsStore>();
+        services.AddSingleton<ILocalModelAdvisorCategoryBandStore, PostgresLocalModelAdvisorCategoryBandStore>();
         services.AddSingleton<ILocalModelAdvisorConsultStore, PostgresLocalModelAdvisorConsultStore>();
         services.AddSingleton<IPolicyThresholdSettingsStore, PostgresPolicyThresholdSettingsStore>();
         services.AddSingleton<IPolicyPostureSettingsStore, PostgresPolicyPostureSettingsStore>();

@@ -59,6 +59,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<LocalModelAdvisorSettingsRow> LocalModelAdvisorSettings => Set<LocalModelAdvisorSettingsRow>();
 
+    public DbSet<LocalModelAdvisorCategoryBandRow> LocalModelAdvisorCategoryBands => Set<LocalModelAdvisorCategoryBandRow>();
+
     public DbSet<LocalModelAdvisorConsultRow> LocalModelAdvisorConsults => Set<LocalModelAdvisorConsultRow>();
 
     public DbSet<PolicyThresholdSettingsRow> PolicyThresholdSettings => Set<PolicyThresholdSettingsRow>();
@@ -320,6 +322,14 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.Model).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxModelLength);
             entity.Property(e => e.KeepAlive).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxKeepAliveLength);
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<LocalModelAdvisorCategoryBandRow>(entity =>
+        {
+            entity.ToTable("local_model_advisor_category_bands");
+            entity.HasKey(e => e.Category);
+            entity.Property(e => e.Category).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorCategoryBand.MaxCategoryLength);
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorCategoryBand.MaxUpdatedByLength);
         });
 
         modelBuilder.Entity<LocalModelAdvisorConsultRow>(entity =>

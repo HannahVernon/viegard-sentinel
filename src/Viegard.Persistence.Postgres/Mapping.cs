@@ -676,6 +676,32 @@ internal static class Mapping
         UpdatedBy = row.UpdatedBy,
     };
 
+    public static LocalModelAdvisorCategoryBandRow ToRow(this LocalModelAdvisorCategoryBand band) => new()
+    {
+        Category = band.Category,
+        Enabled = band.Enabled,
+        InvokeConfidenceMin = band.InvokeConfidenceMin,
+        InvokeConfidenceMax = band.InvokeConfidenceMax,
+        MaxSeverityDelta = band.MaxSeverityDelta,
+        MaxConfidenceDelta = band.MaxConfidenceDelta,
+        Version = band.Version,
+        UpdatedAt = Utc(band.UpdatedAt),
+        UpdatedBy = band.UpdatedBy,
+    };
+
+    public static LocalModelAdvisorCategoryBand ToDomain(this LocalModelAdvisorCategoryBandRow row) => new()
+    {
+        Category = row.Category,
+        Enabled = row.Enabled,
+        InvokeConfidenceMin = row.InvokeConfidenceMin,
+        InvokeConfidenceMax = row.InvokeConfidenceMax,
+        MaxSeverityDelta = row.MaxSeverityDelta,
+        MaxConfidenceDelta = row.MaxConfidenceDelta,
+        Version = row.Version,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+    };
+
     public static LocalModelAdvisorConsultRow ToRow(this AdvisorConsultRecord record) => new()
     {
         Id = record.Id,

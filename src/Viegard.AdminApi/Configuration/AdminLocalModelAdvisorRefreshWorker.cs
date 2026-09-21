@@ -1,15 +1,15 @@
 using Viegard.Application.Configuration;
 
-namespace Viegard.PipelineHost.Workers;
+namespace Viegard.AdminApi.Configuration;
 
-public sealed class LocalModelAdvisorRefreshWorker(
+public sealed class AdminLocalModelAdvisorRefreshWorker(
     LocalModelAdvisorSource source,
     LocalModelAdvisorCategoryBandSource categoryBandSource,
-    ILogger<LocalModelAdvisorRefreshWorker> logger) : BackgroundService
+    ILogger<AdminLocalModelAdvisorRefreshWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Local-model advisor settings refresh worker started.");
+        logger.LogInformation("Admin local-model advisor refresh worker started.");
         try
         {
             await Task.WhenAll(
@@ -21,7 +21,7 @@ public sealed class LocalModelAdvisorRefreshWorker(
         }
         finally
         {
-            logger.LogInformation("Local-model advisor settings refresh worker stopping.");
+            logger.LogInformation("Admin local-model advisor refresh worker stopping.");
         }
     }
 }

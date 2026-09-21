@@ -163,9 +163,11 @@ public static class ReadOnlyApiEndpoints
     internal static async Task<IResult> GetAdvisorSummaryAsync(
         HttpContext context,
         ILocalModelAdvisorConsultStore consults,
-        ILocalModelAdvisorSettingsStore settingsStore)
+        ILocalModelAdvisorSettingsStore settingsStore,
+        ILocalModelAdvisorCategoryBandStore categoryBands)
     {
         var settings = await settingsStore.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        var bands = await categoryBands.ListAsync(context.RequestAborted).ConfigureAwait(false);
         var now = DateTimeOffset.UtcNow;
         var definitions = new (string Label, DateTimeOffset Since)[]
         {
@@ -217,7 +219,18 @@ public static class ReadOnlyApiEndpoints
             version = effective.Version,
             updatedAt = effective.UpdatedAt,
         };
-        return Results.Json(new { configuration, windows }, Json);
+        var categoryOverrides = bands.Select(band => new
+        {
+            category = band.Category,
+            enabled = band.Enabled,
+            invokeConfidenceMin = band.InvokeConfidenceMin,
+            invokeConfidenceMax = band.InvokeConfidenceMax,
+            maxSeverityDelta = band.MaxSeverityDelta,
+            maxConfidenceDelta = band.MaxConfidenceDelta,
+            version = band.Version,
+            updatedAt = band.UpdatedAt,
+        }).ToList();
+        return Results.Json(new { configuration, categoryOverrides, windows }, Json);
     }
 
     internal static async Task<IResult> ListAdvisorConsultsAsync(

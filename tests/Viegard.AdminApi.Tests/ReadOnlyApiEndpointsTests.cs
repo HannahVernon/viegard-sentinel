@@ -8,6 +8,7 @@ using Viegard.Domain;
 using Viegard.Domain.Classifications;
 using Viegard.Domain.Decisions;
 using Viegard.Domain.Events;
+using Viegard.Domain.Health;
 using Viegard.Persistence.InMemory;
 
 namespace Viegard.AdminApi.Tests;
@@ -282,6 +283,51 @@ public sealed class ReadOnlyApiEndpointsTests
         AdvisorSkippedForInjection = advisorSkippedForInjection,
         CreatedAt = createdAt,
     };
+
+    [Fact]
+    public async Task GetInstances_reports_deployed_commit_and_staleness_per_instance()
+    {
+        var now = DateTimeOffset.UtcNow;
+        const string Sha = "cc27436a7f3d1b9e0a5c4d2e8b7a1f6c3d9e0b2a";
+        var registry = new InMemoryInstanceRegistryStore();
+        await registry.UpsertAsync(new InstanceRegistration
+        {
+            InstanceId = "pipeline-1",
+            Version = "1.0.0+" + Sha,
+            CommitSha = Sha,
+            Roles = "pipeline",
+            HostName = "worker",
+            StartedAt = now.AddHours(-2),
+            ReportedAt = now.AddSeconds(-1),
+        });
+        var telemetry = new InMemoryQueueTelemetryStore();
+        await telemetry.PublishAsync(new QueueTelemetrySnapshot
+        {
+            InstanceId = "pipeline-1",
+            QueueName = "events",
+            Depth = 1,
+            InFlight = 0,
+            TotalEnqueued = 100,
+            TotalCompleted = 99,
+            TotalAbandoned = 0,
+            DeadLetterCount = 0,
+            CapturedAt = now.AddSeconds(-2),
+        });
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetInstancesAsync(context, registry, telemetry),
+            context);
+
+        var instance = Assert.Single(json.GetProperty("instances").EnumerateArray());
+        Assert.Equal("pipeline-1", instance.GetProperty("instanceId").GetString());
+        Assert.Equal("1.0.0+" + Sha, instance.GetProperty("version").GetString());
+        Assert.Equal(Sha, instance.GetProperty("commitSha").GetString());
+        Assert.Equal(Sha[..9], instance.GetProperty("shortCommit").GetString());
+        Assert.Equal("pipeline", instance.GetProperty("roles").GetString());
+        Assert.Equal(["events"], instance.GetProperty("queuesReported").EnumerateArray().Select(q => q.GetString()!).ToArray());
+        Assert.Equal("Green", instance.GetProperty("stalenessLight").GetString());
+    }
 
     private static DefaultHttpContext Context(string queryString)
     {

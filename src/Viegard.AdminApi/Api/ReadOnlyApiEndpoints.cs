@@ -5,6 +5,7 @@ using Viegard.AdminApi.Errors;
 using Viegard.Application.Audit;
 using Viegard.Application.Configuration;
 using Viegard.Application.Stores;
+using Viegard.Application.Telemetry;
 using Viegard.Domain.Audit;
 using Viegard.Domain.Decisions;
 using Viegard.Domain.Incidents;
@@ -44,6 +45,7 @@ public static class ReadOnlyApiEndpoints
         api.MapGet("/advisor/consults/{id:guid}", GetAdvisorConsultAsync);
         api.MapGet("/audit", ListAuditAsync);
         api.MapGet("/bans", ListBansAsync);
+        api.MapGet("/instances", GetInstancesAsync);
     }
 
     internal static async Task<IResult> ListEventsAsync(
@@ -264,6 +266,33 @@ public static class ReadOnlyApiEndpoints
                 createdAt = activePromptRevision.CreatedAt,
             };
         return Results.Json(new { configuration, categoryOverrides, activePromptTemplate, windows }, Json);
+    }
+
+    internal static async Task<IResult> GetInstancesAsync(
+        HttpContext context,
+        IInstanceRegistryStore instances,
+        IQueueTelemetryStore queueTelemetry)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var registrations = await instances.ListAsync(context.RequestAborted).ConfigureAwait(false);
+        var snapshots = await queueTelemetry.GetLatestAsync(context.RequestAborted).ConfigureAwait(false);
+        var view = QueueStatusView.Build(snapshots, registrations, now);
+        var rows = view.Instances.Select(row => new
+        {
+            instanceId = row.InstanceId,
+            version = row.Registration?.Version,
+            commitSha = row.Registration?.CommitSha,
+            shortCommit = row.VersionLabel,
+            roles = row.Registration?.Roles,
+            hostName = row.Registration?.HostName,
+            upgradeTarget = row.Registration?.UpgradeTarget,
+            startedAt = row.StartedAt,
+            reportedAt = row.Registration?.ReportedAt,
+            queuesReported = row.QueueNames,
+            lastCapturedAt = row.LastCapturedAt,
+            stalenessLight = row.Light,
+        }).ToList();
+        return Results.Json(new { generatedAt = now, worstLight = view.WorstLight, instances = rows }, Json);
     }
 
     internal static async Task<IResult> ListAdvisorConsultsAsync(

@@ -201,11 +201,21 @@ public static class ReadOnlyApiEndpoints
             });
         }
 
+        var effective = settings ?? new LocalModelAdvisorSettings();
         var configuration = new
         {
-            enabled = settings?.Enabled ?? false,
-            endpoint = settings?.Endpoint ?? LocalModelAdvisorSettings.DefaultEndpoint,
-            model = settings?.Model ?? LocalModelAdvisorSettings.DefaultModel,
+            enabled = effective.Enabled,
+            endpoint = effective.Endpoint,
+            model = effective.Model,
+            temperature = effective.Temperature,
+            timeoutMs = effective.TimeoutMs,
+            keepAlive = effective.KeepAlive,
+            invokeConfidenceMin = effective.InvokeConfidenceMin,
+            invokeConfidenceMax = effective.InvokeConfidenceMax,
+            maxSeverityDelta = effective.MaxSeverityDelta,
+            maxConfidenceDelta = effective.MaxConfidenceDelta,
+            version = effective.Version,
+            updatedAt = effective.UpdatedAt,
         };
         return Results.Json(new { configuration, windows }, Json);
     }

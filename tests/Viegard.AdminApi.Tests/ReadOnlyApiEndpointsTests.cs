@@ -81,7 +81,18 @@ public sealed class ReadOnlyApiEndpointsTests
         await consults.AppendAsync(Consult(AdvisorConsultOutcome.ProviderFailed, now.AddMinutes(-7), 400, "Timeout"));
         var settings = new InMemoryLocalModelAdvisorSettingsStore();
         await settings.UpsertAsync(
-            new LocalModelAdvisorSettings { Enabled = true, Endpoint = "http://example.test:11434", Model = "qwen-test:latest" },
+            new LocalModelAdvisorSettings
+            {
+                Enabled = true,
+                Endpoint = "http://example.test:11434",
+                Model = "qwen-test:latest",
+                Temperature = 0.1,
+                TimeoutMs = 9000,
+                InvokeConfidenceMin = 0.40,
+                InvokeConfidenceMax = 0.80,
+                MaxSeverityDelta = 2,
+                MaxConfidenceDelta = 0.15,
+            },
             expectedVersion: 0,
             updatedBy: "tester",
             updatedAt: now);
@@ -95,6 +106,13 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.True(config.GetProperty("enabled").GetBoolean());
         Assert.Equal("http://example.test:11434", config.GetProperty("endpoint").GetString());
         Assert.Equal("qwen-test:latest", config.GetProperty("model").GetString());
+        Assert.Equal(0.1, config.GetProperty("temperature").GetDouble());
+        Assert.Equal(9000, config.GetProperty("timeoutMs").GetInt32());
+        Assert.Equal(0.40, config.GetProperty("invokeConfidenceMin").GetDouble());
+        Assert.Equal(0.80, config.GetProperty("invokeConfidenceMax").GetDouble());
+        Assert.Equal(2, config.GetProperty("maxSeverityDelta").GetInt32());
+        Assert.Equal(0.15, config.GetProperty("maxConfidenceDelta").GetDouble());
+        Assert.Equal(1, config.GetProperty("version").GetInt32());
 
         var oneHour = json.GetProperty("windows").EnumerateArray().Single(w => w.GetProperty("window").GetString() == "1h");
         Assert.Equal(1, oneHour.GetProperty("escalated").GetInt64());

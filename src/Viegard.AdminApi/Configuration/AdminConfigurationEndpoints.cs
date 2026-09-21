@@ -1683,6 +1683,30 @@ public static class AdminConfigurationEndpoints
             return false;
         }
 
+        if (!int.TryParse(form["maxDownwardSeverityDelta"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var maxDownwardSeverityDelta))
+        {
+            error = LocalModelAdvisorSettingsValidator.MaxDownwardSeverityDeltaError;
+            return false;
+        }
+
+        if (!double.TryParse(form["maxDownwardConfidenceDelta"].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var maxDownwardConfidenceDelta))
+        {
+            error = LocalModelAdvisorSettingsValidator.MaxDownwardConfidenceDeltaError;
+            return false;
+        }
+
+        if (!double.TryParse(form["deEscalationMinModelConfidence"].ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var deEscalationMinModelConfidence))
+        {
+            error = LocalModelAdvisorSettingsValidator.DeEscalationMinModelConfidenceError;
+            return false;
+        }
+
+        if (!int.TryParse(form["deEscalationProtectedSeverity"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var deEscalationProtectedSeverity))
+        {
+            error = LocalModelAdvisorSettingsValidator.DeEscalationProtectedSeverityError;
+            return false;
+        }
+
         if (!int.TryParse(form["responseCacheTtlHours"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var responseCacheTtlHours))
         {
             error = LocalModelAdvisorSettingsValidator.ResponseCacheTtlError;
@@ -1701,6 +1725,11 @@ public static class AdminConfigurationEndpoints
             InvokeConfidenceMax = invokeConfidenceMax,
             MaxSeverityDelta = maxSeverityDelta,
             MaxConfidenceDelta = maxConfidenceDelta,
+            DeEscalationEnabled = form.ContainsKey("deEscalationEnabled"),
+            MaxDownwardSeverityDelta = maxDownwardSeverityDelta,
+            MaxDownwardConfidenceDelta = maxDownwardConfidenceDelta,
+            DeEscalationMinModelConfidence = deEscalationMinModelConfidence,
+            DeEscalationProtectedSeverity = deEscalationProtectedSeverity,
             ResponseCacheEnabled = form.ContainsKey("responseCacheEnabled"),
             ResponseCacheTtlHours = responseCacheTtlHours,
             EnsembleEnabled = ensembleEnabled,
@@ -1754,7 +1783,10 @@ public static class AdminConfigurationEndpoints
             || !TryReadNullableDouble(form["invokeConfidenceMin"].ToString(), LocalModelAdvisorSettingsValidator.ConfidenceBandError, out var invokeConfidenceMin, out error)
             || !TryReadNullableDouble(form["invokeConfidenceMax"].ToString(), LocalModelAdvisorSettingsValidator.ConfidenceBandError, out var invokeConfidenceMax, out error)
             || !TryReadNullableInt(form["maxSeverityDelta"].ToString(), LocalModelAdvisorSettingsValidator.MaxSeverityDeltaError, out var maxSeverityDelta, out error)
-            || !TryReadNullableDouble(form["maxConfidenceDelta"].ToString(), LocalModelAdvisorSettingsValidator.MaxConfidenceDeltaError, out var maxConfidenceDelta, out error))
+            || !TryReadNullableDouble(form["maxConfidenceDelta"].ToString(), LocalModelAdvisorSettingsValidator.MaxConfidenceDeltaError, out var maxConfidenceDelta, out error)
+            || !TryReadNullableBool(form["deEscalationEnabled"].ToString(), out var deEscalationEnabled, out error)
+            || !TryReadNullableInt(form["maxDownwardSeverityDelta"].ToString(), LocalModelAdvisorSettingsValidator.MaxDownwardSeverityDeltaError, out var maxDownwardSeverityDelta, out error)
+            || !TryReadNullableDouble(form["maxDownwardConfidenceDelta"].ToString(), LocalModelAdvisorSettingsValidator.MaxDownwardConfidenceDeltaError, out var maxDownwardConfidenceDelta, out error))
         {
             return false;
         }
@@ -1767,6 +1799,9 @@ public static class AdminConfigurationEndpoints
             InvokeConfidenceMax = invokeConfidenceMax,
             MaxSeverityDelta = maxSeverityDelta,
             MaxConfidenceDelta = maxConfidenceDelta,
+            DeEscalationEnabled = deEscalationEnabled,
+            MaxDownwardSeverityDelta = maxDownwardSeverityDelta,
+            MaxDownwardConfidenceDelta = maxDownwardConfidenceDelta,
         };
         if (!LocalModelAdvisorCategoryBandValidator.TryValidateEffective(band, global, out error))
         {

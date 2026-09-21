@@ -1320,6 +1320,11 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
                 SecondModelEndpoint = "http://127.0.0.2:11434/",
                 SecondModel = "qwen-second:latest",
                 InjectionAction = AdvisorInjectionAction.RecordOnly,
+                DeEscalationEnabled = true,
+                MaxDownwardSeverityDelta = 2,
+                MaxDownwardConfidenceDelta = 0.2,
+                DeEscalationMinModelConfidence = 0.8,
+                DeEscalationProtectedSeverity = 6,
             },
             now);
 
@@ -1328,6 +1333,11 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal("http://127.0.0.2:11434", seeded.SecondModelEndpoint);
         Assert.Equal("qwen-second:latest", seeded.SecondModel);
         Assert.Equal(AdvisorInjectionAction.RecordOnly, seeded.InjectionAction);
+        Assert.True(seeded.DeEscalationEnabled);
+        Assert.Equal(2, seeded.MaxDownwardSeverityDelta);
+        Assert.Equal(0.2, seeded.MaxDownwardConfidenceDelta);
+        Assert.Equal(0.8, seeded.DeEscalationMinModelConfidence);
+        Assert.Equal(6, seeded.DeEscalationProtectedSeverity);
 
         var updated = await store.UpsertAsync(
             seeded with
@@ -1336,6 +1346,11 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
                 SecondModelEndpoint = "",
                 SecondModel = "",
                 InjectionAction = AdvisorInjectionAction.SkipAdvisor,
+                DeEscalationEnabled = false,
+                MaxDownwardSeverityDelta = 1,
+                MaxDownwardConfidenceDelta = 0.1,
+                DeEscalationMinModelConfidence = 0.7,
+                DeEscalationProtectedSeverity = 7,
             },
             expectedVersion: seeded.Version,
             updatedBy: "operator",
@@ -1346,6 +1361,11 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(LocalModelAdvisorSettings.DefaultSecondModelEndpoint, updated.Settings.SecondModelEndpoint);
         Assert.Equal(string.Empty, updated.Settings.SecondModel);
         Assert.Equal(AdvisorInjectionAction.SkipAdvisor, updated.Settings.InjectionAction);
+        Assert.False(updated.Settings.DeEscalationEnabled);
+        Assert.Equal(1, updated.Settings.MaxDownwardSeverityDelta);
+        Assert.Equal(0.1, updated.Settings.MaxDownwardConfidenceDelta);
+        Assert.Equal(0.7, updated.Settings.DeEscalationMinModelConfidence);
+        Assert.Equal(7, updated.Settings.DeEscalationProtectedSeverity);
     }
 
     [PostgresFact]
@@ -1364,6 +1384,9 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
                 InvokeConfidenceMax = 0.75,
                 MaxSeverityDelta = 1,
                 MaxConfidenceDelta = null,
+                DeEscalationEnabled = true,
+                MaxDownwardSeverityDelta = 2,
+                MaxDownwardConfidenceDelta = 0.2,
             },
             expectedVersion: 0,
             updatedBy: "hannah",
@@ -1378,6 +1401,9 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.NotNull(fetched);
         Assert.Equal("path-traversal", fetched!.Category);
         Assert.Equal(0.75, fetched.InvokeConfidenceMax);
+        Assert.True(fetched.DeEscalationEnabled);
+        Assert.Equal(2, fetched.MaxDownwardSeverityDelta);
+        Assert.Equal(0.2, fetched.MaxDownwardConfidenceDelta);
         Assert.Single(await store.ListAsync());
 
         var updated = await store.UpsertAsync(
@@ -1385,6 +1411,8 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             {
                 Enabled = true,
                 MaxSeverityDelta = 2,
+                DeEscalationEnabled = false,
+                MaxDownwardSeverityDelta = 3,
             },
             expectedVersion: fetched.Version,
             updatedBy: "operator",
@@ -1394,6 +1422,8 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(2, updated.Band!.Version);
         Assert.True(updated.Band.Enabled);
         Assert.Equal(2, updated.Band.MaxSeverityDelta);
+        Assert.False(updated.Band.DeEscalationEnabled);
+        Assert.Equal(3, updated.Band.MaxDownwardSeverityDelta);
 
         var conflict = await store.UpsertAsync(
             updated.Band with { MaxSeverityDelta = 9 },

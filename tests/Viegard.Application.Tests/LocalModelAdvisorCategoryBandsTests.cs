@@ -15,6 +15,8 @@ public sealed class LocalModelAdvisorCategoryBandsTests
         { Valid() with { InvokeConfidenceMin = 0.8, InvokeConfidenceMax = 0.7 }, LocalModelAdvisorSettingsValidator.ConfidenceBandError },
         { Valid() with { MaxSeverityDelta = 11 }, LocalModelAdvisorSettingsValidator.MaxSeverityDeltaError },
         { Valid() with { MaxConfidenceDelta = 1.1 }, LocalModelAdvisorSettingsValidator.MaxConfidenceDeltaError },
+        { Valid() with { MaxDownwardSeverityDelta = 11 }, LocalModelAdvisorSettingsValidator.MaxDownwardSeverityDeltaError },
+        { Valid() with { MaxDownwardConfidenceDelta = double.NaN }, LocalModelAdvisorSettingsValidator.MaxDownwardConfidenceDeltaError },
     };
 
     [Fact]
@@ -57,6 +59,9 @@ public sealed class LocalModelAdvisorCategoryBandsTests
             InvokeConfidenceMax = 0.75,
             MaxSeverityDelta = 1,
             MaxConfidenceDelta = null,
+            DeEscalationEnabled = true,
+            MaxDownwardSeverityDelta = 2,
+            MaxDownwardConfidenceDelta = null,
         }, 0, "hannah", DateTimeOffset.UtcNow);
         var source = new LocalModelAdvisorCategoryBandSource(store);
         await source.RefreshAsync();
@@ -68,6 +73,9 @@ public sealed class LocalModelAdvisorCategoryBandsTests
         Assert.Equal(0.75, resolved.InvokeConfidenceMax);
         Assert.Equal(1, resolved.MaxSeverityDelta);
         Assert.Equal(0.2, resolved.MaxConfidenceDelta);
+        Assert.True(resolved.DeEscalationEnabled);
+        Assert.Equal(2, resolved.MaxDownwardSeverityDelta);
+        Assert.Equal(0.1, resolved.MaxDownwardConfidenceDelta);
     }
 
     [Fact]
@@ -120,6 +128,9 @@ public sealed class LocalModelAdvisorCategoryBandsTests
         InvokeConfidenceMax = null,
         MaxSeverityDelta = 2,
         MaxConfidenceDelta = null,
+        DeEscalationEnabled = null,
+        MaxDownwardSeverityDelta = 1,
+        MaxDownwardConfidenceDelta = null,
         UpdatedAt = DateTimeOffset.UtcNow,
         UpdatedBy = "test",
     };
@@ -134,5 +145,8 @@ public sealed class LocalModelAdvisorCategoryBandsTests
         0.5,
         0.85,
         3,
-        0.2);
+        0.2,
+        DeEscalationEnabled: false,
+        MaxDownwardSeverityDelta: 1,
+        MaxDownwardConfidenceDelta: 0.1);
 }

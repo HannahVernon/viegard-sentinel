@@ -133,7 +133,7 @@
                             <td><code>@band.Category</code></td>
                             <td>@FormatNullableBool(band.Enabled)</td>
                             <td>@FormatNullableConfidence(band.InvokeConfidenceMin) to @FormatNullableConfidence(band.InvokeConfidenceMax)</td>
-                            <td>Severity @FormatNullableInt(band.MaxSeverityDelta), confidence @FormatNullableConfidence(band.MaxConfidenceDelta)</td>
+                            <td>Up severity @FormatNullableInt(band.MaxSeverityDelta), up confidence @FormatNullableConfidence(band.MaxConfidenceDelta), down enabled @FormatNullableBool(band.DeEscalationEnabled), down severity @FormatNullableInt(band.MaxDownwardSeverityDelta), down confidence @FormatNullableConfidence(band.MaxDownwardConfidenceDelta)</td>
                             <td>@band.Version.ToString(System.Globalization.CultureInfo.InvariantCulture)</td>
                             <td>@band.UpdatedBy at @Display.Format(band.UpdatedAt)</td>
                             <td class="actions-cell">
@@ -201,6 +201,22 @@
                 <label>
                     Max confidence delta
                     <input name="maxConfidenceDelta" type="number" min="0" max="1" step="0.001" placeholder="inherit" />
+                </label>
+                <label>
+                    De-escalation enabled override
+                    <select name="deEscalationEnabled">
+                        <option value="inherit">inherit</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                    </select>
+                </label>
+                <label>
+                    Max downward severity delta
+                    <input name="maxDownwardSeverityDelta" type="number" min="0" max="10" step="1" placeholder="inherit" />
+                </label>
+                <label>
+                    Max downward confidence delta
+                    <input name="maxDownwardConfidenceDelta" type="number" min="0" max="1" step="0.001" placeholder="inherit" />
                 </label>
                 <button type="submit">Save category override</button>
             </form>
@@ -608,7 +624,7 @@
 
     <section id="local-model-advisor" class="indexed">
         <h2>Local-model advisor</h2>
-        <p class="small">The advisor optionally asks a local Ollama model for a second opinion on ambiguous incident classifications.  It is disabled by default, fail-open, escalation-only, clamped, and uses prompt assembly that fences observed evidence as untrusted data.</p>
+        <p class="small">The advisor optionally asks a local Ollama model for a second opinion on ambiguous incident classifications.  It is disabled by default, fail-open, clamped, and uses prompt assembly that fences observed evidence as untrusted data.  De-escalation is separately disabled by default.</p>
         <p class="small">The endpoint is runtime configuration.  Use the loopback default until the local workstation endpoint is entered here.</p>
 
         <h3>Status</h3>
@@ -655,8 +671,8 @@
                 </tr>
                 <tr>
                     <td><code>Clamp</code></td>
-                    <td>Severity +@LocalModelAdvisorCurrentSettings.MaxSeverityDelta, confidence +@FormatConfidence(LocalModelAdvisorCurrentSettings.MaxConfidenceDelta)</td>
-                    <td>Maximum model-suggested raise above the deterministic classification.</td>
+                    <td>Severity +@LocalModelAdvisorCurrentSettings.MaxSeverityDelta / -@LocalModelAdvisorCurrentSettings.MaxDownwardSeverityDelta, confidence +@FormatConfidence(LocalModelAdvisorCurrentSettings.MaxConfidenceDelta) / -@FormatConfidence(LocalModelAdvisorCurrentSettings.MaxDownwardConfidenceDelta)</td>
+                    <td>Maximum model-suggested movement around the deterministic classification.  Downward movement requires the de-escalation gates.</td>
                 </tr>
                 <tr>
                     <td><code>Response cache</code></td>
@@ -667,6 +683,11 @@
                     <td><code>Ensemble</code></td>
                     <td>@(LocalModelAdvisorCurrentSettings.EnsembleEnabled ? "On" : "Off")</td>
                     <td>When on, a second local model is consulted and the raw pre-clamp outputs are averaged.</td>
+                </tr>
+                <tr>
+                    <td><code>DeEscalation</code></td>
+                    <td>@(LocalModelAdvisorCurrentSettings.DeEscalationEnabled ? "On" : "Off")</td>
+                    <td>When on, clean advisor outputs may lower classifications below protected severity @LocalModelAdvisorCurrentSettings.DeEscalationProtectedSeverity when model confidence is at least @FormatConfidence(LocalModelAdvisorCurrentSettings.DeEscalationMinModelConfidence).</td>
                 </tr>
                 <tr>
                     <td><code>InjectionAction</code></td>
@@ -739,6 +760,27 @@
                     <input name="maxConfidenceDelta" type="number" min="0" max="1" step="0.001" value="@FormatConfidence(LocalModelAdvisorCurrentSettings.MaxConfidenceDelta)" required />
                 </label>
                 <label class="checkbox-label">
+                    <input name="deEscalationEnabled" type="checkbox" checked="@LocalModelAdvisorCurrentSettings.DeEscalationEnabled" />
+                    De-escalation enabled
+                    <span class="small">When checked, clean advisor outputs can lower eligible classifications within the configured downward clamp.</span>
+                </label>
+                <label>
+                    Max downward severity delta
+                    <input name="maxDownwardSeverityDelta" type="number" min="0" max="10" step="1" value="@LocalModelAdvisorCurrentSettings.MaxDownwardSeverityDelta.ToString(System.Globalization.CultureInfo.InvariantCulture)" required />
+                </label>
+                <label>
+                    Max downward confidence delta
+                    <input name="maxDownwardConfidenceDelta" type="number" min="0" max="1" step="0.001" value="@FormatConfidence(LocalModelAdvisorCurrentSettings.MaxDownwardConfidenceDelta)" required />
+                </label>
+                <label>
+                    De-escalation minimum model confidence
+                    <input name="deEscalationMinModelConfidence" type="number" min="0" max="1" step="0.001" value="@FormatConfidence(LocalModelAdvisorCurrentSettings.DeEscalationMinModelConfidence)" required />
+                </label>
+                <label>
+                    De-escalation protected severity
+                    <input name="deEscalationProtectedSeverity" type="number" min="0" max="10" step="1" value="@LocalModelAdvisorCurrentSettings.DeEscalationProtectedSeverity.ToString(System.Globalization.CultureInfo.InvariantCulture)" required />
+                </label>
+                <label class="checkbox-label">
                     <input name="responseCacheEnabled" type="checkbox" checked="@LocalModelAdvisorCurrentSettings.ResponseCacheEnabled" />
                     Response cache enabled
                     <span class="small">When checked, equivalent advisor consults can reuse a recent validated model response.</span>
@@ -751,7 +793,7 @@
                 <label class="checkbox-label">
                     <input name="ensembleEnabled" type="checkbox" checked="@LocalModelAdvisorCurrentSettings.EnsembleEnabled" />
                     Ensemble enabled
-                    <span class="small">When checked, the advisor averages primary and second model outputs before applying the escalation-only clamp.</span>
+                    <span class="small">When checked, the advisor averages primary and second model outputs before applying the bidirectional clamp.</span>
                 </label>
                 <label>
                     Second model endpoint

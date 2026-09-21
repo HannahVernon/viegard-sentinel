@@ -29,6 +29,12 @@ public sealed record LocalModelAdvisorCategoryBand
 
     public double? MaxConfidenceDelta { get; init; }
 
+    public bool? DeEscalationEnabled { get; init; }
+
+    public int? MaxDownwardSeverityDelta { get; init; }
+
+    public double? MaxDownwardConfidenceDelta { get; init; }
+
     public int Version { get; init; }
 
     public DateTimeOffset UpdatedAt { get; init; }
@@ -147,6 +153,19 @@ public static class LocalModelAdvisorCategoryBandValidator
             && (!double.IsFinite(confidenceDelta) || confidenceDelta is < 0.0 or > 1.0))
         {
             error = LocalModelAdvisorSettingsValidator.MaxConfidenceDeltaError;
+            return false;
+        }
+
+        if (band.MaxDownwardSeverityDelta is < 0 or > 10)
+        {
+            error = LocalModelAdvisorSettingsValidator.MaxDownwardSeverityDeltaError;
+            return false;
+        }
+
+        if (band.MaxDownwardConfidenceDelta is { } downwardConfidenceDelta
+            && (!double.IsFinite(downwardConfidenceDelta) || downwardConfidenceDelta is < 0.0 or > 1.0))
+        {
+            error = LocalModelAdvisorSettingsValidator.MaxDownwardConfidenceDeltaError;
             return false;
         }
 
@@ -283,6 +302,9 @@ public sealed class LocalModelAdvisorCategoryBandSource(
             InvokeConfidenceMax = band.InvokeConfidenceMax ?? global.InvokeConfidenceMax,
             MaxSeverityDelta = band.MaxSeverityDelta ?? global.MaxSeverityDelta,
             MaxConfidenceDelta = band.MaxConfidenceDelta ?? global.MaxConfidenceDelta,
+            DeEscalationEnabled = band.DeEscalationEnabled ?? global.DeEscalationEnabled,
+            MaxDownwardSeverityDelta = band.MaxDownwardSeverityDelta ?? global.MaxDownwardSeverityDelta,
+            MaxDownwardConfidenceDelta = band.MaxDownwardConfidenceDelta ?? global.MaxDownwardConfidenceDelta,
         };
     }
 }

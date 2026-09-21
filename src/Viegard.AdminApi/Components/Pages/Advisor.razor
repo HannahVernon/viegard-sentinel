@@ -27,6 +27,7 @@
                 <tr>
                     <th>Window</th>
                     <th>Escalated</th>
+                    <th>De-escalated</th>
                     <th>No change</th>
                     <th>Provider failed</th>
                     <th>Invalid output</th>
@@ -36,6 +37,7 @@
                     <th>Injection detected</th>
                     <th>Skipped for injection</th>
                     <th>Escalation rate</th>
+                    <th>De-escalation rate</th>
                     <th>Failures</th>
                     <th>Latency p50 / p95</th>
                 </tr>
@@ -46,6 +48,7 @@
                     <tr>
                         <td>@window.Label</td>
                         <td>@Count(window, AdvisorConsultOutcome.Escalated)</td>
+                        <td>@Count(window, AdvisorConsultOutcome.DeEscalated)</td>
                         <td>@Count(window, AdvisorConsultOutcome.NoChange)</td>
                         <td>@Count(window, AdvisorConsultOutcome.ProviderFailed)</td>
                         <td>@Count(window, AdvisorConsultOutcome.InvalidOutput)</td>
@@ -55,6 +58,7 @@
                         <td>@window.InjectionDetected</td>
                         <td>@window.SkippedForInjection</td>
                         <td>@EscalationRate(window)</td>
+                        <td>@DeEscalationRate(window)</td>
                         <td>@Failures(window)</td>
                         <td>@Latency(window.Latency)</td>
                     </tr>
@@ -151,11 +155,23 @@
     private static string EscalationRate(AdvisorWindow window)
     {
         var escalated = Count(window, AdvisorConsultOutcome.Escalated);
+        var deEscalated = Count(window, AdvisorConsultOutcome.DeEscalated);
         var noChange = Count(window, AdvisorConsultOutcome.NoChange);
-        var denominator = escalated + noChange;
+        var denominator = escalated + deEscalated + noChange;
         return denominator == 0
             ? "-"
             : (escalated / (double)denominator).ToString("P1", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static string DeEscalationRate(AdvisorWindow window)
+    {
+        var escalated = Count(window, AdvisorConsultOutcome.Escalated);
+        var deEscalated = Count(window, AdvisorConsultOutcome.DeEscalated);
+        var noChange = Count(window, AdvisorConsultOutcome.NoChange);
+        var denominator = escalated + deEscalated + noChange;
+        return denominator == 0
+            ? "-"
+            : (deEscalated / (double)denominator).ToString("P1", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string Latency(AdvisorLatencyStats stats) =>
@@ -201,6 +217,7 @@
     {
         AdvisorConsultOutcome.SkippedOutOfBand => "Skipped out of band",
         AdvisorConsultOutcome.Escalated => "Escalated",
+        AdvisorConsultOutcome.DeEscalated => "De-escalated",
         AdvisorConsultOutcome.NoChange => "No change",
         AdvisorConsultOutcome.ProviderFailed => "Provider failed",
         AdvisorConsultOutcome.InvalidOutput => "Invalid output",
@@ -210,6 +227,7 @@
     private static string OutcomeCss(AdvisorConsultOutcome outcome) => outcome switch
     {
         AdvisorConsultOutcome.Escalated => "badge badge-amber",
+        AdvisorConsultOutcome.DeEscalated => "badge badge-blue",
         AdvisorConsultOutcome.NoChange => "badge badge-green",
         AdvisorConsultOutcome.ProviderFailed or AdvisorConsultOutcome.InvalidOutput => "badge badge-red",
         _ => "badge",

@@ -38,6 +38,16 @@ public sealed class LocalModelAdvisorOptions
     public string SecondModel { get; set; } = string.Empty;
 
     public AdvisorInjectionAction InjectionAction { get; set; } = AdvisorInjectionAction.SkipAdvisor;
+
+    public bool DeEscalationEnabled { get; set; }
+
+    public int MaxDownwardSeverityDelta { get; set; } = 1;
+
+    public double MaxDownwardConfidenceDelta { get; set; } = 0.10;
+
+    public double DeEscalationMinModelConfidence { get; set; } = 0.70;
+
+    public int DeEscalationProtectedSeverity { get; set; } = 7;
 }
 
 public sealed class LocalModelAdvisorOptionsValidator : IValidateOptions<LocalModelAdvisorOptions>

@@ -95,7 +95,7 @@ public sealed class PostgresLocalModelAdvisorConsultStore(IDbContextFactory<Vieg
         var latencies = await db.LocalModelAdvisorConsults.AsNoTracking()
             .Where(r => r.CreatedAt >= cutoff
                 && r.LatencyMs != null
-                && (r.Outcome == (int)AdvisorConsultOutcome.Escalated || r.Outcome == (int)AdvisorConsultOutcome.NoChange))
+                && (r.Outcome == (int)AdvisorConsultOutcome.Escalated || r.Outcome == (int)AdvisorConsultOutcome.DeEscalated || r.Outcome == (int)AdvisorConsultOutcome.NoChange))
             .OrderBy(r => r.LatencyMs)
             .Select(r => r.LatencyMs!.Value)
             .ToListAsync(cancellationToken)

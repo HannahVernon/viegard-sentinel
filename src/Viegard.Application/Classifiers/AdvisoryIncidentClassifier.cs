@@ -128,10 +128,8 @@ public sealed class AdvisoryIncidentClassifier(
                 : null;
             if (cacheKey is not null && await TryGetCachedOutputAsync(cacheKey, cancellationToken).ConfigureAwait(false) is { } cached)
             {
-                var cachedAdjusted = ApplyEscalateOnlyClamp(baseClassification, cached.ToOutput(), cached.ModelId, settings, activeTemplate.Version, injection);
-                var cachedOutcome = cachedAdjusted.Severity > baseClassification.Severity || cachedAdjusted.Confidence > baseClassification.Confidence
-                    ? AdvisorConsultOutcome.Escalated
-                    : AdvisorConsultOutcome.NoChange;
+                var cachedAdjusted = ApplyBidirectionalClamp(baseClassification, cached.ToOutput(), cached.ModelId, settings, activeTemplate.Version, injection);
+                var cachedOutcome = DetermineOutcome(baseClassification, cachedAdjusted);
                 await RecordConsultAsync(BuildRecord(
                     baseClassification,
                     cachedOutcome,
@@ -192,10 +190,8 @@ public sealed class AdvisoryIncidentClassifier(
                         cancellationToken).ConfigureAwait(false);
                 }
 
-                var adjusted = ApplyEscalateOnlyClamp(baseClassification, validation.Output, modelId, settings, activeTemplate.Version, injection);
-                var outcome = adjusted.Severity > baseClassification.Severity || adjusted.Confidence > baseClassification.Confidence
-                    ? AdvisorConsultOutcome.Escalated
-                    : AdvisorConsultOutcome.NoChange;
+                var adjusted = ApplyBidirectionalClamp(baseClassification, validation.Output, modelId, settings, activeTemplate.Version, injection);
+                var outcome = DetermineOutcome(baseClassification, adjusted);
                 await RecordConsultAsync(BuildRecord(
                     baseClassification,
                     outcome,
@@ -238,10 +234,8 @@ public sealed class AdvisoryIncidentClassifier(
                     cancellationToken).ConfigureAwait(false);
             }
 
-            var ensembleAdjusted = ApplyEscalateOnlyClamp(baseClassification, ensemble.Output, ensemble.ModelId, settings, activeTemplate.Version, injection);
-            var ensembleOutcome = ensembleAdjusted.Severity > baseClassification.Severity || ensembleAdjusted.Confidence > baseClassification.Confidence
-                ? AdvisorConsultOutcome.Escalated
-                : AdvisorConsultOutcome.NoChange;
+            var ensembleAdjusted = ApplyBidirectionalClamp(baseClassification, ensemble.Output, ensemble.ModelId, settings, activeTemplate.Version, injection);
+            var ensembleOutcome = DetermineOutcome(baseClassification, ensembleAdjusted);
             await RecordConsultAsync(BuildRecord(
                 baseClassification,
                 ensembleOutcome,
@@ -552,7 +546,22 @@ public sealed class AdvisoryIncidentClassifier(
             .Where(v => v.Trust == PromptTrust.UntrustedObservedData)
             .Select(v => v.Value);
 
-    private static Classification ApplyEscalateOnlyClamp(
+    private static AdvisorConsultOutcome DetermineOutcome(Classification baseClassification, Classification finalClassification)
+    {
+        if (finalClassification.Severity > baseClassification.Severity || finalClassification.Confidence > baseClassification.Confidence)
+        {
+            return AdvisorConsultOutcome.Escalated;
+        }
+
+        if (finalClassification.Severity < baseClassification.Severity || finalClassification.Confidence < baseClassification.Confidence)
+        {
+            return AdvisorConsultOutcome.DeEscalated;
+        }
+
+        return AdvisorConsultOutcome.NoChange;
+    }
+
+    private static Classification ApplyBidirectionalClamp(
         Classification baseClassification,
         ValidatedClassificationOutput modelOutput,
         string modelId,
@@ -560,23 +569,27 @@ public sealed class AdvisoryIncidentClassifier(
         string promptTemplateVersion,
         AdvisorInjectionDetectionResult injection)
     {
-        var modelSeverityWithinDelta = Math.Min(modelOutput.Severity, baseClassification.Severity + settings.MaxSeverityDelta);
-        var finalSeverity = Math.Clamp(
-            Math.Max(baseClassification.Severity, modelSeverityWithinDelta),
-            Classification.MinSeverity,
-            Classification.MaxSeverity);
-
-        var modelConfidenceWithinDelta = Math.Min(modelOutput.Confidence, baseClassification.Confidence + settings.MaxConfidenceDelta);
-        var finalConfidence = Math.Clamp(
-            Math.Max(baseClassification.Confidence, modelConfidenceWithinDelta),
-            0.0,
-            1.0);
+        var deEscalationEligible = settings.DeEscalationEnabled
+            && !injection.Detected
+            && baseClassification.Severity < settings.DeEscalationProtectedSeverity
+            && modelOutput.Confidence >= settings.DeEscalationMinModelConfidence;
+        var severityLowerBound = deEscalationEligible
+            ? Math.Max(Classification.MinSeverity, baseClassification.Severity - settings.MaxDownwardSeverityDelta)
+            : baseClassification.Severity;
+        var confidenceLowerBound = deEscalationEligible
+            ? Math.Max(0.0, baseClassification.Confidence - settings.MaxDownwardConfidenceDelta)
+            : baseClassification.Confidence;
+        var severityUpperBound = Math.Min(Classification.MaxSeverity, baseClassification.Severity + settings.MaxSeverityDelta);
+        var confidenceUpperBound = Math.Min(1.0, baseClassification.Confidence + settings.MaxConfidenceDelta);
+        var finalSeverity = Math.Clamp(modelOutput.Severity, severityLowerBound, severityUpperBound);
+        var finalConfidence = Math.Clamp(modelOutput.Confidence, confidenceLowerBound, confidenceUpperBound);
+        var outcome = DetermineOutcome(baseClassification, baseClassification with { Severity = finalSeverity, Confidence = finalConfidence });
 
         return baseClassification with
         {
             Severity = finalSeverity,
             Confidence = finalConfidence,
-            Reasons = AppendAdvisorReasons(baseClassification.Reasons, AdvisorReasons(modelOutput.Reasons, injection, finalSeverity > baseClassification.Severity || finalConfidence > baseClassification.Confidence)),
+            Reasons = AppendAdvisorReasons(baseClassification.Reasons, AdvisorReasons(modelOutput.Reasons, injection, outcome)),
             Model = new ModelInfo
             {
                 ModelId = modelId,
@@ -589,18 +602,28 @@ public sealed class AdvisoryIncidentClassifier(
     private static IReadOnlyList<string> AdvisorReasons(
         IReadOnlyList<string> modelReasons,
         AdvisorInjectionDetectionResult injection,
-        bool escalated)
+        AdvisorConsultOutcome outcome)
     {
-        if (!escalated || !injection.Detected)
+        var reasons = modelReasons
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .ToList();
+        if (outcome == AdvisorConsultOutcome.DeEscalated)
         {
-            return modelReasons;
+            return reasons
+                .Take(1)
+                .Concat(["advisor lowered assessment"])
+                .ToList();
         }
 
-        return modelReasons
-            .Where(r => !string.IsNullOrWhiteSpace(r))
-            .Take(1)
-            .Concat(["potential prompt injection detected in observed data"])
-            .ToList();
+        if (outcome == AdvisorConsultOutcome.Escalated && injection.Detected)
+        {
+            reasons = reasons
+                .Take(1)
+                .Concat(["potential prompt injection detected in observed data"])
+                .ToList();
+        }
+
+        return reasons;
     }
 
     private static IReadOnlyList<string> AppendAdvisorReasons(

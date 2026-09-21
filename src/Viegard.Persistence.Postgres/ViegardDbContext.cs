@@ -333,6 +333,10 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
                 .HasDefaultValue(Viegard.Application.Configuration.LocalModelAdvisorSettings.DefaultSecondModelEndpoint);
             entity.Property(e => e.SecondModel).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxModelLength);
             entity.Property(e => e.InjectionAction).HasDefaultValue((int)Viegard.Application.Configuration.AdvisorInjectionAction.SkipAdvisor);
+            entity.Property(e => e.MaxDownwardSeverityDelta).HasDefaultValue(1);
+            entity.Property(e => e.MaxDownwardConfidenceDelta).HasDefaultValue(0.10);
+            entity.Property(e => e.DeEscalationMinModelConfidence).HasDefaultValue(0.70);
+            entity.Property(e => e.DeEscalationProtectedSeverity).HasDefaultValue(7);
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxUpdatedByLength);
         });
 

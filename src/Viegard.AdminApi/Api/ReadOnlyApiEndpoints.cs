@@ -190,13 +190,15 @@ public static class ReadOnlyApiEndpoints
             var byOutcome = counts.ToDictionary(c => c.Outcome, c => c.Count);
             long Count(AdvisorConsultOutcome outcome) => byOutcome.GetValueOrDefault(outcome);
             var escalated = Count(AdvisorConsultOutcome.Escalated);
+            var deEscalated = Count(AdvisorConsultOutcome.DeEscalated);
             var noChange = Count(AdvisorConsultOutcome.NoChange);
-            var considered = escalated + noChange;
+            var considered = escalated + deEscalated + noChange;
             windows.Add(new
             {
                 window = label,
                 since,
                 escalated,
+                deEscalated,
                 noChange,
                 providerFailed = Count(AdvisorConsultOutcome.ProviderFailed),
                 invalidOutput = Count(AdvisorConsultOutcome.InvalidOutput),
@@ -207,6 +209,7 @@ public static class ReadOnlyApiEndpoints
                 total = byOutcome.Values.Sum(),
                 failures = Count(AdvisorConsultOutcome.ProviderFailed) + Count(AdvisorConsultOutcome.InvalidOutput),
                 escalationRate = considered == 0 ? (double?)null : escalated / (double)considered,
+                deEscalationRate = considered == 0 ? (double?)null : deEscalated / (double)considered,
                 latency = new { count = latency.Count, p50Ms = latency.P50, p95Ms = latency.P95 },
             });
         }
@@ -230,6 +233,11 @@ public static class ReadOnlyApiEndpoints
             secondModelEndpoint = effective.SecondModelEndpoint,
             secondModel = effective.SecondModel,
             injectionAction = effective.InjectionAction.ToString(),
+            deEscalationEnabled = effective.DeEscalationEnabled,
+            maxDownwardSeverityDelta = effective.MaxDownwardSeverityDelta,
+            maxDownwardConfidenceDelta = effective.MaxDownwardConfidenceDelta,
+            deEscalationMinModelConfidence = effective.DeEscalationMinModelConfidence,
+            deEscalationProtectedSeverity = effective.DeEscalationProtectedSeverity,
             version = effective.Version,
             updatedAt = effective.UpdatedAt,
         };
@@ -241,6 +249,9 @@ public static class ReadOnlyApiEndpoints
             invokeConfidenceMax = band.InvokeConfidenceMax,
             maxSeverityDelta = band.MaxSeverityDelta,
             maxConfidenceDelta = band.MaxConfidenceDelta,
+            deEscalationEnabled = band.DeEscalationEnabled,
+            maxDownwardSeverityDelta = band.MaxDownwardSeverityDelta,
+            maxDownwardConfidenceDelta = band.MaxDownwardConfidenceDelta,
             version = band.Version,
             updatedAt = band.UpdatedAt,
         }).ToList();

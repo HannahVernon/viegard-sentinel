@@ -78,6 +78,7 @@ public sealed class ReadOnlyApiEndpointsTests
         var consults = new InMemoryLocalModelAdvisorConsultStore();
         var now = DateTimeOffset.UtcNow;
         await consults.AppendAsync(Consult(AdvisorConsultOutcome.Escalated, now.AddMinutes(-5), 100));
+        await consults.AppendAsync(Consult(AdvisorConsultOutcome.DeEscalated, now.AddMinutes(-5), 150));
         await consults.AppendAsync(Consult(AdvisorConsultOutcome.NoChange, now.AddMinutes(-6), 200, servedFromCache: true, injectionDetected: true, advisorSkippedForInjection: true));
         await consults.AppendAsync(Consult(AdvisorConsultOutcome.ProviderFailed, now.AddMinutes(-7), 400, "Timeout"));
         var settings = new InMemoryLocalModelAdvisorSettingsStore();
@@ -99,6 +100,11 @@ public sealed class ReadOnlyApiEndpointsTests
                 SecondModelEndpoint = "http://second.example:11434",
                 SecondModel = "qwen-second:latest",
                 InjectionAction = AdvisorInjectionAction.RecordOnly,
+                DeEscalationEnabled = true,
+                MaxDownwardSeverityDelta = 2,
+                MaxDownwardConfidenceDelta = 0.10,
+                DeEscalationMinModelConfidence = 0.7,
+                DeEscalationProtectedSeverity = 7,
             },
             expectedVersion: 0,
             updatedBy: "tester",
@@ -121,6 +127,9 @@ public sealed class ReadOnlyApiEndpointsTests
                 InvokeConfidenceMax = 0.75,
                 MaxSeverityDelta = 1,
                 MaxConfidenceDelta = null,
+                DeEscalationEnabled = true,
+                MaxDownwardSeverityDelta = 2,
+                MaxDownwardConfidenceDelta = 0.1,
             },
             expectedVersion: 0,
             updatedBy: "tester",
@@ -147,6 +156,11 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.Equal("http://second.example:11434", config.GetProperty("secondModelEndpoint").GetString());
         Assert.Equal("qwen-second:latest", config.GetProperty("secondModel").GetString());
         Assert.Equal("RecordOnly", config.GetProperty("injectionAction").GetString());
+        Assert.True(config.GetProperty("deEscalationEnabled").GetBoolean());
+        Assert.Equal(2, config.GetProperty("maxDownwardSeverityDelta").GetInt32());
+        Assert.Equal(0.10, config.GetProperty("maxDownwardConfidenceDelta").GetDouble());
+        Assert.Equal(0.7, config.GetProperty("deEscalationMinModelConfidence").GetDouble());
+        Assert.Equal(7, config.GetProperty("deEscalationProtectedSeverity").GetInt32());
         Assert.Equal(1, config.GetProperty("version").GetInt32());
 
         var activePromptTemplate = json.GetProperty("activePromptTemplate");
@@ -160,19 +174,24 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.Equal(0.75, categoryOverride.GetProperty("invokeConfidenceMax").GetDouble());
         Assert.Equal(1, categoryOverride.GetProperty("maxSeverityDelta").GetInt32());
         Assert.Equal(JsonValueKind.Null, categoryOverride.GetProperty("maxConfidenceDelta").ValueKind);
+        Assert.True(categoryOverride.GetProperty("deEscalationEnabled").GetBoolean());
+        Assert.Equal(2, categoryOverride.GetProperty("maxDownwardSeverityDelta").GetInt32());
+        Assert.Equal(0.1, categoryOverride.GetProperty("maxDownwardConfidenceDelta").GetDouble());
         Assert.Equal(1, categoryOverride.GetProperty("version").GetInt32());
 
         var oneHour = json.GetProperty("windows").EnumerateArray().Single(w => w.GetProperty("window").GetString() == "1h");
         Assert.Equal(1, oneHour.GetProperty("escalated").GetInt64());
+        Assert.Equal(1, oneHour.GetProperty("deEscalated").GetInt64());
         Assert.Equal(1, oneHour.GetProperty("noChange").GetInt64());
         Assert.Equal(1, oneHour.GetProperty("providerFailed").GetInt64());
         Assert.Equal(1, oneHour.GetProperty("failures").GetInt64());
         Assert.Equal(1, oneHour.GetProperty("cacheHits").GetInt64());
         Assert.Equal(1, oneHour.GetProperty("injectionDetected").GetInt64());
         Assert.Equal(1, oneHour.GetProperty("skippedForInjection").GetInt64());
-        Assert.Equal(3, oneHour.GetProperty("total").GetInt64());
-        Assert.Equal(0.5, oneHour.GetProperty("escalationRate").GetDouble());
-        Assert.Equal(2, oneHour.GetProperty("latency").GetProperty("count").GetInt64());
+        Assert.Equal(4, oneHour.GetProperty("total").GetInt64());
+        Assert.Equal(1.0 / 3.0, oneHour.GetProperty("escalationRate").GetDouble(), precision: 10);
+        Assert.Equal(1.0 / 3.0, oneHour.GetProperty("deEscalationRate").GetDouble(), precision: 10);
+        Assert.Equal(3, oneHour.GetProperty("latency").GetProperty("count").GetInt64());
     }
 
     [Fact]
@@ -251,9 +270,9 @@ public sealed class ReadOnlyApiEndpointsTests
         Category = "scanner",
         Outcome = outcome,
         BaseSeverity = 6,
-        FinalSeverity = outcome == AdvisorConsultOutcome.Escalated ? 8 : 6,
+        FinalSeverity = outcome == AdvisorConsultOutcome.Escalated ? 8 : outcome == AdvisorConsultOutcome.DeEscalated ? 4 : 6,
         BaseConfidence = 0.6,
-        FinalConfidence = outcome == AdvisorConsultOutcome.Escalated ? 0.8 : 0.6,
+        FinalConfidence = outcome == AdvisorConsultOutcome.Escalated ? 0.8 : outcome == AdvisorConsultOutcome.DeEscalated ? 0.5 : 0.6,
         LatencyMs = latencyMs,
         FailureKind = failureKind,
         ModelId = "qwen-test:latest",

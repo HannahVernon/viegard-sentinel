@@ -10,6 +10,7 @@ public enum AdvisorConsultOutcome
     NoChange,
     ProviderFailed,
     InvalidOutput,
+    DeEscalated,
 }
 
 public sealed record AdvisorConsultRecord

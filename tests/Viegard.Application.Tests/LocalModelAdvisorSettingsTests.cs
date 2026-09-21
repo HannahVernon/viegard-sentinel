@@ -22,6 +22,10 @@ public sealed class LocalModelAdvisorSettingsTests
         { Valid() with { EnsembleEnabled = true, SecondModel = "" }, LocalModelAdvisorSettingsValidator.SecondModelError },
         { Valid() with { EnsembleEnabled = true, SecondModelEndpoint = "not-a-url", SecondModel = "qwen-second:latest" }, LocalModelAdvisorSettingsValidator.SecondModelEndpointError },
         { Valid() with { InjectionAction = (AdvisorInjectionAction)99 }, LocalModelAdvisorSettingsValidator.InjectionActionError },
+        { Valid() with { MaxDownwardSeverityDelta = 11 }, LocalModelAdvisorSettingsValidator.MaxDownwardSeverityDeltaError },
+        { Valid() with { MaxDownwardConfidenceDelta = 1.1 }, LocalModelAdvisorSettingsValidator.MaxDownwardConfidenceDeltaError },
+        { Valid() with { DeEscalationMinModelConfidence = double.PositiveInfinity }, LocalModelAdvisorSettingsValidator.DeEscalationMinModelConfidenceError },
+        { Valid() with { DeEscalationProtectedSeverity = 11 }, LocalModelAdvisorSettingsValidator.DeEscalationProtectedSeverityError },
     };
 
     [Fact]
@@ -63,6 +67,11 @@ public sealed class LocalModelAdvisorSettingsTests
             SecondModelEndpoint = "http://127.0.0.2:11434/",
             SecondModel = "qwen-second:latest",
             InjectionAction = AdvisorInjectionAction.RecordOnly,
+            DeEscalationEnabled = true,
+            MaxDownwardSeverityDelta = 2,
+            MaxDownwardConfidenceDelta = 0.2,
+            DeEscalationMinModelConfidence = 0.8,
+            DeEscalationProtectedSeverity = 6,
         }, seededAt);
 
         Assert.NotNull(seeded);
@@ -75,6 +84,11 @@ public sealed class LocalModelAdvisorSettingsTests
         Assert.Equal("http://127.0.0.2:11434", seeded.SecondModelEndpoint);
         Assert.Equal("qwen-second:latest", seeded.SecondModel);
         Assert.Equal(AdvisorInjectionAction.RecordOnly, seeded.InjectionAction);
+        Assert.True(seeded.DeEscalationEnabled);
+        Assert.Equal(2, seeded.MaxDownwardSeverityDelta);
+        Assert.Equal(0.2, seeded.MaxDownwardConfidenceDelta);
+        Assert.Equal(0.8, seeded.DeEscalationMinModelConfidence);
+        Assert.Equal(6, seeded.DeEscalationProtectedSeverity);
         Assert.Equal(1, seeded.Version);
         Assert.Equal(seededAt, seeded.SeededAt);
 
@@ -129,6 +143,11 @@ public sealed class LocalModelAdvisorSettingsTests
 
         var defaults = LocalModelAdvisorSettings.FromOptions(new LocalModelAdvisorOptions(), DateTimeOffset.UtcNow);
         Assert.Equal(AdvisorInjectionAction.SkipAdvisor, defaults.InjectionAction);
+        Assert.False(defaults.DeEscalationEnabled);
+        Assert.Equal(1, defaults.MaxDownwardSeverityDelta);
+        Assert.Equal(0.10, defaults.MaxDownwardConfidenceDelta);
+        Assert.Equal(0.70, defaults.DeEscalationMinModelConfidence);
+        Assert.Equal(7, defaults.DeEscalationProtectedSeverity);
     }
 
     private static LocalModelAdvisorSettings Valid() => new()

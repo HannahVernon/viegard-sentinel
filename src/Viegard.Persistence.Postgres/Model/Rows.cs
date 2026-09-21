@@ -476,6 +476,27 @@ public sealed class LocalModelAdvisorCategoryBandRow
     public string UpdatedBy { get; set; } = string.Empty;
 }
 
+
+public sealed class LocalModelAdvisorPromptTemplateRow
+{
+    public Guid Id { get; set; }
+
+    public string TemplateId { get; set; } = string.Empty;
+
+    public int Revision { get; set; }
+
+    public string SystemInstructions { get; set; } = string.Empty;
+
+    public string ApplicationInstructions { get; set; } = string.Empty;
+
+    public bool IsActive { get; set; }
+
+    public string? Note { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public string CreatedBy { get; set; } = string.Empty;
+}
 public sealed class LocalModelAdvisorConsultRow
 {
     public Guid Id { get; set; }

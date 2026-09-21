@@ -63,6 +63,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<LocalModelAdvisorConsultRow> LocalModelAdvisorConsults => Set<LocalModelAdvisorConsultRow>();
 
+    public DbSet<LocalModelAdvisorPromptTemplateRow> LocalModelAdvisorPromptTemplates => Set<LocalModelAdvisorPromptTemplateRow>();
+
     public DbSet<PolicyThresholdSettingsRow> PolicyThresholdSettings => Set<PolicyThresholdSettingsRow>();
 
     public DbSet<PolicyPostureSettingsRow> PolicyPostureSettings => Set<PolicyPostureSettingsRow>();
@@ -332,6 +334,22 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorCategoryBand.MaxUpdatedByLength);
         });
 
+
+        modelBuilder.Entity<LocalModelAdvisorPromptTemplateRow>(entity =>
+        {
+            entity.ToTable("local_model_advisor_prompt_templates");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.HasIndex(e => new { e.TemplateId, e.Revision }).IsUnique();
+            entity.HasIndex(e => e.TemplateId)
+                .IsUnique()
+                .HasFilter("is_active");
+            entity.Property(e => e.TemplateId).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorPromptTemplateRevision.MaxTemplateIdLength);
+            entity.Property(e => e.SystemInstructions).HasColumnType("text");
+            entity.Property(e => e.ApplicationInstructions).HasColumnType("text");
+            entity.Property(e => e.Note).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorPromptTemplateRevision.MaxNoteLength);
+            entity.Property(e => e.CreatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorPromptTemplateRevision.MaxCreatedByLength);
+        });
         modelBuilder.Entity<LocalModelAdvisorConsultRow>(entity =>
         {
             entity.ToTable("local_model_advisor_consults");

@@ -32,7 +32,7 @@ public sealed class OllamaInferenceProvider(
 
         try
         {
-            var prompt = promptAssembler.Assemble(LocalModelAdvisorPrompt.Template, request.Variables);
+            var prompt = promptAssembler.Assemble(request.Template ?? LocalModelAdvisorPrompt.Template, request.Variables);
             var payload = new
             {
                 model = settings.Model,

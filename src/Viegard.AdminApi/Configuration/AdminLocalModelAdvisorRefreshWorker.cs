@@ -5,6 +5,7 @@ namespace Viegard.AdminApi.Configuration;
 public sealed class AdminLocalModelAdvisorRefreshWorker(
     LocalModelAdvisorSource source,
     LocalModelAdvisorCategoryBandSource categoryBandSource,
+    LocalModelAdvisorPromptTemplateSource promptTemplateSource,
     ILogger<AdminLocalModelAdvisorRefreshWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -14,7 +15,8 @@ public sealed class AdminLocalModelAdvisorRefreshWorker(
         {
             await Task.WhenAll(
                 source.RunRefreshLoopAsync(stoppingToken),
-                categoryBandSource.RunRefreshLoopAsync(stoppingToken)).ConfigureAwait(false);
+                categoryBandSource.RunRefreshLoopAsync(stoppingToken),
+                promptTemplateSource.RunRefreshLoopAsync(stoppingToken)).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

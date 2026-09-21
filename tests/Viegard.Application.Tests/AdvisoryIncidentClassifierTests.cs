@@ -238,6 +238,7 @@ public sealed class AdvisoryIncidentClassifierTests
             eventStore,
             source,
             categoryBandSource,
+            new LocalModelAdvisorPromptTemplateSource(),
             Options.Create(new LocalModelAdvisorOptions()),
             provider,
             new ClassificationOutputValidator(),

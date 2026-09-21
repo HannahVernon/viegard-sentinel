@@ -34,6 +34,33 @@ public sealed class OllamaInferenceProviderTests
         Assert.Contains("\"format\":", handler.LastRequestBody, StringComparison.Ordinal);
     }
 
+
+    [Fact]
+    public async Task Infer_uses_request_template_when_provided_and_static_template_when_null()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+                {"model":"qwen-test:latest","message":{"role":"assistant","content":"{}"}}
+                """),
+        });
+        var provider = await CreateProviderAsync(handler);
+        var custom = LocalModelAdvisorPrompt.Template with
+        {
+            SystemInstructions = "Custom system {output_schema}",
+            ApplicationInstructions = "Custom application {base_category}",
+        };
+
+        await provider.InferAsync(Request() with { Template = custom });
+
+        Assert.Contains("Custom system schema", handler.LastRequestBody, StringComparison.Ordinal);
+        Assert.Contains("Custom application path-traversal", handler.LastRequestBody, StringComparison.Ordinal);
+
+        await provider.InferAsync(Request());
+
+        Assert.Contains("local-model security advisor", handler.LastRequestBody, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Http_500_returns_unavailable_and_never_throws()
     {

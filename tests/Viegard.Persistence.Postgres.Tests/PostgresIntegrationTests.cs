@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using Viegard.Application.Auth;
+using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
 using Viegard.Application.Detection;
 using Viegard.Application.Policy;
@@ -61,7 +62,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         // 180d window) age into purge eligibility ~24h after the run that
         // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_category_bands, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_category_bands, local_model_advisor_prompt_templates, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -1356,6 +1357,50 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.True(deleted.Succeeded);
         Assert.Null(await store.GetAsync("path-traversal"));
         Assert.Empty(await store.ListAsync());
+    }
+
+
+    [PostgresFact]
+    public async Task Local_model_advisor_prompt_template_store_round_trips_and_activates_prior_revision()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresLocalModelAdvisorPromptTemplateStore(factory);
+        var now = new DateTimeOffset(2026, 9, 21, 9, 30, 0, TimeSpan.Zero);
+
+        var first = await store.CreateRevisionAsync(
+            AdvisoryIncidentClassifier.PromptTemplateId,
+            "System {output_schema}",
+            "Application {base_category}",
+            "first",
+            "hannah",
+            now);
+        var second = await store.CreateRevisionAsync(
+            AdvisoryIncidentClassifier.PromptTemplateId,
+            "System v2 {output_schema}",
+            "Application {base_severity}",
+            "second",
+            "operator",
+            now.AddMinutes(1));
+
+        Assert.Equal(1, first.Revision);
+        Assert.Equal(2, second.Revision);
+        Assert.Equal(second.Id, (await store.GetActiveAsync(AdvisoryIncidentClassifier.PromptTemplateId))!.Id);
+        Assert.False((await store.GetAsync(first.Id))!.IsActive);
+        Assert.True((await store.GetAsync(second.Id))!.IsActive);
+        var revisions = await store.ListAsync(AdvisoryIncidentClassifier.PromptTemplateId);
+        Assert.Equal(new[] { 2, 1 }, revisions.Select(r => r.Revision).ToArray());
+
+        var activated = await store.ActivateAsync(first.Id);
+
+        Assert.True(activated.Succeeded);
+        Assert.Equal(2, activated.Before!.Revision);
+        Assert.Equal(1, activated.After!.Revision);
+        Assert.Equal(first.Id, (await store.GetActiveAsync(AdvisoryIncidentClassifier.PromptTemplateId))!.Id);
+        Assert.True((await store.GetAsync(first.Id))!.IsActive);
+        Assert.False((await store.GetAsync(second.Id))!.IsActive);
+
+        await using var db = factory.CreateDbContext();
+        Assert.Equal(1, await db.LocalModelAdvisorPromptTemplates.CountAsync(r => r.TemplateId == AdvisoryIncidentClassifier.PromptTemplateId && r.IsActive));
     }
 
     [PostgresFact]

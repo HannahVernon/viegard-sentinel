@@ -17,6 +17,7 @@ public sealed class AdvisoryIncidentClassifier(
     IEventStore eventStore,
     LocalModelAdvisorSource advisorSource,
     LocalModelAdvisorCategoryBandSource categoryBandSource,
+    LocalModelAdvisorPromptTemplateSource promptTemplateSource,
     IOptions<LocalModelAdvisorOptions> options,
     IInferenceProvider inferenceProvider,
     ClassificationOutputValidator outputValidator,
@@ -26,6 +27,15 @@ public sealed class AdvisoryIncidentClassifier(
     public const string PromptTemplateVersion = "local-model-advisor-v1.0";
     public const string PromptTemplateId = "local-model-advisor-v1";
     public const string OutputSchemaId = "viegard-classification-output-v1";
+    public static IReadOnlySet<string> TrustedPromptVariableNames { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "output_schema",
+        "base_category",
+        "base_severity",
+        "base_confidence",
+        "max_severity_delta",
+        "max_confidence_delta",
+    };
     private const int MaxReasons = 10;
 
     public string ClassifierId => Id;
@@ -78,9 +88,11 @@ public sealed class AdvisoryIncidentClassifier(
                 return baseOutcome;
             }
 
+            var activeTemplate = promptTemplateSource.Current;
             var request = new InferenceRequest
             {
                 TemplateId = PromptTemplateId,
+                Template = activeTemplate,
                 Variables = await BuildPromptVariablesAsync(baseClassification, incident, settings, cancellationToken).ConfigureAwait(false),
                 OutputSchemaId = OutputSchemaId,
                 MaxTokens = 256,
@@ -119,7 +131,7 @@ public sealed class AdvisoryIncidentClassifier(
                 return baseOutcome;
             }
 
-            var adjusted = ApplyEscalateOnlyClamp(baseClassification, validation.Output, inference.ModelId ?? settings.Model, settings);
+            var adjusted = ApplyEscalateOnlyClamp(baseClassification, validation.Output, inference.ModelId ?? settings.Model, settings, activeTemplate.Version);
             var outcome = adjusted.Severity > baseClassification.Severity || adjusted.Confidence > baseClassification.Confidence
                 ? AdvisorConsultOutcome.Escalated
                 : AdvisorConsultOutcome.NoChange;
@@ -234,7 +246,8 @@ public sealed class AdvisoryIncidentClassifier(
         Classification baseClassification,
         ValidatedClassificationOutput modelOutput,
         string modelId,
-        LocalModelAdvisorValues settings)
+        LocalModelAdvisorValues settings,
+        string promptTemplateVersion)
     {
         var modelSeverityWithinDelta = Math.Min(modelOutput.Severity, baseClassification.Severity + settings.MaxSeverityDelta);
         var finalSeverity = Math.Clamp(
@@ -257,7 +270,7 @@ public sealed class AdvisoryIncidentClassifier(
             {
                 ModelId = modelId,
                 ModelVersion = null,
-                PromptTemplateVersion = PromptTemplateVersion,
+                PromptTemplateVersion = promptTemplateVersion,
             },
         };
     }

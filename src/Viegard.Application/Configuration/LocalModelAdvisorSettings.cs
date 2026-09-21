@@ -51,6 +51,8 @@ public sealed record LocalModelAdvisorSettings
 
     public string SecondModel { get; init; } = string.Empty;
 
+    public AdvisorInjectionAction InjectionAction { get; init; } = AdvisorInjectionAction.SkipAdvisor;
+
     public int Version { get; init; }
 
     public DateTimeOffset? SeededAt { get; init; }
@@ -81,6 +83,7 @@ public sealed record LocalModelAdvisorSettings
             EnsembleEnabled = options.EnsembleEnabled,
             SecondModelEndpoint = options.SecondModelEndpoint,
             SecondModel = options.SecondModel,
+            InjectionAction = options.InjectionAction,
             Version = 1,
             SeededAt = utc,
             UpdatedAt = utc,
@@ -102,6 +105,7 @@ public static class LocalModelAdvisorSettingsValidator
     public const string ResponseCacheTtlError = "Local-model advisor response cache TTL must be between 1 and 2160 hours.";
     public const string SecondModelEndpointError = "Local-model advisor second model endpoint must be an absolute http or https URL.";
     public const string SecondModelError = "Local-model advisor second model is required when ensemble is enabled, must not exceed 128 characters, and must not contain control characters.";
+    public const string InjectionActionError = "Local-model advisor injection action must be RecordOnly or SkipAdvisor.";
 
     public static bool TryValidate(LocalModelAdvisorSettings settings, out string error)
     {
@@ -172,6 +176,12 @@ public static class LocalModelAdvisorSettingsValidator
             return false;
         }
 
+        if (!Enum.IsDefined(settings.InjectionAction))
+        {
+            error = InjectionActionError;
+            return false;
+        }
+
         if (settings.Id != LocalModelAdvisorSettings.FixedId)
         {
             error = "Local-model advisor settings row has an invalid id.";
@@ -193,6 +203,20 @@ public static class LocalModelAdvisorSettingsValidator
 
     public static bool TryNormalizeSecondModel(string? value, bool required, out string normalized, out string error) =>
         TryNormalizeOptionalModel(value, required, out normalized, out error);
+
+    public static bool TryNormalizeInjectionAction(string? value, out AdvisorInjectionAction normalized, out string error)
+    {
+        if (Enum.TryParse<AdvisorInjectionAction>(value?.Trim(), ignoreCase: false, out normalized)
+            && Enum.IsDefined(normalized))
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        normalized = AdvisorInjectionAction.SkipAdvisor;
+        error = InjectionActionError;
+        return false;
+    }
 
     public static string NormalizeUpdatedBy(string updatedBy)
     {

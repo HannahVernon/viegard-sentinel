@@ -456,6 +456,8 @@ public sealed class LocalModelAdvisorSettingsRow
 
     public string SecondModel { get; set; } = string.Empty;
 
+    public int InjectionAction { get; set; }
+
     public int Version { get; set; }
 
     public DateTimeOffset? SeededAt { get; set; }
@@ -486,6 +488,22 @@ public sealed class LocalModelAdvisorCategoryBandRow
     public string UpdatedBy { get; set; } = string.Empty;
 }
 
+public sealed class LocalModelAdvisorInjectionPatternRow
+{
+    public Guid Id { get; set; }
+
+    public string Category { get; set; } = string.Empty;
+
+    public string Pattern { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    public bool Enabled { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public string CreatedBy { get; set; } = string.Empty;
+}
 
 public sealed class LocalModelAdvisorPromptTemplateRow
 {
@@ -558,6 +576,12 @@ public sealed class LocalModelAdvisorConsultRow
     public bool ServedFromCache { get; set; }
 
     public string? EnsembleDetailJson { get; set; }
+
+    public bool InjectionDetected { get; set; }
+
+    public string InjectionCategoriesJson { get; set; } = "[]";
+
+    public bool AdvisorSkippedForInjection { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 }

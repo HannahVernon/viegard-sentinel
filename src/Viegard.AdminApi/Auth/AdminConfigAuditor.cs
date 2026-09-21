@@ -219,6 +219,39 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
             logger.LogError(ex, "Failed to append admin configuration audit record.");
         }
     }
+
+    public async ValueTask RecordLocalModelAdvisorInjectionPatternWriteAsync(
+        string username,
+        string action,
+        LocalModelAdvisorInjectionPattern? before,
+        LocalModelAdvisorInjectionPattern? after,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config write by {username}: {action} local-model advisor injection pattern.",
+                SourceId = "admin:config",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "LocalModelAdvisorInjectionPatternChanged",
+                    Username = username,
+                    Action = action,
+                    Before = before,
+                    After = after,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
+
     public async ValueTask RecordIngestionFiltersWriteAsync(
         string username,
         string sourceType,

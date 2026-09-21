@@ -97,7 +97,8 @@ public sealed record LocalModelAdvisorValues(
     int ResponseCacheTtlHours = 72,
     bool EnsembleEnabled = false,
     string SecondModelEndpoint = LocalModelAdvisorSettings.DefaultSecondModelEndpoint,
-    string SecondModel = "")
+    string SecondModel = "",
+    AdvisorInjectionAction InjectionAction = AdvisorInjectionAction.SkipAdvisor)
 {
     public static LocalModelAdvisorValues FromOptions(LocalModelAdvisorOptions options)
     {
@@ -122,7 +123,8 @@ public sealed record LocalModelAdvisorValues(
             options.ResponseCacheTtlHours,
             options.EnsembleEnabled,
             secondModelEndpoint,
-            secondModel);
+            secondModel,
+            options.InjectionAction);
     }
 
     public static LocalModelAdvisorValues FromSettings(LocalModelAdvisorSettings settings)
@@ -148,7 +150,8 @@ public sealed record LocalModelAdvisorValues(
             settings.ResponseCacheTtlHours,
             settings.EnsembleEnabled,
             secondModelEndpoint,
-            secondModel);
+            secondModel,
+            settings.InjectionAction);
     }
 }
 
@@ -169,6 +172,7 @@ public sealed record LocalModelAdvisorSnapshot(
     bool EnsembleEnabled,
     string SecondModelEndpoint,
     string SecondModel,
+    AdvisorInjectionAction InjectionAction,
     int Version)
 {
     public static LocalModelAdvisorSnapshot Unseeded { get; } = new(
@@ -188,6 +192,7 @@ public sealed record LocalModelAdvisorSnapshot(
         false,
         LocalModelAdvisorSettings.DefaultSecondModelEndpoint,
         string.Empty,
+        AdvisorInjectionAction.SkipAdvisor,
         0);
 
     public static LocalModelAdvisorSnapshot Seeded(LocalModelAdvisorSettings settings)
@@ -211,6 +216,7 @@ public sealed record LocalModelAdvisorSnapshot(
             values.EnsembleEnabled,
             values.SecondModelEndpoint,
             values.SecondModel,
+            values.InjectionAction,
             settings.Version);
     }
 
@@ -231,6 +237,7 @@ public sealed record LocalModelAdvisorSnapshot(
                 ResponseCacheTtlHours,
                 EnsembleEnabled,
                 SecondModelEndpoint,
-                SecondModel)
+                SecondModel,
+                InjectionAction)
             : LocalModelAdvisorValues.FromOptions(fallbackOptions);
 }

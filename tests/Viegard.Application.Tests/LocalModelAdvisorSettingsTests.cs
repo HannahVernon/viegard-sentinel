@@ -21,6 +21,7 @@ public sealed class LocalModelAdvisorSettingsTests
         { Valid() with { ResponseCacheTtlHours = 2161 }, LocalModelAdvisorSettingsValidator.ResponseCacheTtlError },
         { Valid() with { EnsembleEnabled = true, SecondModel = "" }, LocalModelAdvisorSettingsValidator.SecondModelError },
         { Valid() with { EnsembleEnabled = true, SecondModelEndpoint = "not-a-url", SecondModel = "qwen-second:latest" }, LocalModelAdvisorSettingsValidator.SecondModelEndpointError },
+        { Valid() with { InjectionAction = (AdvisorInjectionAction)99 }, LocalModelAdvisorSettingsValidator.InjectionActionError },
     };
 
     [Fact]
@@ -61,6 +62,7 @@ public sealed class LocalModelAdvisorSettingsTests
             EnsembleEnabled = true,
             SecondModelEndpoint = "http://127.0.0.2:11434/",
             SecondModel = "qwen-second:latest",
+            InjectionAction = AdvisorInjectionAction.RecordOnly,
         }, seededAt);
 
         Assert.NotNull(seeded);
@@ -72,6 +74,7 @@ public sealed class LocalModelAdvisorSettingsTests
         Assert.True(seeded.EnsembleEnabled);
         Assert.Equal("http://127.0.0.2:11434", seeded.SecondModelEndpoint);
         Assert.Equal("qwen-second:latest", seeded.SecondModel);
+        Assert.Equal(AdvisorInjectionAction.RecordOnly, seeded.InjectionAction);
         Assert.Equal(1, seeded.Version);
         Assert.Equal(seededAt, seeded.SeededAt);
 
@@ -84,6 +87,7 @@ public sealed class LocalModelAdvisorSettingsTests
 
         Assert.Equal("qwen-test:latest", secondSeed!.Model);
         Assert.True(secondSeed.Enabled);
+        Assert.Equal(AdvisorInjectionAction.RecordOnly, secondSeed.InjectionAction);
 
         var conflict = await store.UpsertAsync(
             Valid() with { Model = "new-model" },
@@ -107,6 +111,24 @@ public sealed class LocalModelAdvisorSettingsTests
 
         Assert.True(LocalModelAdvisorSettingsValidator.TryValidate(settings, out var error));
         Assert.Equal(string.Empty, error);
+    }
+
+    [Fact]
+    public async Task In_memory_store_round_trips_injection_action_and_defaults_to_skip_advisor()
+    {
+        var store = new InMemoryLocalModelAdvisorSettingsStore();
+
+        var created = await store.UpsertAsync(
+            Valid() with { InjectionAction = AdvisorInjectionAction.RecordOnly },
+            expectedVersion: 0,
+            updatedBy: "test",
+            updatedAt: DateTimeOffset.UtcNow);
+
+        Assert.True(created.Succeeded);
+        Assert.Equal(AdvisorInjectionAction.RecordOnly, created.Settings!.InjectionAction);
+
+        var defaults = LocalModelAdvisorSettings.FromOptions(new LocalModelAdvisorOptions(), DateTimeOffset.UtcNow);
+        Assert.Equal(AdvisorInjectionAction.SkipAdvisor, defaults.InjectionAction);
     }
 
     private static LocalModelAdvisorSettings Valid() => new()

@@ -112,6 +112,24 @@ public sealed class PostgresLocalModelAdvisorConsultStore(IDbContextFactory<Vieg
             .ConfigureAwait(false);
     }
 
+    public async Task<long> GetInjectionDetectedCountAsync(DateTimeOffset since, CancellationToken cancellationToken = default)
+    {
+        var cutoff = since.ToUniversalTime();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await db.LocalModelAdvisorConsults.AsNoTracking()
+            .LongCountAsync(r => r.CreatedAt >= cutoff && r.InjectionDetected, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<long> GetSkippedForInjectionCountAsync(DateTimeOffset since, CancellationToken cancellationToken = default)
+    {
+        var cutoff = since.ToUniversalTime();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await db.LocalModelAdvisorConsults.AsNoTracking()
+            .LongCountAsync(r => r.CreatedAt >= cutoff && r.AdvisorSkippedForInjection, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyList<AdvisorConsultRecord>> GetRecentAsync(int limit, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);

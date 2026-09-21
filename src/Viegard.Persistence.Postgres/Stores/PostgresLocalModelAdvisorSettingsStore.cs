@@ -60,6 +60,7 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 ensemble_enabled,
                 second_model_endpoint,
                 second_model,
+                injection_action,
                 version,
                 seeded_at,
                 updated_at,
@@ -82,6 +83,7 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 {seed.EnsembleEnabled},
                 {seed.SecondModelEndpoint},
                 {seed.SecondModel},
+                {(int)seed.InjectionAction},
                 {seed.Version},
                 {seed.SeededAt},
                 {seed.UpdatedAt},
@@ -161,6 +163,7 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 .SetProperty(r => r.EnsembleEnabled, normalized.EnsembleEnabled)
                 .SetProperty(r => r.SecondModelEndpoint, normalized.SecondModelEndpoint)
                 .SetProperty(r => r.SecondModel, normalized.SecondModel)
+                .SetProperty(r => r.InjectionAction, (int)normalized.InjectionAction)
                 .SetProperty(r => r.Version, expectedVersion + 1)
                 .SetProperty(r => r.UpdatedAt, utcUpdatedAt)
                 .SetProperty(r => r.UpdatedBy, normalizedUpdatedBy),

@@ -78,7 +78,7 @@ public sealed class ReadOnlyApiEndpointsTests
         var consults = new InMemoryLocalModelAdvisorConsultStore();
         var now = DateTimeOffset.UtcNow;
         await consults.AppendAsync(Consult(AdvisorConsultOutcome.Escalated, now.AddMinutes(-5), 100));
-        await consults.AppendAsync(Consult(AdvisorConsultOutcome.NoChange, now.AddMinutes(-6), 200, servedFromCache: true));
+        await consults.AppendAsync(Consult(AdvisorConsultOutcome.NoChange, now.AddMinutes(-6), 200, servedFromCache: true, injectionDetected: true, advisorSkippedForInjection: true));
         await consults.AppendAsync(Consult(AdvisorConsultOutcome.ProviderFailed, now.AddMinutes(-7), 400, "Timeout"));
         var settings = new InMemoryLocalModelAdvisorSettingsStore();
         await settings.UpsertAsync(
@@ -98,6 +98,7 @@ public sealed class ReadOnlyApiEndpointsTests
                 EnsembleEnabled = true,
                 SecondModelEndpoint = "http://second.example:11434",
                 SecondModel = "qwen-second:latest",
+                InjectionAction = AdvisorInjectionAction.RecordOnly,
             },
             expectedVersion: 0,
             updatedBy: "tester",
@@ -145,6 +146,7 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.True(config.GetProperty("ensembleEnabled").GetBoolean());
         Assert.Equal("http://second.example:11434", config.GetProperty("secondModelEndpoint").GetString());
         Assert.Equal("qwen-second:latest", config.GetProperty("secondModel").GetString());
+        Assert.Equal("RecordOnly", config.GetProperty("injectionAction").GetString());
         Assert.Equal(1, config.GetProperty("version").GetInt32());
 
         var activePromptTemplate = json.GetProperty("activePromptTemplate");
@@ -166,6 +168,8 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.Equal(1, oneHour.GetProperty("providerFailed").GetInt64());
         Assert.Equal(1, oneHour.GetProperty("failures").GetInt64());
         Assert.Equal(1, oneHour.GetProperty("cacheHits").GetInt64());
+        Assert.Equal(1, oneHour.GetProperty("injectionDetected").GetInt64());
+        Assert.Equal(1, oneHour.GetProperty("skippedForInjection").GetInt64());
         Assert.Equal(3, oneHour.GetProperty("total").GetInt64());
         Assert.Equal(0.5, oneHour.GetProperty("escalationRate").GetDouble());
         Assert.Equal(2, oneHour.GetProperty("latency").GetProperty("count").GetInt64());
@@ -238,7 +242,9 @@ public sealed class ReadOnlyApiEndpointsTests
         DateTimeOffset createdAt,
         int? latencyMs,
         string? failureKind = null,
-        bool servedFromCache = false) => new()
+        bool servedFromCache = false,
+        bool injectionDetected = false,
+        bool advisorSkippedForInjection = false) => new()
     {
         ClassificationId = ViegardId.New(),
         IncidentId = ViegardId.New(),
@@ -252,6 +258,9 @@ public sealed class ReadOnlyApiEndpointsTests
         FailureKind = failureKind,
         ModelId = "qwen-test:latest",
         ServedFromCache = servedFromCache,
+        InjectionDetected = injectionDetected,
+        InjectionCategories = injectionDetected ? [nameof(AdvisorInjectionPatternCategory.OutputControlHijack)] : [],
+        AdvisorSkippedForInjection = advisorSkippedForInjection,
         CreatedAt = createdAt,
     };
 

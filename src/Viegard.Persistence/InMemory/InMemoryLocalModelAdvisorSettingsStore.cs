@@ -105,6 +105,7 @@ public sealed class InMemoryLocalModelAdvisorSettingsStore : ILocalModelAdvisorS
                 EnsembleEnabled = normalized.EnsembleEnabled,
                 SecondModelEndpoint = normalized.SecondModelEndpoint,
                 SecondModel = normalized.SecondModel,
+                InjectionAction = normalized.InjectionAction,
                 Version = _settings.Version + 1,
                 UpdatedAt = updatedAt.ToUniversalTime(),
                 UpdatedBy = LocalModelAdvisorSettingsValidator.NormalizeUpdatedBy(updatedBy),

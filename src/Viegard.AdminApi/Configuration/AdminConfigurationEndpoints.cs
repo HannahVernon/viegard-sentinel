@@ -49,6 +49,18 @@ public static class AdminConfigurationEndpoints
         app.MapPost("/configuration/local-model-advisor/prompt-template/activate", ActivateLocalModelAdvisorPromptTemplateAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
+        app.MapGet("/configuration/local-model-advisor/injection-patterns", ListLocalModelAdvisorInjectionPatternsAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/local-model-advisor/injection-patterns", AddLocalModelAdvisorInjectionPatternAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/local-model-advisor/injection-patterns/toggle", ToggleLocalModelAdvisorInjectionPatternAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/local-model-advisor/injection-patterns/delete", DeleteLocalModelAdvisorInjectionPatternAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
         app.MapPost("/configuration/satellites/create", CreateSatelliteAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
@@ -505,6 +517,171 @@ public static class AdminConfigurationEndpoints
             result.After,
             context.RequestAborted).ConfigureAwait(false);
         return Redirect(LocalModelAdvisorConfigurationPath, status: $"Local-model advisor prompt template revision {result.After.Revision.ToString(CultureInfo.InvariantCulture)} activated.");
+    }
+
+    internal static async Task<IResult> ListLocalModelAdvisorInjectionPatternsAsync(
+        HttpContext context,
+        ILocalModelAdvisorInjectionPatternStore patterns)
+    {
+        var items = await patterns.ListAsync(context.RequestAborted).ConfigureAwait(false);
+        return Results.Json(new
+        {
+            baseCategories = Enum.GetNames<AdvisorInjectionPatternCategory>(),
+            items,
+        });
+    }
+
+    internal static async Task<IResult> AddLocalModelAdvisorInjectionPatternAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ILocalModelAdvisorInjectionPatternStore patterns,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Step-up verification is required before editing local-model advisor injection patterns.");
+        }
+
+        if (!TryReadLocalModelAdvisorInjectionPattern(form, out var category, out var pattern, out var description, out var error))
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: error);
+        }
+
+        LocalModelAdvisorInjectionPattern created;
+        try
+        {
+            created = await patterns.CreateAsync(
+                    category,
+                    pattern,
+                    description,
+                    user.Username,
+                    DateTimeOffset.UtcNow,
+                    context.RequestAborted)
+                .ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: ex.Message);
+        }
+
+        await configAuditor.RecordLocalModelAdvisorInjectionPatternWriteAsync(
+            user.Username,
+            "Create",
+            null,
+            created,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(LocalModelAdvisorConfigurationPath, status: "Local-model advisor injection pattern added.");
+    }
+
+    internal static async Task<IResult> ToggleLocalModelAdvisorInjectionPatternAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ILocalModelAdvisorInjectionPatternStore patterns,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Step-up verification is required before editing local-model advisor injection patterns.");
+        }
+
+        if (!Guid.TryParse(form["id"].ToString(), out var id) || id == Guid.Empty)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor injection pattern id was not valid.  Reload the page and try again.");
+        }
+
+        var enabled = bool.TryParse(form["enabled"].ToString(), out var parsed) && parsed;
+        var result = await patterns.SetEnabledAsync(id, enabled, context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded || result.After is null)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor injection pattern was not found.  Reload the page and try again.");
+        }
+
+        await configAuditor.RecordLocalModelAdvisorInjectionPatternWriteAsync(
+            user.Username,
+            enabled ? "Enable" : "Disable",
+            result.Before,
+            result.After,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(LocalModelAdvisorConfigurationPath, status: "Local-model advisor injection pattern updated.");
+    }
+
+    internal static async Task<IResult> DeleteLocalModelAdvisorInjectionPatternAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ILocalModelAdvisorInjectionPatternStore patterns,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Step-up verification is required before editing local-model advisor injection patterns.");
+        }
+
+        if (!Guid.TryParse(form["id"].ToString(), out var id) || id == Guid.Empty)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor injection pattern id was not valid.  Reload the page and try again.");
+        }
+
+        var result = await patterns.DeleteAsync(id, context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded || result.Before is null)
+        {
+            return Redirect(LocalModelAdvisorConfigurationPath, error: "Local-model advisor injection pattern was not found.  Reload the page and try again.");
+        }
+
+        await configAuditor.RecordLocalModelAdvisorInjectionPatternWriteAsync(
+            user.Username,
+            "Delete",
+            result.Before,
+            null,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(LocalModelAdvisorConfigurationPath, status: "Local-model advisor injection pattern deleted.");
     }
 
     internal static async Task<IResult> CreateSatelliteAsync(
@@ -1469,7 +1646,8 @@ public static class AdminConfigurationEndpoints
             || !LocalModelAdvisorSettingsValidator.TryNormalizeModel(form["model"].ToString(), out var model, out error)
             || !LocalModelAdvisorSettingsValidator.TryNormalizeKeepAlive(form["keepAlive"].ToString(), out var keepAlive, out error)
             || !LocalModelAdvisorSettingsValidator.TryNormalizeSecondModelEndpoint(form["secondModelEndpoint"].ToString(), ensembleEnabled, out var secondModelEndpoint, out error)
-            || !LocalModelAdvisorSettingsValidator.TryNormalizeSecondModel(form["secondModel"].ToString(), ensembleEnabled, out var secondModel, out error))
+            || !LocalModelAdvisorSettingsValidator.TryNormalizeSecondModel(form["secondModel"].ToString(), ensembleEnabled, out var secondModel, out error)
+            || !LocalModelAdvisorSettingsValidator.TryNormalizeInjectionAction(form["injectionAction"].ToString(), out var injectionAction, out error))
         {
             return false;
         }
@@ -1528,8 +1706,30 @@ public static class AdminConfigurationEndpoints
             EnsembleEnabled = ensembleEnabled,
             SecondModelEndpoint = secondModelEndpoint,
             SecondModel = secondModel,
+            InjectionAction = injectionAction,
         };
         if (!LocalModelAdvisorSettingsValidator.TryValidate(settings, out error))
+        {
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryReadLocalModelAdvisorInjectionPattern(
+        IFormCollection form,
+        out string category,
+        out string pattern,
+        out string? description,
+        out string error)
+    {
+        category = string.Empty;
+        pattern = string.Empty;
+        description = null;
+        if (!LocalModelAdvisorInjectionPatternValidator.TryNormalizeCategory(form["category"].ToString(), out category, out error)
+            || !LocalModelAdvisorInjectionPatternValidator.TryNormalizePattern(form["pattern"].ToString(), out pattern, out error)
+            || !LocalModelAdvisorInjectionPatternValidator.TryNormalizeDescription(form["description"].ToString(), out description, out error))
         {
             return false;
         }

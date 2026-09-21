@@ -94,6 +94,24 @@ public sealed class InMemoryLocalModelAdvisorConsultStore : ILocalModelAdvisorCo
         }
     }
 
+    public Task<long> GetInjectionDetectedCountAsync(DateTimeOffset since, CancellationToken cancellationToken = default)
+    {
+        var cutoff = since.ToUniversalTime();
+        lock (_sync)
+        {
+            return Task.FromResult(_records.LongCount(r => r.CreatedAt >= cutoff && r.InjectionDetected));
+        }
+    }
+
+    public Task<long> GetSkippedForInjectionCountAsync(DateTimeOffset since, CancellationToken cancellationToken = default)
+    {
+        var cutoff = since.ToUniversalTime();
+        lock (_sync)
+        {
+            return Task.FromResult(_records.LongCount(r => r.CreatedAt >= cutoff && r.AdvisorSkippedForInjection));
+        }
+    }
+
     public Task<IReadOnlyList<AdvisorConsultRecord>> GetRecentAsync(int limit, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
@@ -140,5 +158,9 @@ public sealed class InMemoryLocalModelAdvisorConsultStore : ILocalModelAdvisorCo
     private static AdvisorConsultRecord Normalize(AdvisorConsultRecord record) => record with
     {
         CreatedAt = record.CreatedAt.ToUniversalTime(),
+        InjectionCategories = record.InjectionCategories
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray(),
     };
 }

@@ -96,6 +96,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IJetPackDesiredAddressStore, PostgresJetPackDesiredAddressStore>();
         services.AddSingleton<ILocalModelAdvisorSettingsStore, PostgresLocalModelAdvisorSettingsStore>();
         services.AddSingleton<ILocalModelAdvisorCategoryBandStore, PostgresLocalModelAdvisorCategoryBandStore>();
+        services.AddSingleton<ILocalModelAdvisorInjectionPatternStore, PostgresLocalModelAdvisorInjectionPatternStore>();
         services.AddSingleton<ILocalModelAdvisorPromptTemplateStore, PostgresLocalModelAdvisorPromptTemplateStore>();
         services.AddSingleton<ILocalModelAdvisorResponseCacheStore, PostgresLocalModelAdvisorResponseCacheStore>();
         services.AddSingleton<ILocalModelAdvisorConsultStore, PostgresLocalModelAdvisorConsultStore>();

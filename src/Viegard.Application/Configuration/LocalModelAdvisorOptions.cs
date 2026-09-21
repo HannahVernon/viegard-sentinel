@@ -36,6 +36,8 @@ public sealed class LocalModelAdvisorOptions
     public string SecondModelEndpoint { get; set; } = LocalModelAdvisorSettings.DefaultSecondModelEndpoint;
 
     public string SecondModel { get; set; } = string.Empty;
+
+    public AdvisorInjectionAction InjectionAction { get; set; } = AdvisorInjectionAction.SkipAdvisor;
 }
 
 public sealed class LocalModelAdvisorOptionsValidator : IValidateOptions<LocalModelAdvisorOptions>

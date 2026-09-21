@@ -656,6 +656,7 @@ internal static class Mapping
         EnsembleEnabled = settings.EnsembleEnabled,
         SecondModelEndpoint = settings.SecondModelEndpoint,
         SecondModel = settings.SecondModel,
+        InjectionAction = (int)settings.InjectionAction,
         Version = settings.Version,
         SeededAt = Utc(settings.SeededAt),
         UpdatedAt = Utc(settings.UpdatedAt),
@@ -680,6 +681,7 @@ internal static class Mapping
         EnsembleEnabled = row.EnsembleEnabled,
         SecondModelEndpoint = row.SecondModelEndpoint,
         SecondModel = row.SecondModel,
+        InjectionAction = (AdvisorInjectionAction)row.InjectionAction,
         Version = row.Version,
         SeededAt = row.SeededAt,
         UpdatedAt = row.UpdatedAt,
@@ -710,6 +712,29 @@ internal static class Mapping
         Version = row.Version,
         UpdatedAt = row.UpdatedAt,
         UpdatedBy = row.UpdatedBy,
+    };
+
+
+    public static LocalModelAdvisorInjectionPatternRow ToRow(this LocalModelAdvisorInjectionPattern pattern) => new()
+    {
+        Id = pattern.Id,
+        Category = pattern.Category,
+        Pattern = pattern.Pattern,
+        Description = pattern.Description,
+        Enabled = pattern.Enabled,
+        CreatedAt = Utc(pattern.CreatedAt),
+        CreatedBy = pattern.CreatedBy,
+    };
+
+    public static LocalModelAdvisorInjectionPattern ToDomain(this LocalModelAdvisorInjectionPatternRow row) => new()
+    {
+        Id = row.Id,
+        Category = row.Category,
+        Pattern = row.Pattern,
+        Description = row.Description,
+        Enabled = row.Enabled,
+        CreatedAt = row.CreatedAt,
+        CreatedBy = row.CreatedBy,
     };
 
 
@@ -781,6 +806,9 @@ internal static class Mapping
         ModelId = record.ModelId,
         ServedFromCache = record.ServedFromCache,
         EnsembleDetailJson = record.EnsembleDetail is null ? null : ToJson(record.EnsembleDetail),
+        InjectionDetected = record.InjectionDetected,
+        InjectionCategoriesJson = ToJson(record.InjectionCategories),
+        AdvisorSkippedForInjection = record.AdvisorSkippedForInjection,
         CreatedAt = Utc(record.CreatedAt),
     };
 
@@ -800,6 +828,9 @@ internal static class Mapping
         ModelId = row.ModelId,
         ServedFromCache = row.ServedFromCache,
         EnsembleDetail = row.EnsembleDetailJson is null ? null : FromJson<AdvisorEnsembleDetail>(row.EnsembleDetailJson),
+        InjectionDetected = row.InjectionDetected,
+        InjectionCategories = FromJson<List<string>>(row.InjectionCategoriesJson),
+        AdvisorSkippedForInjection = row.AdvisorSkippedForInjection,
         CreatedAt = row.CreatedAt,
     };
 

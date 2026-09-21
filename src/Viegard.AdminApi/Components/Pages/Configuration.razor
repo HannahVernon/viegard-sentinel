@@ -4,6 +4,7 @@
 @inject IJetPackFeedSettingsStore JetPackFeedSettingsStore
 @inject ILocalModelAdvisorSettingsStore LocalModelAdvisorSettingsStore
 @inject ILocalModelAdvisorCategoryBandStore LocalModelAdvisorCategoryBandStore
+@inject ILocalModelAdvisorInjectionPatternStore LocalModelAdvisorInjectionPatternStore
 @inject ILocalModelAdvisorPromptTemplateStore LocalModelAdvisorPromptTemplateStore
 @inject IPolicyThresholdSettingsStore PolicyThresholdSettingsStore
 @inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
@@ -668,6 +669,11 @@
                     <td>When on, a second local model is consulted and the raw pre-clamp outputs are averaged.</td>
                 </tr>
                 <tr>
+                    <td><code>InjectionAction</code></td>
+                    <td><code>@LocalModelAdvisorCurrentSettings.InjectionAction</code></td>
+                    <td>RecordOnly records detections and continues.  SkipAdvisor records detections and keeps the deterministic classification.</td>
+                </tr>
+                <tr>
                     <td><code>SecondModelEndpoint</code></td>
                     <td><code>@LocalModelAdvisorCurrentSettings.SecondModelEndpoint</code></td>
                     <td>Absolute http or https base URL for the second model's Ollama service.</td>
@@ -757,6 +763,16 @@
                     <input name="secondModel" maxlength="@LocalModelAdvisorSettings.MaxModelLength" value="@LocalModelAdvisorCurrentSettings.SecondModel" />
                     <span class="small">Ollama model name for the second consult.  Required only when ensemble is enabled.</span>
                 </label>
+                <label>
+                    Prompt-injection action
+                    <select name="injectionAction">
+                        @foreach (var action in Enum.GetValues<AdvisorInjectionAction>())
+                        {
+                            <option value="@action" selected="@(LocalModelAdvisorCurrentSettings.InjectionAction == action)">@action</option>
+                        }
+                    </select>
+                    <span class="small">SkipAdvisor is the default fail-safe action when untrusted observed data matches an injection pattern.</span>
+                </label>
                 <button type="submit">Save local-model advisor settings</button>
             </form>
         }
@@ -765,6 +781,93 @@
             <div class="step-up-strip">
                 <span>Editing local-model advisor settings requires step-up verification.</span>
                 <StepUpPrompt ReturnTo="/configuration#local-model-advisor" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-local-model-advisor" />
+            </div>
+        }
+
+        <h3>Prompt-injection patterns</h3>
+        <p class="small">Base patterns are code-defined and cannot be edited here.  Operator-added patterns are additional regexes applied after the base list.</p>
+        @if (_localModelAdvisorInjectionPatterns.Count == 0)
+        {
+            <p>No operator-added injection patterns are configured.</p>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Enabled</th>
+                        <th>Pattern</th>
+                        <th>Description</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var pattern in _localModelAdvisorInjectionPatterns)
+                    {
+                        <tr>
+                            <td><code>@pattern.Category</code></td>
+                            <td>@(pattern.Enabled ? "Yes" : "No")</td>
+                            <td><code>@pattern.Pattern</code></td>
+                            <td>@pattern.Description</td>
+                            <td>@pattern.CreatedBy at @Display.Format(pattern.CreatedAt)</td>
+                            <td class="actions-cell">
+                                @if (_stepUpFresh)
+                                {
+                                    <form method="post" action="/configuration/local-model-advisor/injection-patterns/toggle">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="id" value="@pattern.Id.ToString("N")" />
+                                        <input type="hidden" name="enabled" value="@((!pattern.Enabled).ToString())" />
+                                        <button type="submit">@(pattern.Enabled ? "Disable" : "Enable")</button>
+                                    </form>
+                                    <form method="post" action="/configuration/local-model-advisor/injection-patterns/delete">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="id" value="@pattern.Id.ToString("N")" />
+                                        <button type="submit">Delete</button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <span class="small">Step-up required</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/local-model-advisor/injection-patterns" class="edit-form">
+                <AntiforgeryToken />
+                <label>
+                    Category
+                    <select name="category">
+                        @foreach (var category in Enum.GetNames<AdvisorInjectionPatternCategory>())
+                        {
+                            <option value="@category">@category</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    Regex
+                    <input name="pattern" maxlength="@LocalModelAdvisorInjectionPattern.MaxPatternLength" required />
+                    <span class="small">Regexes are compiled case-insensitive and culture-invariant.  Invalid regexes are rejected on save.</span>
+                </label>
+                <label>
+                    Description
+                    <input name="description" maxlength="@LocalModelAdvisorInjectionPattern.MaxDescriptionLength" />
+                </label>
+                <button type="submit">Add injection pattern</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Editing local-model advisor injection patterns requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#local-model-advisor" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-local-model-advisor-injection" />
             </div>
         }
 
@@ -1187,6 +1290,7 @@
     private JetPackFeedSettings? _jetPackSettings;
     private LocalModelAdvisorSettings? _localModelAdvisorSettings;
     private IReadOnlyList<LocalModelAdvisorCategoryBand> _localModelAdvisorCategoryBands = [];
+    private IReadOnlyList<LocalModelAdvisorInjectionPattern> _localModelAdvisorInjectionPatterns = [];
     private IReadOnlyList<LocalModelAdvisorPromptTemplateRevision> _localModelAdvisorPromptTemplateRevisions = [];
     private PolicyThresholdSettings? _thresholdSettings;
     private PolicyPostureSettings? _postureSettings;
@@ -1319,6 +1423,7 @@
         _jetPackSettings = await JetPackFeedSettingsStore.GetAsync().ConfigureAwait(false);
         _localModelAdvisorSettings = await LocalModelAdvisorSettingsStore.GetAsync().ConfigureAwait(false);
         _localModelAdvisorCategoryBands = await LocalModelAdvisorCategoryBandStore.ListAsync().ConfigureAwait(false);
+        _localModelAdvisorInjectionPatterns = await LocalModelAdvisorInjectionPatternStore.ListAsync().ConfigureAwait(false);
         _localModelAdvisorPromptTemplateRevisions = await LocalModelAdvisorPromptTemplateStore.ListAsync(AdvisoryIncidentClassifier.PromptTemplateId).ConfigureAwait(false);
         _thresholdSettings = await PolicyThresholdSettingsStore.GetAsync().ConfigureAwait(false);
         _postureSettings = await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false);

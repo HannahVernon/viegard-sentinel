@@ -22,7 +22,8 @@ public sealed class AdvisoryIncidentClassifier(
     IInferenceProvider inferenceProvider,
     ClassificationOutputValidator outputValidator,
     ILocalModelAdvisorDiagnostics? diagnostics = null,
-    ILocalModelAdvisorResponseCacheStore? responseCacheStore = null) : IClassifier
+    ILocalModelAdvisorResponseCacheStore? responseCacheStore = null,
+    LocalModelAdvisorInjectionDetector? injectionDetector = null) : IClassifier
 {
     public const string Id = "local-advisor-v1";
     public const string PromptTemplateVersion = "local-model-advisor-v1.0";
@@ -91,6 +92,22 @@ public sealed class AdvisoryIncidentClassifier(
 
             var activeTemplate = promptTemplateSource.Current;
             var variables = await BuildPromptVariablesAsync(baseClassification, incident, settings, cancellationToken).ConfigureAwait(false);
+            var injection = (injectionDetector ?? new LocalModelAdvisorInjectionDetector()).Detect(UntrustedObservedValues(variables));
+            if (injection.Detected && settings.InjectionAction == AdvisorInjectionAction.SkipAdvisor)
+            {
+                await RecordConsultAsync(BuildRecord(
+                    baseClassification,
+                    AdvisorConsultOutcome.NoChange,
+                    finalSeverity: baseClassification.Severity,
+                    finalConfidence: baseClassification.Confidence,
+                    latencyMs: null,
+                    failureKind: null,
+                    modelId: settings.Model,
+                    injection: injection,
+                    advisorSkippedForInjection: true), cancellationToken).ConfigureAwait(false);
+                return baseOutcome;
+            }
+
             var request = new InferenceRequest
             {
                 TemplateId = PromptTemplateId,
@@ -111,7 +128,7 @@ public sealed class AdvisoryIncidentClassifier(
                 : null;
             if (cacheKey is not null && await TryGetCachedOutputAsync(cacheKey, cancellationToken).ConfigureAwait(false) is { } cached)
             {
-                var cachedAdjusted = ApplyEscalateOnlyClamp(baseClassification, cached.ToOutput(), cached.ModelId, settings, activeTemplate.Version);
+                var cachedAdjusted = ApplyEscalateOnlyClamp(baseClassification, cached.ToOutput(), cached.ModelId, settings, activeTemplate.Version, injection);
                 var cachedOutcome = cachedAdjusted.Severity > baseClassification.Severity || cachedAdjusted.Confidence > baseClassification.Confidence
                     ? AdvisorConsultOutcome.Escalated
                     : AdvisorConsultOutcome.NoChange;
@@ -123,7 +140,8 @@ public sealed class AdvisoryIncidentClassifier(
                     latencyMs: null,
                     failureKind: null,
                     modelId: cached.ModelId,
-                    servedFromCache: true), cancellationToken).ConfigureAwait(false);
+                    servedFromCache: true,
+                    injection: injection), cancellationToken).ConfigureAwait(false);
                 return ClassificationOutcome.Success(cachedAdjusted);
             }
 
@@ -142,7 +160,8 @@ public sealed class AdvisoryIncidentClassifier(
                         finalConfidence: baseClassification.Confidence,
                         latencyMs: latencyMs,
                         failureKind: inference.FailureKind?.ToString(),
-                        modelId: inference.ModelId ?? settings.Model), cancellationToken).ConfigureAwait(false);
+                        modelId: inference.ModelId ?? settings.Model,
+                        injection: injection), cancellationToken).ConfigureAwait(false);
                     return baseOutcome;
                 }
 
@@ -156,7 +175,8 @@ public sealed class AdvisoryIncidentClassifier(
                         finalConfidence: baseClassification.Confidence,
                         latencyMs: latencyMs,
                         failureKind: null,
-                        modelId: inference.ModelId ?? settings.Model), cancellationToken).ConfigureAwait(false);
+                        modelId: inference.ModelId ?? settings.Model,
+                        injection: injection), cancellationToken).ConfigureAwait(false);
                     return baseOutcome;
                 }
 
@@ -172,7 +192,7 @@ public sealed class AdvisoryIncidentClassifier(
                         cancellationToken).ConfigureAwait(false);
                 }
 
-                var adjusted = ApplyEscalateOnlyClamp(baseClassification, validation.Output, modelId, settings, activeTemplate.Version);
+                var adjusted = ApplyEscalateOnlyClamp(baseClassification, validation.Output, modelId, settings, activeTemplate.Version, injection);
                 var outcome = adjusted.Severity > baseClassification.Severity || adjusted.Confidence > baseClassification.Confidence
                     ? AdvisorConsultOutcome.Escalated
                     : AdvisorConsultOutcome.NoChange;
@@ -183,7 +203,8 @@ public sealed class AdvisoryIncidentClassifier(
                     finalConfidence: adjusted.Confidence,
                     latencyMs: latencyMs,
                     failureKind: null,
-                    modelId: modelId), cancellationToken).ConfigureAwait(false);
+                    modelId: modelId,
+                    injection: injection), cancellationToken).ConfigureAwait(false);
                 return ClassificationOutcome.Success(adjusted);
             }
 
@@ -201,7 +222,8 @@ public sealed class AdvisoryIncidentClassifier(
                     latencyMs: ensemble.LatencyMs,
                     failureKind: ensemble.FailureKind,
                     modelId: ensemble.ModelId,
-                    ensembleDetail: ensemble.Detail), cancellationToken).ConfigureAwait(false);
+                    ensembleDetail: ensemble.Detail,
+                    injection: injection), cancellationToken).ConfigureAwait(false);
                 return baseOutcome;
             }
 
@@ -216,7 +238,7 @@ public sealed class AdvisoryIncidentClassifier(
                     cancellationToken).ConfigureAwait(false);
             }
 
-            var ensembleAdjusted = ApplyEscalateOnlyClamp(baseClassification, ensemble.Output, ensemble.ModelId, settings, activeTemplate.Version);
+            var ensembleAdjusted = ApplyEscalateOnlyClamp(baseClassification, ensemble.Output, ensemble.ModelId, settings, activeTemplate.Version, injection);
             var ensembleOutcome = ensembleAdjusted.Severity > baseClassification.Severity || ensembleAdjusted.Confidence > baseClassification.Confidence
                 ? AdvisorConsultOutcome.Escalated
                 : AdvisorConsultOutcome.NoChange;
@@ -228,7 +250,8 @@ public sealed class AdvisoryIncidentClassifier(
                 latencyMs: ensemble.LatencyMs,
                 failureKind: null,
                 modelId: ensemble.ModelId,
-                ensembleDetail: ensemble.Detail), cancellationToken).ConfigureAwait(false);
+                ensembleDetail: ensemble.Detail,
+                injection: injection), cancellationToken).ConfigureAwait(false);
             return ClassificationOutcome.Success(ensembleAdjusted);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -430,7 +453,9 @@ public sealed class AdvisoryIncidentClassifier(
         string? failureKind,
         string? modelId,
         bool servedFromCache = false,
-        AdvisorEnsembleDetail? ensembleDetail = null) => new()
+        AdvisorEnsembleDetail? ensembleDetail = null,
+        AdvisorInjectionDetectionResult? injection = null,
+        bool advisorSkippedForInjection = false) => new()
     {
         ClassificationId = baseClassification.Id,
         IncidentId = baseClassification.SubjectId,
@@ -445,6 +470,9 @@ public sealed class AdvisoryIncidentClassifier(
         ModelId = modelId,
         ServedFromCache = servedFromCache,
         EnsembleDetail = ensembleDetail,
+        InjectionDetected = injection?.Detected == true,
+        InjectionCategories = injection?.Categories ?? [],
+        AdvisorSkippedForInjection = advisorSkippedForInjection,
         CreatedAt = DateTimeOffset.UtcNow,
     };
 
@@ -519,12 +547,18 @@ public sealed class AdvisoryIncidentClassifier(
         Trust = trust,
     };
 
+    private static IEnumerable<string> UntrustedObservedValues(IEnumerable<PromptVariable> variables) =>
+        variables
+            .Where(v => v.Trust == PromptTrust.UntrustedObservedData)
+            .Select(v => v.Value);
+
     private static Classification ApplyEscalateOnlyClamp(
         Classification baseClassification,
         ValidatedClassificationOutput modelOutput,
         string modelId,
         LocalModelAdvisorValues settings,
-        string promptTemplateVersion)
+        string promptTemplateVersion,
+        AdvisorInjectionDetectionResult injection)
     {
         var modelSeverityWithinDelta = Math.Min(modelOutput.Severity, baseClassification.Severity + settings.MaxSeverityDelta);
         var finalSeverity = Math.Clamp(
@@ -542,7 +576,7 @@ public sealed class AdvisoryIncidentClassifier(
         {
             Severity = finalSeverity,
             Confidence = finalConfidence,
-            Reasons = AppendAdvisorReasons(baseClassification.Reasons, modelOutput.Reasons),
+            Reasons = AppendAdvisorReasons(baseClassification.Reasons, AdvisorReasons(modelOutput.Reasons, injection, finalSeverity > baseClassification.Severity || finalConfidence > baseClassification.Confidence)),
             Model = new ModelInfo
             {
                 ModelId = modelId,
@@ -550,6 +584,23 @@ public sealed class AdvisoryIncidentClassifier(
                 PromptTemplateVersion = promptTemplateVersion,
             },
         };
+    }
+
+    private static IReadOnlyList<string> AdvisorReasons(
+        IReadOnlyList<string> modelReasons,
+        AdvisorInjectionDetectionResult injection,
+        bool escalated)
+    {
+        if (!escalated || !injection.Detected)
+        {
+            return modelReasons;
+        }
+
+        return modelReasons
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Take(1)
+            .Concat(["potential prompt injection detected in observed data"])
+            .ToList();
     }
 
     private static IReadOnlyList<string> AppendAdvisorReasons(

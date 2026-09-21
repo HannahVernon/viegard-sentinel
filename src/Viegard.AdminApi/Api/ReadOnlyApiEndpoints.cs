@@ -185,6 +185,8 @@ public static class ReadOnlyApiEndpoints
             var counts = await consults.GetOutcomeCountsAsync(since, context.RequestAborted).ConfigureAwait(false);
             var latency = await consults.GetLatencyStatsAsync(since, context.RequestAborted).ConfigureAwait(false);
             var cacheHits = await consults.GetCacheHitCountAsync(since, context.RequestAborted).ConfigureAwait(false);
+            var injectionDetected = await consults.GetInjectionDetectedCountAsync(since, context.RequestAborted).ConfigureAwait(false);
+            var skippedForInjection = await consults.GetSkippedForInjectionCountAsync(since, context.RequestAborted).ConfigureAwait(false);
             var byOutcome = counts.ToDictionary(c => c.Outcome, c => c.Count);
             long Count(AdvisorConsultOutcome outcome) => byOutcome.GetValueOrDefault(outcome);
             var escalated = Count(AdvisorConsultOutcome.Escalated);
@@ -200,6 +202,8 @@ public static class ReadOnlyApiEndpoints
                 invalidOutput = Count(AdvisorConsultOutcome.InvalidOutput),
                 skippedOutOfBand = Count(AdvisorConsultOutcome.SkippedOutOfBand),
                 cacheHits,
+                injectionDetected,
+                skippedForInjection,
                 total = byOutcome.Values.Sum(),
                 failures = Count(AdvisorConsultOutcome.ProviderFailed) + Count(AdvisorConsultOutcome.InvalidOutput),
                 escalationRate = considered == 0 ? (double?)null : escalated / (double)considered,
@@ -225,6 +229,7 @@ public static class ReadOnlyApiEndpoints
             ensembleEnabled = effective.EnsembleEnabled,
             secondModelEndpoint = effective.SecondModelEndpoint,
             secondModel = effective.SecondModel,
+            injectionAction = effective.InjectionAction.ToString(),
             version = effective.Version,
             updatedAt = effective.UpdatedAt,
         };

@@ -61,6 +61,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<LocalModelAdvisorCategoryBandRow> LocalModelAdvisorCategoryBands => Set<LocalModelAdvisorCategoryBandRow>();
 
+    public DbSet<LocalModelAdvisorInjectionPatternRow> LocalModelAdvisorInjectionPatterns => Set<LocalModelAdvisorInjectionPatternRow>();
+
     public DbSet<LocalModelAdvisorConsultRow> LocalModelAdvisorConsults => Set<LocalModelAdvisorConsultRow>();
 
     public DbSet<LocalModelAdvisorPromptTemplateRow> LocalModelAdvisorPromptTemplates => Set<LocalModelAdvisorPromptTemplateRow>();
@@ -330,6 +332,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
                 .HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxEndpointLength)
                 .HasDefaultValue(Viegard.Application.Configuration.LocalModelAdvisorSettings.DefaultSecondModelEndpoint);
             entity.Property(e => e.SecondModel).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxModelLength);
+            entity.Property(e => e.InjectionAction).HasDefaultValue((int)Viegard.Application.Configuration.AdvisorInjectionAction.SkipAdvisor);
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorSettings.MaxUpdatedByLength);
         });
 
@@ -339,6 +342,18 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Category);
             entity.Property(e => e.Category).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorCategoryBand.MaxCategoryLength);
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorCategoryBand.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<LocalModelAdvisorInjectionPatternRow>(entity =>
+        {
+            entity.ToTable("local_model_advisor_injection_patterns");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.HasIndex(e => e.CreatedAt);
+            entity.Property(e => e.Category).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorInjectionPattern.MaxCategoryLength);
+            entity.Property(e => e.Pattern).HasColumnType("text");
+            entity.Property(e => e.Description).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorInjectionPattern.MaxDescriptionLength);
+            entity.Property(e => e.CreatedBy).HasMaxLength(Viegard.Application.Configuration.LocalModelAdvisorInjectionPattern.MaxCreatedByLength);
         });
 
 
@@ -382,6 +397,9 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.FailureKind).HasColumnType("text");
             entity.Property(e => e.ModelId).HasColumnType("text");
             entity.Property(e => e.EnsembleDetailJson).HasColumnType("jsonb");
+            entity.Property(e => e.InjectionCategoriesJson)
+                .HasColumnType("jsonb")
+                .HasDefaultValue("[]");
         });
 
         modelBuilder.Entity<PolicyThresholdSettingsRow>(entity =>
@@ -528,6 +546,10 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
         modelBuilder.Entity<LocalModelAdvisorConsultRow>()
             .Property(e => e.EnsembleDetailJson)
             .HasColumnName("ensemble_detail");
+
+        modelBuilder.Entity<LocalModelAdvisorConsultRow>()
+            .Property(e => e.InjectionCategoriesJson)
+            .HasColumnName("injection_categories");
     }
 
     private static string ToSnakeCase(string name) =>

@@ -42,6 +42,12 @@ public sealed record AdvisorConsultRecord
 
     public AdvisorEnsembleDetail? EnsembleDetail { get; init; }
 
+    public bool InjectionDetected { get; init; }
+
+    public IReadOnlyList<string> InjectionCategories { get; init; } = [];
+
+    public bool AdvisorSkippedForInjection { get; init; }
+
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 
@@ -75,6 +81,10 @@ public interface ILocalModelAdvisorConsultStore
     Task<IReadOnlyList<AdvisorOutcomeCount>> GetOutcomeCountsAsync(DateTimeOffset since, CancellationToken cancellationToken = default);
 
     Task<long> GetCacheHitCountAsync(DateTimeOffset since, CancellationToken cancellationToken = default);
+
+    Task<long> GetInjectionDetectedCountAsync(DateTimeOffset since, CancellationToken cancellationToken = default);
+
+    Task<long> GetSkippedForInjectionCountAsync(DateTimeOffset since, CancellationToken cancellationToken = default);
 
     Task<AdvisorLatencyStats> GetLatencyStatsAsync(DateTimeOffset since, CancellationToken cancellationToken = default);
 

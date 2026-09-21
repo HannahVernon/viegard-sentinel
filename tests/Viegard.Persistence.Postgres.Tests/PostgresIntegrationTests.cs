@@ -62,7 +62,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         // 180d window) age into purge eligibility ~24h after the run that
         // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_injection_patterns, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
     }
 
     public async Task DisposeAsync()
@@ -1319,6 +1319,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
                 EnsembleEnabled = true,
                 SecondModelEndpoint = "http://127.0.0.2:11434/",
                 SecondModel = "qwen-second:latest",
+                InjectionAction = AdvisorInjectionAction.RecordOnly,
             },
             now);
 
@@ -1326,6 +1327,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.True(seeded!.EnsembleEnabled);
         Assert.Equal("http://127.0.0.2:11434", seeded.SecondModelEndpoint);
         Assert.Equal("qwen-second:latest", seeded.SecondModel);
+        Assert.Equal(AdvisorInjectionAction.RecordOnly, seeded.InjectionAction);
 
         var updated = await store.UpsertAsync(
             seeded with
@@ -1333,6 +1335,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
                 EnsembleEnabled = false,
                 SecondModelEndpoint = "",
                 SecondModel = "",
+                InjectionAction = AdvisorInjectionAction.SkipAdvisor,
             },
             expectedVersion: seeded.Version,
             updatedBy: "operator",
@@ -1342,6 +1345,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.False(updated.Settings!.EnsembleEnabled);
         Assert.Equal(LocalModelAdvisorSettings.DefaultSecondModelEndpoint, updated.Settings.SecondModelEndpoint);
         Assert.Equal(string.Empty, updated.Settings.SecondModel);
+        Assert.Equal(AdvisorInjectionAction.SkipAdvisor, updated.Settings.InjectionAction);
     }
 
     [PostgresFact]
@@ -1454,6 +1458,63 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Local_model_advisor_injection_pattern_store_round_trips_and_source_skips_invalid_rows()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresLocalModelAdvisorInjectionPatternStore(factory);
+        var now = new DateTimeOffset(2026, 9, 21, 10, 0, 0, TimeSpan.Zero);
+
+        var created = await store.CreateAsync(
+            nameof(AdvisorInjectionPatternCategory.OutputControlHijack),
+            "operator-safe-pattern",
+            "operator pattern",
+            "operator",
+            now);
+
+        Assert.True(created.Enabled);
+        Assert.Equal(nameof(AdvisorInjectionPatternCategory.OutputControlHijack), created.Category);
+        Assert.Equal("operator", created.CreatedBy);
+        Assert.Equal(created.Id, (await store.GetAsync(created.Id))!.Id);
+        Assert.Single(await store.ListAsync());
+
+        var disabled = await store.SetEnabledAsync(created.Id, enabled: false);
+        Assert.True(disabled.Succeeded);
+        Assert.True(disabled.Before!.Enabled);
+        Assert.False(disabled.After!.Enabled);
+        Assert.False((await store.GetAsync(created.Id))!.Enabled);
+
+        var enabled = await store.SetEnabledAsync(created.Id, enabled: true);
+        Assert.True(enabled.Succeeded);
+        Assert.True(enabled.After!.Enabled);
+
+        await using (var db = factory.CreateDbContext())
+        {
+            db.LocalModelAdvisorInjectionPatterns.Add(new LocalModelAdvisorInjectionPattern
+            {
+                Category = nameof(AdvisorInjectionPatternCategory.InstructionOverride),
+                Pattern = "(",
+                Description = "invalid row inserted to verify source load tolerance",
+                Enabled = true,
+                CreatedAt = now.AddMinutes(1),
+                CreatedBy = "test",
+            }.ToRow());
+            await db.SaveChangesAsync();
+        }
+
+        var source = new LocalModelAdvisorInjectionPatternSource(store);
+        await source.RefreshAsync();
+
+        Assert.Single(source.Current);
+        Assert.Equal("operator-safe-pattern", source.Current[0].Regex.ToString());
+
+        var deleted = await store.DeleteAsync(created.Id);
+        Assert.True(deleted.Succeeded);
+        Assert.Null(await store.GetAsync(created.Id));
+        Assert.Single(await store.ListAsync());
+        Assert.False((await store.DeleteAsync(created.Id)).Succeeded);
+    }
+
+    [PostgresFact]
     public async Task Local_model_advisor_consult_store_round_trips_aggregates_and_prunes()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -1463,7 +1524,14 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         var escalated = AdvisorConsultRecord(classificationId, AdvisorConsultOutcome.Escalated, now.AddMinutes(-10), 100, finalSeverity: 8, servedFromCache: true);
         await store.AppendAsync(escalated);
-        await store.AppendAsync(AdvisorConsultRecord(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-9), 200));
+        await store.AppendAsync(AdvisorConsultRecord(
+            ViegardId.New(),
+            AdvisorConsultOutcome.NoChange,
+            now.AddMinutes(-9),
+            200,
+            injectionDetected: true,
+            injectionCategories: [nameof(AdvisorInjectionPatternCategory.InstructionOverride)],
+            advisorSkippedForInjection: true));
         await store.AppendAsync(AdvisorConsultRecord(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-8), 300));
         await store.AppendAsync(AdvisorConsultRecord(ViegardId.New(), AdvisorConsultOutcome.ProviderFailed, now.AddDays(-2), 400, failureKind: "Timeout"));
 
@@ -1475,6 +1543,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.NotNull(byId);
         Assert.Equal(escalated.Id, byId!.Id);
         Assert.True(byId.ServedFromCache);
+        Assert.False(byId.InjectionDetected);
         Assert.NotNull(byId.EnsembleDetail);
         Assert.Equal("average", byId.EnsembleDetail!.Rule);
         Assert.Equal(2, byId.EnsembleDetail.Models.Count);
@@ -1502,6 +1571,8 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(200, latency.P50);
         Assert.Equal(300, latency.P95);
         Assert.Equal(1, await store.GetCacheHitCountAsync(now.AddHours(-1)));
+        Assert.Equal(1, await store.GetInjectionDetectedCountAsync(now.AddHours(-1)));
+        Assert.Equal(1, await store.GetSkippedForInjectionCountAsync(now.AddHours(-1)));
 
         Assert.Equal(1, await store.PruneOlderThanAsync(now.AddDays(-1)));
         Assert.Equal(3, (await store.GetRecentAsync(10)).Count);
@@ -2359,7 +2430,10 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         int? latencyMs,
         int finalSeverity = 6,
         string? failureKind = null,
-        bool servedFromCache = false) => new()
+        bool servedFromCache = false,
+        bool injectionDetected = false,
+        IReadOnlyList<string>? injectionCategories = null,
+        bool advisorSkippedForInjection = false) => new()
         {
             ClassificationId = classificationId,
             IncidentId = ViegardId.New(),
@@ -2381,6 +2455,9 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
                         new AdvisorEnsembleModelOutput("qwen-second:latest", "http://second.example", 9, 0.9, true),
                     ])
                 : null,
+            InjectionDetected = injectionDetected,
+            InjectionCategories = injectionCategories ?? [],
+            AdvisorSkippedForInjection = advisorSkippedForInjection,
             CreatedAt = createdAt,
         };
 

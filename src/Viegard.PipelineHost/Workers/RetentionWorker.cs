@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Viegard.Application.Audit;
+using Viegard.Application.Configuration;
 using Viegard.Application.Retention;
 using Viegard.Domain;
 using Viegard.Domain.Audit;
@@ -13,7 +14,8 @@ public sealed class RetentionWorker(
     IAuditLedger auditLedger,
     IOptions<RetentionOptions> options,
     TimeProvider timeProvider,
-    ILogger<RetentionWorker> logger) : BackgroundService
+    ILogger<RetentionWorker> logger,
+    ILocalModelAdvisorResponseCacheStore? advisorResponseCache = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -57,13 +59,21 @@ public sealed class RetentionWorker(
         var retentionOptions = options.Value;
         var now = timeProvider.GetUtcNow();
         var settings = await retentionSettingsStore.GetAsync(cancellationToken).ConfigureAwait(false);
+        var expiredCacheRows = advisorResponseCache is null
+            ? 0
+            : await advisorResponseCache
+                .PruneExpiredAsync(now, cancellationToken)
+                .ConfigureAwait(false);
         if (settings is null)
         {
             logger.LogDebug("Retention purge cycle skipped because retention settings have not been seeded.");
             await retentionSettingsStore
                 .UpdateLastCycleAsync(now, RetentionSettings.EmptyCounts(), cancellationToken)
                 .ConfigureAwait(false);
-            return new RetentionCycleResult(0, []);
+            var cacheOnlyResults = expiredCacheRows == 0
+                ? Array.Empty<RetentionTargetResult>()
+                : [new RetentionTargetResult("local_model_advisor_response_cache", 0, now, expiredCacheRows)];
+            return new RetentionCycleResult(expiredCacheRows, cacheOnlyResults);
         }
 
         var configuredPeriods = settings.ConfiguredPeriods();
@@ -74,7 +84,10 @@ public sealed class RetentionWorker(
             await retentionSettingsStore
                 .UpdateLastCycleAsync(now, cycleCounts, cancellationToken)
                 .ConfigureAwait(false);
-            return new RetentionCycleResult(0, []);
+            var cacheOnlyResults = expiredCacheRows == 0
+                ? Array.Empty<RetentionTargetResult>()
+                : [new RetentionTargetResult("local_model_advisor_response_cache", 0, now, expiredCacheRows)];
+            return new RetentionCycleResult(expiredCacheRows, cacheOnlyResults);
         }
 
         var batchSize = retentionOptions.EffectiveBatchSize;
@@ -88,6 +101,11 @@ public sealed class RetentionWorker(
                 .ConfigureAwait(false);
             results.Add(new RetentionTargetResult(period.Target.TableName(), period.Days, cutoff, rowsDeleted));
             cycleCounts[period.Target] = rowsDeleted;
+        }
+
+        if (expiredCacheRows > 0)
+        {
+            results.Add(new RetentionTargetResult("local_model_advisor_response_cache", 0, now, expiredCacheRows));
         }
 
         var totalDeleted = results.Sum(r => r.RowsDeleted);

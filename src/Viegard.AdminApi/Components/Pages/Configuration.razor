@@ -657,6 +657,11 @@
                     <td>Severity +@LocalModelAdvisorCurrentSettings.MaxSeverityDelta, confidence +@FormatConfidence(LocalModelAdvisorCurrentSettings.MaxConfidenceDelta)</td>
                     <td>Maximum model-suggested raise above the deterministic classification.</td>
                 </tr>
+                <tr>
+                    <td><code>Response cache</code></td>
+                    <td>@(LocalModelAdvisorCurrentSettings.ResponseCacheEnabled ? "On" : "Off"), @LocalModelAdvisorCurrentSettings.ResponseCacheTtlHours.ToString(System.Globalization.CultureInfo.InvariantCulture) hour(s)</td>
+                    <td>When on, equivalent recent prompts reuse the raw validated model output and re-apply current clamp settings.</td>
+                </tr>
             </tbody>
         </table>
 
@@ -711,6 +716,16 @@
                 <label>
                     Max confidence delta
                     <input name="maxConfidenceDelta" type="number" min="0" max="1" step="0.001" value="@FormatConfidence(LocalModelAdvisorCurrentSettings.MaxConfidenceDelta)" required />
+                </label>
+                <label class="checkbox-label">
+                    <input name="responseCacheEnabled" type="checkbox" checked="@LocalModelAdvisorCurrentSettings.ResponseCacheEnabled" />
+                    Response cache enabled
+                    <span class="small">When checked, equivalent advisor consults can reuse a recent validated model response.</span>
+                </label>
+                <label>
+                    Response cache TTL (hours)
+                    <input name="responseCacheTtlHours" type="number" min="1" max="2160" step="1" value="@LocalModelAdvisorCurrentSettings.ResponseCacheTtlHours.ToString(System.Globalization.CultureInfo.InvariantCulture)" required />
+                    <span class="small">Default is 72 hours.  Existing entries expire at their saved expiry time.</span>
                 </label>
                 <button type="submit">Save local-model advisor settings</button>
             </form>

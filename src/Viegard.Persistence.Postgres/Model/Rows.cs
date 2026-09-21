@@ -446,6 +446,10 @@ public sealed class LocalModelAdvisorSettingsRow
 
     public double MaxConfidenceDelta { get; set; }
 
+    public bool ResponseCacheEnabled { get; set; }
+
+    public int ResponseCacheTtlHours { get; set; }
+
     public int Version { get; set; }
 
     public DateTimeOffset? SeededAt { get; set; }
@@ -497,6 +501,28 @@ public sealed class LocalModelAdvisorPromptTemplateRow
 
     public string CreatedBy { get; set; } = string.Empty;
 }
+
+public sealed class LocalModelAdvisorResponseCacheRow
+{
+    public Guid Id { get; set; }
+
+    public string CacheKey { get; set; } = string.Empty;
+
+    public string ModelId { get; set; } = string.Empty;
+
+    public string TemplateVersion { get; set; } = string.Empty;
+
+    public int Severity { get; set; }
+
+    public double Confidence { get; set; }
+
+    public string ReasonsJson { get; set; } = "[]";
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset ExpiresAt { get; set; }
+}
+
 public sealed class LocalModelAdvisorConsultRow
 {
     public Guid Id { get; set; }
@@ -522,6 +548,8 @@ public sealed class LocalModelAdvisorConsultRow
     public string? FailureKind { get; set; }
 
     public string? ModelId { get; set; }
+
+    public bool ServedFromCache { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 }

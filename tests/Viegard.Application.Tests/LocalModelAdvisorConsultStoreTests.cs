@@ -14,7 +14,7 @@ public sealed class LocalModelAdvisorConsultStoreTests
         var now = new DateTimeOffset(2026, 9, 20, 7, 0, 0, TimeSpan.Zero);
 
         await store.AppendAsync(Record(classificationId, AdvisorConsultOutcome.Escalated, now.AddMinutes(-10), 100, finalSeverity: 8));
-        await store.AppendAsync(Record(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-9), 200));
+        await store.AppendAsync(Record(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-9), 200, servedFromCache: true));
         await store.AppendAsync(Record(ViegardId.New(), AdvisorConsultOutcome.NoChange, now.AddMinutes(-8), 300));
         await store.AppendAsync(Record(ViegardId.New(), AdvisorConsultOutcome.ProviderFailed, now.AddHours(-2), 400, failureKind: "Timeout"));
         await store.AppendAsync(Record(ViegardId.New(), AdvisorConsultOutcome.SkippedOutOfBand, now.AddDays(-2), null));
@@ -32,6 +32,7 @@ public sealed class LocalModelAdvisorConsultStoreTests
         Assert.Equal(3, latency.Count);
         Assert.Equal(200, latency.P50);
         Assert.Equal(300, latency.P95);
+        Assert.Equal(1, await store.GetCacheHitCountAsync(now.AddHours(-1)));
 
         var recent = await store.GetRecentAsync(2);
         Assert.Equal(2, recent.Count);
@@ -79,7 +80,8 @@ public sealed class LocalModelAdvisorConsultStoreTests
         DateTimeOffset createdAt,
         int? latencyMs,
         int finalSeverity = 6,
-        string? failureKind = null) => new()
+        string? failureKind = null,
+        bool servedFromCache = false) => new()
         {
             ClassificationId = classificationId,
             IncidentId = ViegardId.New(),
@@ -92,6 +94,7 @@ public sealed class LocalModelAdvisorConsultStoreTests
             LatencyMs = latencyMs,
             FailureKind = failureKind,
             ModelId = "qwen-test:latest",
+            ServedFromCache = servedFromCache,
             CreatedAt = createdAt,
         };
 }

@@ -184,6 +184,7 @@ public static class ReadOnlyApiEndpoints
         {
             var counts = await consults.GetOutcomeCountsAsync(since, context.RequestAborted).ConfigureAwait(false);
             var latency = await consults.GetLatencyStatsAsync(since, context.RequestAborted).ConfigureAwait(false);
+            var cacheHits = await consults.GetCacheHitCountAsync(since, context.RequestAborted).ConfigureAwait(false);
             var byOutcome = counts.ToDictionary(c => c.Outcome, c => c.Count);
             long Count(AdvisorConsultOutcome outcome) => byOutcome.GetValueOrDefault(outcome);
             var escalated = Count(AdvisorConsultOutcome.Escalated);
@@ -198,6 +199,7 @@ public static class ReadOnlyApiEndpoints
                 providerFailed = Count(AdvisorConsultOutcome.ProviderFailed),
                 invalidOutput = Count(AdvisorConsultOutcome.InvalidOutput),
                 skippedOutOfBand = Count(AdvisorConsultOutcome.SkippedOutOfBand),
+                cacheHits,
                 total = byOutcome.Values.Sum(),
                 failures = Count(AdvisorConsultOutcome.ProviderFailed) + Count(AdvisorConsultOutcome.InvalidOutput),
                 escalationRate = considered == 0 ? (double?)null : escalated / (double)considered,
@@ -218,6 +220,8 @@ public static class ReadOnlyApiEndpoints
             invokeConfidenceMax = effective.InvokeConfidenceMax,
             maxSeverityDelta = effective.MaxSeverityDelta,
             maxConfidenceDelta = effective.MaxConfidenceDelta,
+            responseCacheEnabled = effective.ResponseCacheEnabled,
+            responseCacheTtlHours = effective.ResponseCacheTtlHours,
             version = effective.Version,
             updatedAt = effective.UpdatedAt,
         };

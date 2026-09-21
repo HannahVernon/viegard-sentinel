@@ -26,6 +26,10 @@ public sealed class LocalModelAdvisorOptions
     public int MaxSeverityDelta { get; set; } = 3;
 
     public double MaxConfidenceDelta { get; set; } = 0.20;
+
+    public bool ResponseCacheEnabled { get; set; }
+
+    public int ResponseCacheTtlHours { get; set; } = 72;
 }
 
 public sealed class LocalModelAdvisorOptionsValidator : IValidateOptions<LocalModelAdvisorOptions>

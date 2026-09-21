@@ -40,6 +40,10 @@ public sealed record LocalModelAdvisorSettings
 
     public double MaxConfidenceDelta { get; init; } = 0.20;
 
+    public bool ResponseCacheEnabled { get; init; }
+
+    public int ResponseCacheTtlHours { get; init; } = 72;
+
     public int Version { get; init; }
 
     public DateTimeOffset? SeededAt { get; init; }
@@ -65,6 +69,8 @@ public sealed record LocalModelAdvisorSettings
             InvokeConfidenceMax = options.InvokeConfidenceMax,
             MaxSeverityDelta = options.MaxSeverityDelta,
             MaxConfidenceDelta = options.MaxConfidenceDelta,
+            ResponseCacheEnabled = options.ResponseCacheEnabled,
+            ResponseCacheTtlHours = options.ResponseCacheTtlHours,
             Version = 1,
             SeededAt = utc,
             UpdatedAt = utc,
@@ -83,6 +89,7 @@ public static class LocalModelAdvisorSettingsValidator
     public const string ConfidenceBandError = "Local-model advisor confidence band must satisfy 0 <= min <= max <= 1.";
     public const string MaxSeverityDeltaError = "Local-model advisor max severity delta must be between 0 and 10.";
     public const string MaxConfidenceDeltaError = "Local-model advisor max confidence delta must be between 0 and 1.";
+    public const string ResponseCacheTtlError = "Local-model advisor response cache TTL must be between 1 and 2160 hours.";
 
     public static bool TryValidate(LocalModelAdvisorSettings settings, out string error)
     {
@@ -126,6 +133,12 @@ public static class LocalModelAdvisorSettingsValidator
         if (!double.IsFinite(settings.MaxConfidenceDelta) || settings.MaxConfidenceDelta is < 0.0 or > 1.0)
         {
             error = MaxConfidenceDeltaError;
+            return false;
+        }
+
+        if (settings.ResponseCacheTtlHours is < 1 or > 2160)
+        {
+            error = ResponseCacheTtlError;
             return false;
         }
 

@@ -38,6 +38,8 @@ public sealed record AdvisorConsultRecord
 
     public string? ModelId { get; init; }
 
+    public bool ServedFromCache { get; init; }
+
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 
@@ -60,6 +62,8 @@ public interface ILocalModelAdvisorConsultStore
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<AdvisorOutcomeCount>> GetOutcomeCountsAsync(DateTimeOffset since, CancellationToken cancellationToken = default);
+
+    Task<long> GetCacheHitCountAsync(DateTimeOffset since, CancellationToken cancellationToken = default);
 
     Task<AdvisorLatencyStats> GetLatencyStatsAsync(DateTimeOffset since, CancellationToken cancellationToken = default);
 

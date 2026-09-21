@@ -651,6 +651,8 @@ internal static class Mapping
         InvokeConfidenceMax = settings.InvokeConfidenceMax,
         MaxSeverityDelta = settings.MaxSeverityDelta,
         MaxConfidenceDelta = settings.MaxConfidenceDelta,
+        ResponseCacheEnabled = settings.ResponseCacheEnabled,
+        ResponseCacheTtlHours = settings.ResponseCacheTtlHours,
         Version = settings.Version,
         SeededAt = Utc(settings.SeededAt),
         UpdatedAt = Utc(settings.UpdatedAt),
@@ -670,6 +672,8 @@ internal static class Mapping
         InvokeConfidenceMax = row.InvokeConfidenceMax,
         MaxSeverityDelta = row.MaxSeverityDelta,
         MaxConfidenceDelta = row.MaxConfidenceDelta,
+        ResponseCacheEnabled = row.ResponseCacheEnabled,
+        ResponseCacheTtlHours = row.ResponseCacheTtlHours,
         Version = row.Version,
         SeededAt = row.SeededAt,
         UpdatedAt = row.UpdatedAt,
@@ -728,6 +732,33 @@ internal static class Mapping
         CreatedAt = row.CreatedAt,
         CreatedBy = row.CreatedBy,
     };
+
+    public static LocalModelAdvisorResponseCacheRow ToRow(this LocalModelAdvisorResponseCacheEntry entry) => new()
+    {
+        Id = entry.Id,
+        CacheKey = entry.CacheKey,
+        ModelId = entry.ModelId,
+        TemplateVersion = entry.TemplateVersion,
+        Severity = entry.Severity,
+        Confidence = entry.Confidence,
+        ReasonsJson = ToJson(entry.Reasons),
+        CreatedAt = Utc(entry.CreatedAt),
+        ExpiresAt = Utc(entry.ExpiresAt),
+    };
+
+    public static LocalModelAdvisorResponseCacheEntry ToDomain(this LocalModelAdvisorResponseCacheRow row) => new()
+    {
+        Id = row.Id,
+        CacheKey = row.CacheKey,
+        ModelId = row.ModelId,
+        TemplateVersion = row.TemplateVersion,
+        Severity = row.Severity,
+        Confidence = row.Confidence,
+        Reasons = FromJson<List<string>>(row.ReasonsJson),
+        CreatedAt = row.CreatedAt,
+        ExpiresAt = row.ExpiresAt,
+    };
+
     public static LocalModelAdvisorConsultRow ToRow(this AdvisorConsultRecord record) => new()
     {
         Id = record.Id,
@@ -742,6 +773,7 @@ internal static class Mapping
         LatencyMs = record.LatencyMs,
         FailureKind = record.FailureKind,
         ModelId = record.ModelId,
+        ServedFromCache = record.ServedFromCache,
         CreatedAt = Utc(record.CreatedAt),
     };
 
@@ -759,6 +791,7 @@ internal static class Mapping
         LatencyMs = row.LatencyMs,
         FailureKind = row.FailureKind,
         ModelId = row.ModelId,
+        ServedFromCache = row.ServedFromCache,
         CreatedAt = row.CreatedAt,
     };
 

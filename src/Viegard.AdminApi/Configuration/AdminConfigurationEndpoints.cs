@@ -1502,6 +1502,12 @@ public static class AdminConfigurationEndpoints
             return false;
         }
 
+        if (!int.TryParse(form["responseCacheTtlHours"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var responseCacheTtlHours))
+        {
+            error = LocalModelAdvisorSettingsValidator.ResponseCacheTtlError;
+            return false;
+        }
+
         settings = new LocalModelAdvisorSettings
         {
             Enabled = form.ContainsKey("enabled"),
@@ -1514,6 +1520,8 @@ public static class AdminConfigurationEndpoints
             InvokeConfidenceMax = invokeConfidenceMax,
             MaxSeverityDelta = maxSeverityDelta,
             MaxConfidenceDelta = maxConfidenceDelta,
+            ResponseCacheEnabled = form.ContainsKey("responseCacheEnabled"),
+            ResponseCacheTtlHours = responseCacheTtlHours,
         };
         if (!LocalModelAdvisorSettingsValidator.TryValidate(settings, out error))
         {

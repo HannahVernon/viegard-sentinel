@@ -55,6 +55,8 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 invoke_confidence_max,
                 max_severity_delta,
                 max_confidence_delta,
+                response_cache_enabled,
+                response_cache_ttl_hours,
                 version,
                 seeded_at,
                 updated_at,
@@ -72,6 +74,8 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 {seed.InvokeConfidenceMax},
                 {seed.MaxSeverityDelta},
                 {seed.MaxConfidenceDelta},
+                {seed.ResponseCacheEnabled},
+                {seed.ResponseCacheTtlHours},
                 {seed.Version},
                 {seed.SeededAt},
                 {seed.UpdatedAt},
@@ -146,6 +150,8 @@ public sealed class PostgresLocalModelAdvisorSettingsStore(
                 .SetProperty(r => r.InvokeConfidenceMax, normalized.InvokeConfidenceMax)
                 .SetProperty(r => r.MaxSeverityDelta, normalized.MaxSeverityDelta)
                 .SetProperty(r => r.MaxConfidenceDelta, normalized.MaxConfidenceDelta)
+                .SetProperty(r => r.ResponseCacheEnabled, normalized.ResponseCacheEnabled)
+                .SetProperty(r => r.ResponseCacheTtlHours, normalized.ResponseCacheTtlHours)
                 .SetProperty(r => r.Version, expectedVersion + 1)
                 .SetProperty(r => r.UpdatedAt, utcUpdatedAt)
                 .SetProperty(r => r.UpdatedBy, normalizedUpdatedBy),

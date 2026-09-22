@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Viegard.AdminApi.Auth;
 using Viegard.Application.Configuration;
+using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Policy;
 using Viegard.Application.Retention;
@@ -24,6 +25,7 @@ public static class AdminConfigurationEndpoints
     private const string UpgradesConfigurationPath = "/configuration#upgrades";
     private const string ThresholdsConfigurationPath = "/configuration#thresholds";
     private const string ClassifierSettingsConfigurationPath = "/configuration#classifier-settings";
+    private const string BurstDetectionSettingsConfigurationPath = "/configuration#burst-detection";
     private const string PostureConfigurationPath = "/configuration#posture";
     internal const string EnforceConfirmationWord = "ENFORCE";
     private const string IngestionConfigurationPath = "/configuration#ingestion";
@@ -100,6 +102,9 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/classifier-settings", SaveClassifierSettingsAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/burst-detection", SaveBurstDetectionSettingsAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/posture", SavePolicyPostureAsync)
@@ -1411,6 +1416,64 @@ public static class AdminConfigurationEndpoints
         return Redirect(ClassifierSettingsConfigurationPath, status: "Classifier settings saved.");
     }
 
+    internal static async Task<IResult> SaveBurstDetectionSettingsAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IBurstDetectionSettingsStore burstSettings,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(BurstDetectionSettingsConfigurationPath, error: "Step-up verification is required before editing burst-detection settings.");
+        }
+
+        if (!int.TryParse(form["rowVersion"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedRowVersion)
+            || expectedRowVersion < 0)
+        {
+            return Redirect(BurstDetectionSettingsConfigurationPath, error: "Burst-detection settings version was not valid.  Reload the page and try again.");
+        }
+
+        var before = await burstSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        if (!TryReadBurstDetectionSettings(form, before, out var candidate, out var error))
+        {
+            return Redirect(BurstDetectionSettingsConfigurationPath, error: error);
+        }
+
+        var result = await burstSettings.UpdateAsync(
+            candidate,
+            expectedRowVersion,
+            user.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(BurstDetectionSettingsConfigurationPath, error: "Burst-detection settings were changed by another session.  Review the current values and save again.");
+        }
+
+        await configAuditor.RecordBurstDetectionSettingsWriteAsync(
+            user.Username,
+            before,
+            result.Settings,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(BurstDetectionSettingsConfigurationPath, status: "Burst-detection settings saved.");
+    }
+
     internal static async Task<IResult> SavePolicyPostureAsync(
         HttpContext context,
         IAntiforgery antiforgery,
@@ -2114,6 +2177,77 @@ public static class AdminConfigurationEndpoints
         }
 
         return true;
+    }
+
+    private static bool TryReadBurstDetectionSettings(
+        IFormCollection form,
+        BurstDetectionSettings? current,
+        out BurstDetectionSettings settings,
+        out string error)
+    {
+        settings = current ?? new BurstDetectionSettings
+        {
+            Id = BurstDetectionSettings.FixedId,
+            RowVersion = 0,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = "admin",
+        };
+        error = string.Empty;
+
+        if (!int.TryParse(
+                form["authFailureThreshold"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var authFailureThreshold))
+        {
+            error = BurstDetectionSettingsValidator.ThresholdError;
+            return false;
+        }
+
+        if (!int.TryParse(
+                form["authFailureWindowSeconds"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var authFailureWindowSeconds))
+        {
+            error = BurstDetectionSettingsValidator.WindowError;
+            return false;
+        }
+
+        if (!int.TryParse(
+                form["authFailureCooldownSeconds"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var authFailureCooldownSeconds))
+        {
+            error = BurstDetectionSettingsValidator.CooldownError;
+            return false;
+        }
+
+        settings = settings with
+        {
+            GlobalEnabled = ReadCheckbox(form, "globalEnabled"),
+            AuthFailureEnabled = ReadCheckbox(form, "authFailureEnabled"),
+            AuthFailureThreshold = authFailureThreshold,
+            AuthFailureWindowSeconds = authFailureWindowSeconds,
+            AuthFailureCooldownSeconds = authFailureCooldownSeconds,
+            AuthFailureActionEligible = ReadCheckbox(form, "authFailureActionEligible"),
+        };
+
+        if (!BurstDetectionSettingsValidator.TryValidate(settings, out error))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool ReadCheckbox(IFormCollection form, string name)
+    {
+        var value = form[name].ToString();
+        return value.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("on", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("1", StringComparison.Ordinal);
     }
 
     private static bool TryReadMdaemonIngestionFilterMatrix(

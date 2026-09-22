@@ -741,7 +741,10 @@ public sealed class AdvisoryIncidentClassifierTests
         cacheStore ??= new InMemoryLocalModelAdvisorResponseCacheStore();
         diagnostics ??= new RecordingDiagnostics();
         var classifier = new AdvisoryIncidentClassifier(
-            new DeterministicIncidentClassifier(incidentStore, Options.Create(new ClassifierOptions())),
+            new DeterministicIncidentClassifier(
+                incidentStore,
+                Options.Create(new ClassifierOptions()),
+                new ClassifierSettingsSource()),
             incidentStore,
             eventStore,
             source,

@@ -62,7 +62,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         // 180d window) age into purge eligibility ~24h after the run that
         // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_injection_patterns, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_injection_patterns, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry, classifier_settings");
     }
 
     public async Task DisposeAsync()
@@ -1692,6 +1692,100 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [PostgresFact]
+    public async Task Classifier_settings_store_creates_updates_conflicts_and_notifies()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var listener = new PostgresClassifierSettingsStore(factory, _dataSource!);
+        var writer = new PostgresClassifierSettingsStore(factory, _dataSource!);
+        var now = new DateTimeOffset(2026, 9, 22, 14, 30, 0, TimeSpan.Zero);
+        var wait = listener.WaitForChangeAsync(
+            listener.CurrentChangeVersion,
+            TimeSpan.FromSeconds(10),
+            CancellationToken.None).AsTask();
+
+        await Task.Delay(300);
+        var saved = await writer.UpdateAsync(
+            ClassifierSettingsWith(
+                scoreForFullConfidence: 5.0,
+                severityPerScorePoint: 2.0,
+                blockRecommendationScore: 3.0,
+                repeatConfidenceMinEvents: 4,
+                repeatConfidenceCoefficient: 0.08,
+                repeatConfidenceBonusCap: 0.30),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: now);
+
+        var version = await wait.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.True(version > 0);
+        Assert.True(saved.Succeeded);
+        var savedSettings = saved.Settings!;
+        Assert.Equal(1, savedSettings.RowVersion);
+        Assert.Equal(5.0, savedSettings.ScoreForFullConfidence);
+        Assert.Equal(0.30, savedSettings.RepeatConfidenceBonusCap);
+        Assert.Equal("hannah", savedSettings.UpdatedBy);
+
+        var updated = await writer.UpdateAsync(
+            savedSettings with
+            {
+                ScoreForFullConfidence = 6.0,
+                SeverityPerScorePoint = 2.5,
+                BlockRecommendationScore = 3.5,
+                RepeatConfidenceMinEvents = 5,
+                RepeatConfidenceCoefficient = 0.1,
+                RepeatConfidenceBonusCap = 0.25,
+            },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "operator",
+            updatedAt: now.AddMinutes(1));
+
+        Assert.True(updated.Succeeded);
+        var updatedSettings = updated.Settings!;
+        Assert.Equal(2, updatedSettings.RowVersion);
+        Assert.Equal(6.0, updatedSettings.ScoreForFullConfidence);
+        Assert.Equal(5, updatedSettings.RepeatConfidenceMinEvents);
+        Assert.Equal(0.25, updatedSettings.RepeatConfidenceBonusCap);
+
+        var conflict = await writer.UpdateAsync(
+            updatedSettings with { ScoreForFullConfidence = 4.0 },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "stale",
+            updatedAt: now.AddMinutes(2));
+
+        Assert.False(conflict.Succeeded);
+        Assert.Equal(2, conflict.Settings!.RowVersion);
+        Assert.Equal(6.0, conflict.Settings.ScoreForFullConfidence);
+    }
+
+    [PostgresFact]
+    public async Task Classifier_settings_seed_is_create_only()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var firstStore = new PostgresClassifierSettingsStore(factory, _dataSource!);
+        var secondStore = new PostgresClassifierSettingsStore(factory, _dataSource!);
+        var seededAt = new DateTimeOffset(2026, 9, 22, 14, 30, 0, TimeSpan.Zero);
+
+        var seeded = await firstStore.TryCreateAsync(
+            ClassifierSettings.FromOptions(
+                new ClassifierOptions { ScoreForFullConfidence = 6.0, RepeatConfidenceBonusCap = 0.25 },
+                seededAt));
+
+        Assert.True(seeded.Created);
+        Assert.Equal(6.0, seeded.Settings.ScoreForFullConfidence);
+        Assert.Equal(0.25, seeded.Settings.RepeatConfidenceBonusCap);
+
+        var second = await secondStore.TryCreateAsync(
+            ClassifierSettings.FromOptions(
+                new ClassifierOptions { ScoreForFullConfidence = 9.0 },
+                seededAt.AddMinutes(1)));
+
+        Assert.False(second.Created);
+        Assert.Equal(6.0, second.Settings.ScoreForFullConfidence);
+
+        await ClearClassifierSettingsAsync(factory);
+    }
+
+    [PostgresFact]
     public async Task Policy_threshold_settings_seed_is_create_only_and_race_safe()
     {
         var factory = new TestDbContextFactory(_dataSource!);
@@ -2373,6 +2467,31 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
     {
         await using var db = factory.CreateDbContext();
         await db.PolicyThresholdSettings.ExecuteDeleteAsync();
+    }
+
+    private static ClassifierSettings ClassifierSettingsWith(
+        double scoreForFullConfidence,
+        double severityPerScorePoint,
+        double blockRecommendationScore,
+        int repeatConfidenceMinEvents,
+        double repeatConfidenceCoefficient,
+        double repeatConfidenceBonusCap) => new()
+        {
+            Id = ClassifierSettings.FixedId,
+            ScoreForFullConfidence = scoreForFullConfidence,
+            SeverityPerScorePoint = severityPerScorePoint,
+            BlockRecommendationScore = blockRecommendationScore,
+            RepeatConfidenceMinEvents = repeatConfidenceMinEvents,
+            RepeatConfidenceCoefficient = repeatConfidenceCoefficient,
+            RepeatConfidenceBonusCap = repeatConfidenceBonusCap,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = "it",
+        };
+
+    private static async Task ClearClassifierSettingsAsync(TestDbContextFactory factory)
+    {
+        await using var db = factory.CreateDbContext();
+        await db.ClassifierSettings.ExecuteDeleteAsync();
     }
 
     private static MikroTikRouter MikroTikRouter(string name, DateTimeOffset now) => new()

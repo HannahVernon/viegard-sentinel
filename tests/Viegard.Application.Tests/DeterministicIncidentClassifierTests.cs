@@ -195,6 +195,65 @@ public sealed class DeterministicIncidentClassifierTests
     }
 
     [Fact]
+    public async Task Repeat_event_volume_adds_confidence_without_changing_severity()
+    {
+        var burstStore = new InMemoryIncidentStore();
+        var singleStore = new InMemoryIncidentStore();
+        var burst = Incident(
+            "ip=198.51.100.21",
+            [Evidence("Rule http.wp-login: repeated login POSTs.", 3.25)],
+            eventCount: 16);
+        var single = Incident(
+            "ip=198.51.100.21",
+            [Evidence("Rule http.wp-login: repeated login POSTs.", 3.25)],
+            eventCount: 1);
+        await burstStore.UpsertAsync(burst);
+        await singleStore.UpsertAsync(single);
+
+        var withBonus = Assert.IsType<Classification>(
+            (await Classifier(burstStore).ClassifyAsync(Subject(burst.Id))).Classification);
+        var withoutBonus = Assert.IsType<Classification>(
+            (await Classifier(singleStore).ClassifyAsync(Subject(single.Id))).Classification);
+
+        Assert.True(withBonus.Confidence >= 0.9);
+        Assert.Equal(0.65, withoutBonus.Confidence, precision: 10);
+        Assert.Equal(withoutBonus.Severity, withBonus.Severity);
+    }
+
+    [Fact]
+    public async Task Repeat_event_volume_below_minimum_adds_no_confidence_bonus()
+    {
+        var store = new InMemoryIncidentStore();
+        var incident = Incident(
+            "ip=198.51.100.22",
+            [Evidence("Rule http.wp-login: repeated login POSTs.", 3.25)],
+            eventCount: 3);
+        await store.UpsertAsync(incident);
+
+        var classification = Assert.IsType<Classification>(
+            (await Classifier(store).ClassifyAsync(Subject(incident.Id))).Classification);
+
+        Assert.Equal(0.65, classification.Confidence, precision: 10);
+    }
+
+    [Fact]
+    public async Task Repeat_event_volume_bonus_is_capped()
+    {
+        var store = new InMemoryIncidentStore();
+        var incident = Incident(
+            "ip=198.51.100.23",
+            [Evidence("Rule http.wp-login: repeated login POSTs.", 2.0)],
+            eventCount: 64);
+        await store.UpsertAsync(incident);
+
+        var classification = Assert.IsType<Classification>(
+            (await Classifier(store).ClassifyAsync(Subject(incident.Id))).Classification);
+
+        Assert.Equal(0.70, classification.Confidence, precision: 10);
+        Assert.Equal(4, classification.Severity);
+    }
+
+    [Fact]
     public void Options_validator_rejects_non_positive_values()
     {
         var result = new ClassifierOptionsValidator().Validate(
@@ -204,11 +263,14 @@ public sealed class DeterministicIncidentClassifierTests
                 ScoreForFullConfidence = 0,
                 SeverityPerScorePoint = -1,
                 BlockRecommendationScore = double.PositiveInfinity,
+                RepeatConfidenceMinEvents = 0,
+                RepeatConfidenceCoefficient = double.PositiveInfinity,
+                RepeatConfidenceBonusCap = 2.0,
             });
 
         Assert.False(result.Succeeded);
         Assert.NotNull(result.Failures);
-        Assert.Equal(3, result.Failures!.Count());
+        Assert.Equal(6, result.Failures!.Count());
     }
 
     [Fact]
@@ -280,7 +342,7 @@ public sealed class DeterministicIncidentClassifierTests
     }
 
     private static DeterministicIncidentClassifier Classifier(InMemoryIncidentStore store) =>
-        new(store, Options.Create(new ClassifierOptions()));
+        new(store, Options.Create(new ClassifierOptions()), new ClassifierSettingsSource());
 
     private static ClassificationSubject Subject(Guid incidentId) => new()
     {
@@ -288,7 +350,7 @@ public sealed class DeterministicIncidentClassifierTests
         SubjectId = incidentId,
     };
 
-    private static Incident Incident(string correlationKey, IReadOnlyList<EvidenceItem> evidence)
+    private static Incident Incident(string correlationKey, IReadOnlyList<EvidenceItem> evidence, int eventCount = 0)
     {
         var now = DateTimeOffset.UtcNow;
         return new Incident
@@ -297,7 +359,7 @@ public sealed class DeterministicIncidentClassifierTests
             CorrelationKey = correlationKey,
             WindowStart = now.AddMinutes(-5),
             WindowEnd = now,
-            EventIds = [],
+            EventIds = Enumerable.Range(0, eventCount).Select(_ => Guid.NewGuid()).ToList(),
             Evidence = evidence,
             State = IncidentState.Open,
         };

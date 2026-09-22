@@ -18,6 +18,7 @@ using Viegard.Actions.MikroTik;
 using Viegard.Application.Actions;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
+using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
 using Viegard.Application.Detection;
 using Viegard.Application.Policy;
@@ -101,6 +102,11 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<PolicyOptions>, PolicyOptionsValidator>();
 builder.Services
+    .AddOptions<ClassifierOptions>()
+    .Bind(builder.Configuration.GetSection(ClassifierOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<ClassifierOptions>, ClassifierOptionsValidator>();
+builder.Services
     .AddOptions<JetPackFeedOptions>()
     .Bind(builder.Configuration.GetSection(JetPackFeedOptions.SectionName))
     .ValidateOnStart();
@@ -133,6 +139,8 @@ builder.Services.AddSingleton<IRouterCredentialProtector, AesGcmRouterCredential
 builder.Services.AddSingleton<RouterCertificateFetcher>();
 builder.Services.AddSingleton<RouterConnectivityTester>();
 builder.Services.AddSingleton<DecisionTargetResolver>();
+builder.Services.AddSingleton<ClassifierSettingsSource>();
+builder.Services.AddSingleton<PolicyThresholdSource>();
 builder.Services.AddSingleton<LocalModelAdvisorSource>();
 builder.Services.AddSingleton<LocalModelAdvisorCategoryBandSource>();
 builder.Services.AddSingleton<LocalModelAdvisorInjectionPatternSource>();
@@ -262,6 +270,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ILocalModelAdvisorResponseCacheStore, InMemoryLocalModelAdvisorResponseCacheStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorConsultStore, InMemoryLocalModelAdvisorConsultStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
+        builder.Services.AddSingleton<IClassifierSettingsStore, InMemoryClassifierSettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<ISatelliteRoleStore, InMemorySatelliteRoleStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();

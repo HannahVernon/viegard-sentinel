@@ -71,6 +71,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<PolicyThresholdSettingsRow> PolicyThresholdSettings => Set<PolicyThresholdSettingsRow>();
 
+    public DbSet<ClassifierSettingsRow> ClassifierSettings => Set<ClassifierSettingsRow>();
+
     public DbSet<PolicyPostureSettingsRow> PolicyPostureSettings => Set<PolicyPostureSettingsRow>();
 
     public DbSet<AdminErrorRow> AdminErrors => Set<AdminErrorRow>();
@@ -413,6 +415,15 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Policy.PolicyThresholdSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<ClassifierSettingsRow>(entity =>
+        {
+            entity.ToTable("classifier_settings", table =>
+                table.HasCheckConstraint("CK_classifier_settings_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Classifiers.ClassifierSettings.MaxUpdatedByLength);
         });
 
         modelBuilder.Entity<PolicyPostureSettingsRow>(entity =>

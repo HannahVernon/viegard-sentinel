@@ -37,6 +37,8 @@ Path | Returns
 `GET /api/v1/audit` | Audit ledger records
 `GET /api/v1/bans` | Active bans and the 50 most recent ban actions
 `GET /api/v1/instances` | Registered instances with deployed version and commit, roles, host, queues reported, last telemetry capture, and staleness light
+`GET /api/v1/classifier/settings` | Deterministic classifier tunables (score controls plus the count-aware repeat-confidence terms), with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
+`GET /api/v1/policy/thresholds` | Policy review/action confidence and action minimum severity, with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
 `GET /status/queues` | Queue and instance health (display-formatted)
 `GET /status/upgrades` | Recent host upgrade commands (display-formatted)
 `GET /status/bans` | Bans (display-formatted for the live UI)
@@ -92,3 +94,17 @@ and `commitSha` (nullable), a nine-character `shortCommit` label, `roles`,
 traffic-light value (`Green`/`Amber`/`Red`, or `null` for a registry-only row
 with no queue telemetry).  The commit fields are the deployed-commit signal
 used for deployment verification.
+
+`GET /api/v1/classifier/settings` returns `scoreForFullConfidence`,
+`severityPerScorePoint`, `blockRecommendationScore`, `repeatConfidenceMinEvents`,
+`repeatConfidenceCoefficient`, `repeatConfidenceBonusCap`, plus `version`,
+`updatedAt`, `updatedBy`, and `seeded`.  When `seeded` is `false` the values are
+the code-defined `ClassifierOptions` fallback, `version` is `0`, and `updatedAt`
+and `updatedBy` are `null`; once an operator saves on `/configuration` (or the
+maintenance role seeds the row) the values, version, and last-writer reflect the
+`classifier_settings` row.
+
+`GET /api/v1/policy/thresholds` returns `reviewConfidence`, `actionConfidence`,
+and `actionMinSeverity`, plus `version`, `updatedAt`, `updatedBy`, and `seeded`,
+with the same fallback semantics as the classifier settings endpoint against the
+`policy_threshold_settings` row.

@@ -619,6 +619,29 @@ public sealed class PolicyThresholdSettingsRow
     public string UpdatedBy { get; set; } = string.Empty;
 }
 
+public sealed class ClassifierSettingsRow
+{
+    public int Id { get; set; }
+
+    public double ScoreForFullConfidence { get; set; }
+
+    public double SeverityPerScorePoint { get; set; }
+
+    public double BlockRecommendationScore { get; set; }
+
+    public int RepeatConfidenceMinEvents { get; set; }
+
+    public double RepeatConfidenceCoefficient { get; set; }
+
+    public double RepeatConfidenceBonusCap { get; set; }
+
+    public int RowVersion { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+}
+
 public sealed class PolicyPostureSettingsRow
 {
     public int Id { get; set; }

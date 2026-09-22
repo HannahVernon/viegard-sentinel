@@ -73,6 +73,12 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<ClassifierSettingsRow> ClassifierSettings => Set<ClassifierSettingsRow>();
 
+    public DbSet<BurstDetectionSettingsRow> BurstDetectionSettings => Set<BurstDetectionSettingsRow>();
+
+    public DbSet<BurstWindowRow> BurstWindows => Set<BurstWindowRow>();
+
+    public DbSet<BurstCooldownRow> BurstCooldowns => Set<BurstCooldownRow>();
+
     public DbSet<PolicyPostureSettingsRow> PolicyPostureSettings => Set<PolicyPostureSettingsRow>();
 
     public DbSet<AdminErrorRow> AdminErrors => Set<AdminErrorRow>();
@@ -424,6 +430,32 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Classifiers.ClassifierSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<BurstDetectionSettingsRow>(entity =>
+        {
+            entity.ToTable("burst_detection_settings", table =>
+                table.HasCheckConstraint("CK_burst_detection_settings_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Burst.BurstDetectionSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<BurstWindowRow>(entity =>
+        {
+            entity.ToTable("burst_windows");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SignalId).HasMaxLength(64);
+            entity.Property(e => e.SourceKey).HasMaxLength(256);
+            entity.HasIndex(e => new { e.SignalId, e.SourceKey, e.OccurredAt });
+        });
+
+        modelBuilder.Entity<BurstCooldownRow>(entity =>
+        {
+            entity.ToTable("burst_cooldowns");
+            entity.HasKey(e => new { e.SignalId, e.SourceKey });
+            entity.Property(e => e.SignalId).HasMaxLength(64);
+            entity.Property(e => e.SourceKey).HasMaxLength(256);
         });
 
         modelBuilder.Entity<PolicyPostureSettingsRow>(entity =>

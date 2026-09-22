@@ -11,6 +11,7 @@ using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Configuration;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
+using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
@@ -694,6 +695,122 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Save_burst_detection_settings_persists_values_and_writes_config_audit()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.BurstDetection.UpdateAsync(
+            BurstDetectionValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = BurstDetectionForm(
+            rowVersion: 1,
+            globalEnabled: true,
+            authFailureEnabled: true,
+            authFailureThreshold: 8,
+            authFailureWindowSeconds: 120,
+            authFailureCooldownSeconds: 900,
+            authFailureActionEligible: true);
+
+        var result = await fixture.InvokeSaveBurstDetectionSettingsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Burst-detection%20settings%20saved", location, StringComparison.Ordinal);
+        var settings = await fixture.BurstDetection.GetAsync();
+        Assert.True(settings!.GlobalEnabled);
+        Assert.True(settings.AuthFailureEnabled);
+        Assert.Equal(8, settings.AuthFailureThreshold);
+        Assert.Equal(120, settings.AuthFailureWindowSeconds);
+        Assert.Equal(900, settings.AuthFailureCooldownSeconds);
+        Assert.True(settings.AuthFailureActionEligible);
+        Assert.Equal(2, settings.RowVersion);
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("BurstDetectionSettingsChanged", audit.DetailJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Save_burst_detection_settings_unchecked_boxes_disable_flags()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.BurstDetection.UpdateAsync(
+            BurstDetectionValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = BurstDetectionForm(
+            rowVersion: 1,
+            globalEnabled: false,
+            authFailureEnabled: false,
+            authFailureThreshold: 5,
+            authFailureWindowSeconds: 300,
+            authFailureCooldownSeconds: 3600,
+            authFailureActionEligible: false);
+
+        var result = await fixture.InvokeSaveBurstDetectionSettingsAsync();
+        await ExecuteRedirectAsync(result, fixture.Context);
+
+        var settings = await fixture.BurstDetection.GetAsync();
+        Assert.False(settings!.GlobalEnabled);
+        Assert.False(settings.AuthFailureEnabled);
+        Assert.False(settings.AuthFailureActionEligible);
+    }
+
+    [Fact]
+    public async Task Save_burst_detection_settings_rejects_invalid_values_without_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.BurstDetection.UpdateAsync(
+            BurstDetectionValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = BurstDetectionForm(
+            rowVersion: 1,
+            globalEnabled: true,
+            authFailureEnabled: true,
+            authFailureThreshold: 0,
+            authFailureWindowSeconds: 300,
+            authFailureCooldownSeconds: 3600,
+            authFailureActionEligible: false);
+
+        var result = await fixture.InvokeSaveBurstDetectionSettingsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains(Uri.EscapeDataString(BurstDetectionSettingsValidator.ThresholdError), location, StringComparison.Ordinal);
+        var settings = await fixture.BurstDetection.GetAsync();
+        Assert.Equal(5, settings!.AuthFailureThreshold);
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Save_burst_detection_settings_returns_friendly_error_on_version_conflict()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.BurstDetection.UpdateAsync(
+            BurstDetectionValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = BurstDetectionForm(
+            rowVersion: 0,
+            globalEnabled: true,
+            authFailureEnabled: true,
+            authFailureThreshold: 8,
+            authFailureWindowSeconds: 120,
+            authFailureCooldownSeconds: 900,
+            authFailureActionEligible: false);
+
+        var result = await fixture.InvokeSaveBurstDetectionSettingsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Burst-detection%20settings%20were%20changed", location, StringComparison.Ordinal);
+        var settings = await fixture.BurstDetection.GetAsync();
+        Assert.Equal(5, settings!.AuthFailureThreshold);
+        Assert.Equal(1, settings.RowVersion);
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
     public async Task Request_host_upgrade_queues_command_and_writes_minimal_audit_detail()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
@@ -1123,6 +1240,47 @@ public sealed class AdminConfigurationEndpointsTests
         UpdatedBy = "test",
     };
 
+    private static FormCollection BurstDetectionForm(
+        int rowVersion,
+        bool globalEnabled,
+        bool authFailureEnabled,
+        int authFailureThreshold,
+        int authFailureWindowSeconds,
+        int authFailureCooldownSeconds,
+        bool authFailureActionEligible)
+    {
+        var fields = new Dictionary<string, StringValues>(StringComparer.Ordinal)
+        {
+            ["rowVersion"] = rowVersion.ToString(CultureInfo.InvariantCulture),
+            ["authFailureThreshold"] = authFailureThreshold.ToString(CultureInfo.InvariantCulture),
+            ["authFailureWindowSeconds"] = authFailureWindowSeconds.ToString(CultureInfo.InvariantCulture),
+            ["authFailureCooldownSeconds"] = authFailureCooldownSeconds.ToString(CultureInfo.InvariantCulture),
+        };
+
+        if (globalEnabled)
+        {
+            fields["globalEnabled"] = "true";
+        }
+
+        if (authFailureEnabled)
+        {
+            fields["authFailureEnabled"] = "true";
+        }
+
+        if (authFailureActionEligible)
+        {
+            fields["authFailureActionEligible"] = "true";
+        }
+
+        return new FormCollection(fields);
+    }
+
+    private static BurstDetectionSettings BurstDetectionValue() => new()
+    {
+        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedBy = "test",
+    };
+
     private static JetPackFeedSettings JetPackSettings(
         string feedUrl = JetPackFeedSettings.DefaultFeedUrl,
         TimeSpan? fetchInterval = null,
@@ -1202,6 +1360,7 @@ public sealed class AdminConfigurationEndpointsTests
         InMemoryPolicyThresholdSettingsStore PolicyThresholds,
         InMemoryPolicyPostureSettingsStore PolicyPosture,
         InMemoryClassifierSettingsStore ClassifierSettings,
+        InMemoryBurstDetectionSettingsStore BurstDetection,
         RecordingAuditLedger AuditLedger,
         DateTimeOffset Now,
         NoopAntiforgery Antiforgery,
@@ -1270,6 +1429,7 @@ public sealed class AdminConfigurationEndpointsTests
             var policyThresholds = new InMemoryPolicyThresholdSettingsStore();
             var policyPosture = new InMemoryPolicyPostureSettingsStore();
             var classifierSettings = new InMemoryClassifierSettingsStore();
+            var burstDetection = new InMemoryBurstDetectionSettingsStore();
             var satelliteCredentialCookie = new SatelliteRoleCredentialCookie(new NoopDataProtectionProvider());
             var services = new ServiceCollection()
                 .AddLogging()
@@ -1296,6 +1456,7 @@ public sealed class AdminConfigurationEndpointsTests
                 policyThresholds,
                 policyPosture,
                 classifierSettings,
+                burstDetection,
                 auditLedger,
                 now,
                 new NoopAntiforgery(),
@@ -1402,6 +1563,16 @@ public sealed class AdminConfigurationEndpointsTests
                 Context,
                 Antiforgery,
                 ClassifierSettings,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeSaveBurstDetectionSettingsAsync() =>
+            AdminConfigurationEndpoints.SaveBurstDetectionSettingsAsync(
+                Context,
+                Antiforgery,
+                BurstDetection,
                 Users,
                 Sessions,
                 AuthAuditor,

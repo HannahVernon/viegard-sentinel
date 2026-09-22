@@ -107,6 +107,11 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<ClassifierOptions>, ClassifierOptionsValidator>();
 builder.Services
+    .AddOptions<Viegard.Application.Burst.BurstDetectionOptions>()
+    .Bind(builder.Configuration.GetSection(Viegard.Application.Burst.BurstDetectionOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<Viegard.Application.Burst.BurstDetectionOptions>, Viegard.Application.Burst.BurstDetectionOptionsValidator>();
+builder.Services
     .AddOptions<JetPackFeedOptions>()
     .Bind(builder.Configuration.GetSection(JetPackFeedOptions.SectionName))
     .ValidateOnStart();
@@ -140,6 +145,7 @@ builder.Services.AddSingleton<RouterCertificateFetcher>();
 builder.Services.AddSingleton<RouterConnectivityTester>();
 builder.Services.AddSingleton<DecisionTargetResolver>();
 builder.Services.AddSingleton<ClassifierSettingsSource>();
+builder.Services.AddSingleton<Viegard.Application.Burst.BurstDetectionSettingsSource>();
 builder.Services.AddSingleton<PolicyThresholdSource>();
 builder.Services.AddSingleton<LocalModelAdvisorSource>();
 builder.Services.AddSingleton<LocalModelAdvisorCategoryBandSource>();
@@ -271,6 +277,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ILocalModelAdvisorConsultStore, InMemoryLocalModelAdvisorConsultStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IClassifierSettingsStore, InMemoryClassifierSettingsStore>();
+        builder.Services.AddSingleton<Viegard.Application.Burst.IBurstDetectionSettingsStore, InMemoryBurstDetectionSettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<ISatelliteRoleStore, InMemorySatelliteRoleStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();

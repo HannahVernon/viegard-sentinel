@@ -43,6 +43,7 @@ public static class ReadOnlyApiEndpoints
         api.MapGet("/decisions/{id:guid}", GetDecisionAsync);
         api.MapGet("/classifications/{id:guid}", GetClassificationAsync);
         api.MapGet("/classifier/settings", GetClassifierSettingsAsync);
+        api.MapGet("/burst/settings", GetBurstDetectionSettingsAsync);
         api.MapGet("/policy/thresholds", GetPolicyThresholdsAsync);
         api.MapGet("/advisor/summary", GetAdvisorSummaryAsync);
         api.MapGet("/advisor/consults", ListAdvisorConsultsAsync);
@@ -289,6 +290,29 @@ public static class ReadOnlyApiEndpoints
             repeatConfidenceMinEvents = values.RepeatConfidenceMinEvents,
             repeatConfidenceCoefficient = values.RepeatConfidenceCoefficient,
             repeatConfidenceBonusCap = values.RepeatConfidenceBonusCap,
+            version = settings?.RowVersion ?? source.Current.RowVersion,
+            updatedAt = settings?.UpdatedAt,
+            updatedBy = settings?.UpdatedBy,
+            seeded = settings is not null || source.Current.IsSeeded,
+        }, Json);
+    }
+
+    internal static async Task<IResult> GetBurstDetectionSettingsAsync(
+        HttpContext context,
+        Viegard.Application.Burst.IBurstDetectionSettingsStore settingsStore,
+        Viegard.Application.Burst.BurstDetectionSettingsSource source,
+        IOptions<Viegard.Application.Burst.BurstDetectionOptions> options)
+    {
+        var settings = await settingsStore.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        var values = settings?.ToValues() ?? source.CurrentValues(options.Value);
+        return Results.Json(new
+        {
+            globalEnabled = values.GlobalEnabled,
+            authFailureEnabled = values.AuthFailureEnabled,
+            authFailureThreshold = values.AuthFailureThreshold,
+            authFailureWindowSeconds = values.AuthFailureWindowSeconds,
+            authFailureCooldownSeconds = values.AuthFailureCooldownSeconds,
+            authFailureActionEligible = values.AuthFailureActionEligible,
             version = settings?.RowVersion ?? source.Current.RowVersion,
             updatedAt = settings?.UpdatedAt,
             updatedBy = settings?.UpdatedBy,

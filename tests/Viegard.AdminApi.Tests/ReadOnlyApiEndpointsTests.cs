@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Viegard.AdminApi.Api;
 using Viegard.Application.Classifiers;
+using Viegard.Application.Burst;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
 using Viegard.Domain;
@@ -396,6 +397,75 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.Equal(4, json.GetProperty("repeatConfidenceMinEvents").GetInt32());
         Assert.Equal(0.08, json.GetProperty("repeatConfidenceCoefficient").GetDouble());
         Assert.Equal(0.30, json.GetProperty("repeatConfidenceBonusCap").GetDouble());
+        Assert.Equal(0, json.GetProperty("version").GetInt32());
+        Assert.False(json.GetProperty("seeded").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetBurstDetectionSettings_returns_seeded_values_from_store()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryBurstDetectionSettingsStore();
+        await store.UpdateAsync(
+            new BurstDetectionSettings
+            {
+                GlobalEnabled = true,
+                AuthFailureEnabled = true,
+                AuthFailureThreshold = 8,
+                AuthFailureWindowSeconds = 120,
+                AuthFailureCooldownSeconds = 900,
+                AuthFailureActionEligible = true,
+                UpdatedAt = now,
+                UpdatedBy = "operator",
+            },
+            expectedRowVersion: 0,
+            updatedBy: "operator",
+            updatedAt: now);
+        var source = new BurstDetectionSettingsSource(store);
+        await source.RefreshAsync();
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetBurstDetectionSettingsAsync(
+                context,
+                store,
+                source,
+                Options.Create(new BurstDetectionOptions())),
+            context);
+
+        Assert.True(json.GetProperty("globalEnabled").GetBoolean());
+        Assert.True(json.GetProperty("authFailureEnabled").GetBoolean());
+        Assert.Equal(8, json.GetProperty("authFailureThreshold").GetInt32());
+        Assert.Equal(120, json.GetProperty("authFailureWindowSeconds").GetInt32());
+        Assert.Equal(900, json.GetProperty("authFailureCooldownSeconds").GetInt32());
+        Assert.True(json.GetProperty("authFailureActionEligible").GetBoolean());
+        Assert.Equal(1, json.GetProperty("version").GetInt32());
+        Assert.Equal("operator", json.GetProperty("updatedBy").GetString());
+        Assert.True(json.GetProperty("seeded").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetBurstDetectionSettings_falls_back_to_options_when_unseeded()
+    {
+        var store = new InMemoryBurstDetectionSettingsStore();
+        var source = new BurstDetectionSettingsSource(store);
+        await source.RefreshAsync();
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetBurstDetectionSettingsAsync(
+                context,
+                store,
+                source,
+                Options.Create(new BurstDetectionOptions())),
+            context);
+
+        Assert.True(json.GetProperty("globalEnabled").GetBoolean());
+        Assert.True(json.GetProperty("authFailureEnabled").GetBoolean());
+        Assert.Equal(5, json.GetProperty("authFailureThreshold").GetInt32());
+        Assert.Equal(300, json.GetProperty("authFailureWindowSeconds").GetInt32());
+        Assert.Equal(3600, json.GetProperty("authFailureCooldownSeconds").GetInt32());
+        Assert.False(json.GetProperty("authFailureActionEligible").GetBoolean());
         Assert.Equal(0, json.GetProperty("version").GetInt32());
         Assert.False(json.GetProperty("seeded").GetBoolean());
     }

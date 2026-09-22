@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Viegard.Actions.MikroTik;
 using Viegard.Application.Actions;
 using Viegard.Application.Audit;
+using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
 using Viegard.Application.Correlation;
@@ -99,6 +100,12 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<ClassifierOptions>, ClassifierOptionsValidator>();
 
+builder.Services
+    .AddOptions<BurstDetectionOptions>()
+    .Bind(builder.Configuration.GetSection(BurstDetectionOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<BurstDetectionOptions>, BurstDetectionOptionsValidator>();
+
 // Secrets (D-0006): mounted secret files in production, user-secrets-backed
 // configuration in development.  Selection is configuration, never code.
 var secretProviderKind = builder.Configuration["Viegard:Secrets:Provider"] ?? "configuration";
@@ -159,6 +166,8 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ILocalModelAdvisorConsultStore, InMemoryLocalModelAdvisorConsultStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IClassifierSettingsStore, InMemoryClassifierSettingsStore>();
+builder.Services.AddSingleton<IBurstDetectionSettingsStore, InMemoryBurstDetectionSettingsStore>();
+builder.Services.AddSingleton<IBurstWindowStore, InMemoryBurstWindowStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();
 
@@ -187,6 +196,14 @@ builder.Services.AddSingleton<IPolicyThresholdDiagnostics, LoggingPolicyThreshol
 builder.Services.AddSingleton<PolicyThresholdSource>();
 builder.Services.AddSingleton<IClassifierSettingsDiagnostics, LoggingClassifierSettingsDiagnostics>();
 builder.Services.AddSingleton<ClassifierSettingsSource>();
+builder.Services.AddSingleton<IBurstDetectionSettingsDiagnostics, LoggingBurstDetectionSettingsDiagnostics>();
+builder.Services.AddSingleton<BurstDetectionSettingsSource>();
+builder.Services.AddSingleton<IBurstSignal, AuthFailureBurstSignal>();
+builder.Services.AddSingleton(sp => new BurstDetector(
+    sp.GetServices<IBurstSignal>(),
+    sp.GetRequiredService<IBurstWindowStore>(),
+    sp.GetRequiredService<BurstDetectionSettingsSource>(),
+    sp.GetRequiredService<IOptions<BurstDetectionOptions>>().Value));
 builder.Services.AddSingleton<IPolicyPostureDiagnostics, LoggingPolicyPostureDiagnostics>();
 builder.Services.AddSingleton<PolicyPostureSource>();
 builder.Services.AddSingleton<ILocalModelAdvisorDiagnostics, StoreLocalModelAdvisorDiagnostics>();
@@ -336,6 +353,7 @@ if (configuredRoles.Contains(RoleNames.Correlation, StringComparer.OrdinalIgnore
             sp.GetRequiredService<IIncidentStore>(),
             sp.GetRequiredService<IOptions<CorrelationOptions>>().Value));
     builder.Services.AddHostedService<CorrelationWorker>();
+    builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, BurstDetectionSettingsRefreshWorker>());
 }
 
 // The classification worker runs only in the singleton classification role (D-0011, D-0028).

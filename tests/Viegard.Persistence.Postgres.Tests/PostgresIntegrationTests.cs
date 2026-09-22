@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using Viegard.Application.Auth;
 using Viegard.Application.Classifiers;
+using Viegard.Application.Burst;
 using Viegard.Application.Configuration;
 using Viegard.Application.Detection;
 using Viegard.Application.Policy;
@@ -62,7 +63,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         // 180d window) age into purge eligibility ~24h after the run that
         // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_injection_patterns, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry, classifier_settings");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_injection_patterns, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry, classifier_settings, burst_detection_settings, burst_windows, burst_cooldowns");
     }
 
     public async Task DisposeAsync()
@@ -1783,6 +1784,110 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(6.0, second.Settings.ScoreForFullConfidence);
 
         await ClearClassifierSettingsAsync(factory);
+    }
+
+    [PostgresFact]
+    public async Task Burst_detection_settings_store_creates_updates_conflicts_and_notifies()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var listener = new PostgresBurstDetectionSettingsStore(factory, _dataSource!);
+        var writer = new PostgresBurstDetectionSettingsStore(factory, _dataSource!);
+        var now = new DateTimeOffset(2026, 9, 22, 14, 30, 0, TimeSpan.Zero);
+        var wait = listener.WaitForChangeAsync(
+            listener.CurrentChangeVersion,
+            TimeSpan.FromSeconds(10),
+            CancellationToken.None).AsTask();
+
+        await Task.Delay(300);
+        var saved = await writer.UpdateAsync(
+            new BurstDetectionSettings
+            {
+                GlobalEnabled = true,
+                AuthFailureEnabled = true,
+                AuthFailureThreshold = 5,
+                AuthFailureWindowSeconds = 300,
+                AuthFailureCooldownSeconds = 3600,
+                AuthFailureActionEligible = false,
+                UpdatedAt = now,
+                UpdatedBy = "hannah",
+            },
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: now);
+
+        var version = await wait.WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.True(version > 0);
+        Assert.True(saved.Succeeded);
+        var savedSettings = saved.Settings!;
+        Assert.Equal(1, savedSettings.RowVersion);
+        Assert.Equal(5, savedSettings.AuthFailureThreshold);
+        Assert.False(savedSettings.AuthFailureActionEligible);
+        Assert.Equal("hannah", savedSettings.UpdatedBy);
+
+        var updated = await writer.UpdateAsync(
+            savedSettings with
+            {
+                AuthFailureThreshold = 8,
+                AuthFailureWindowSeconds = 120,
+                AuthFailureCooldownSeconds = 900,
+                AuthFailureActionEligible = true,
+            },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "operator",
+            updatedAt: now.AddMinutes(1));
+
+        Assert.True(updated.Succeeded);
+        var updatedSettings = updated.Settings!;
+        Assert.Equal(2, updatedSettings.RowVersion);
+        Assert.Equal(8, updatedSettings.AuthFailureThreshold);
+        Assert.Equal(120, updatedSettings.AuthFailureWindowSeconds);
+        Assert.True(updatedSettings.AuthFailureActionEligible);
+
+        var conflict = await writer.UpdateAsync(
+            updatedSettings with { AuthFailureThreshold = 3 },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "stale",
+            updatedAt: now.AddMinutes(2));
+
+        Assert.False(conflict.Succeeded);
+        Assert.Equal(2, conflict.Settings!.RowVersion);
+        Assert.Equal(8, conflict.Settings.AuthFailureThreshold);
+    }
+
+    [PostgresFact]
+    public async Task Burst_window_store_counts_within_window_prunes_and_enforces_cooldown()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresBurstWindowStore(factory);
+        const string signal = "auth-failure";
+        const string source = "ip=203.0.113.10";
+        var window = TimeSpan.FromSeconds(300);
+        var start = new DateTimeOffset(2026, 9, 22, 14, 30, 0, TimeSpan.Zero);
+
+        var first = await store.RecordAndCountAsync(signal, source, Guid.NewGuid(), start, window, maxEventIds: 10);
+        Assert.Equal(1, first.Count);
+
+        var second = await store.RecordAndCountAsync(signal, source, Guid.NewGuid(), start.AddSeconds(60), window, maxEventIds: 10);
+        Assert.Equal(2, second.Count);
+        Assert.Equal(2, second.EventIds.Count);
+
+        // An occurrence outside the window prunes the earliest entries.
+        var later = await store.RecordAndCountAsync(signal, source, Guid.NewGuid(), start.AddSeconds(400), window, maxEventIds: 10);
+        Assert.Equal(1, later.Count);
+
+        // A different source is counted independently.
+        var otherSource = await store.RecordAndCountAsync(signal, "ip=203.0.113.99", Guid.NewGuid(), start.AddSeconds(400), window, maxEventIds: 10);
+        Assert.Equal(1, otherSource.Count);
+
+        var cooldown = TimeSpan.FromSeconds(600);
+        var firstFire = await store.TryBeginCooldownAsync(signal, source, start.AddSeconds(400), cooldown);
+        Assert.True(firstFire);
+
+        var suppressed = await store.TryBeginCooldownAsync(signal, source, start.AddSeconds(700), cooldown);
+        Assert.False(suppressed);
+
+        var afterCooldown = await store.TryBeginCooldownAsync(signal, source, start.AddSeconds(1100), cooldown);
+        Assert.True(afterCooldown);
     }
 
     [PostgresFact]

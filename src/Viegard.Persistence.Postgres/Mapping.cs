@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
@@ -896,6 +897,34 @@ internal static class Mapping
         RepeatConfidenceMinEvents = row.RepeatConfidenceMinEvents,
         RepeatConfidenceCoefficient = row.RepeatConfidenceCoefficient,
         RepeatConfidenceBonusCap = row.RepeatConfidenceBonusCap,
+        RowVersion = row.RowVersion,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+    };
+
+    public static BurstDetectionSettingsRow ToRow(this BurstDetectionSettings settings) => new()
+    {
+        Id = settings.Id,
+        GlobalEnabled = settings.GlobalEnabled,
+        AuthFailureEnabled = settings.AuthFailureEnabled,
+        AuthFailureThreshold = settings.AuthFailureThreshold,
+        AuthFailureWindowSeconds = settings.AuthFailureWindowSeconds,
+        AuthFailureCooldownSeconds = settings.AuthFailureCooldownSeconds,
+        AuthFailureActionEligible = settings.AuthFailureActionEligible,
+        RowVersion = settings.RowVersion,
+        UpdatedAt = Utc(settings.UpdatedAt),
+        UpdatedBy = settings.UpdatedBy,
+    };
+
+    public static BurstDetectionSettings ToDomain(this BurstDetectionSettingsRow row) => new()
+    {
+        Id = row.Id,
+        GlobalEnabled = row.GlobalEnabled,
+        AuthFailureEnabled = row.AuthFailureEnabled,
+        AuthFailureThreshold = row.AuthFailureThreshold,
+        AuthFailureWindowSeconds = row.AuthFailureWindowSeconds,
+        AuthFailureCooldownSeconds = row.AuthFailureCooldownSeconds,
+        AuthFailureActionEligible = row.AuthFailureActionEligible,
         RowVersion = row.RowVersion,
         UpdatedAt = row.UpdatedAt,
         UpdatedBy = row.UpdatedBy,

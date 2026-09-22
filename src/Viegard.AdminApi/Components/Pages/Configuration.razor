@@ -8,6 +8,7 @@
 @inject ILocalModelAdvisorPromptTemplateStore LocalModelAdvisorPromptTemplateStore
 @inject IPolicyThresholdSettingsStore PolicyThresholdSettingsStore
 @inject IClassifierSettingsStore ClassifierSettingsStore
+@inject Viegard.Application.Burst.IBurstDetectionSettingsStore BurstDetectionSettingsStore
 @inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
 @inject IIngestionFilterStore IngestionFilters
 @inject ISatelliteRoleStore SatelliteRoles
@@ -20,6 +21,7 @@
 @inject IOptions<AdminAuthOptions> AuthOptions
 @inject IOptions<PolicyOptions> PolicyOptions
 @inject IOptions<ClassifierOptions> ClassifierOptions
+@inject IOptions<Viegard.Application.Burst.BurstDetectionOptions> BurstDetectionOptions
 @inject IOptions<JetPackFeedOptions> JetPackOptions
 @inject IOptions<LocalModelAdvisorOptions> LocalModelAdvisorOptions
 @inject UserDisplay Display
@@ -36,6 +38,7 @@
         <a href="/configuration#local-model-advisor">Local-model advisor</a>
         <a href="/configuration#upgrades">Upgrades</a>
         <a href="/configuration#classifier-settings">Classifier settings</a>
+        <a href="/configuration#burst-detection">Burst detection</a>
         <a href="/configuration#thresholds">Policy thresholds</a>
         <a href="/configuration#posture">Policy posture</a>
         <a href="/configuration#ingestion">Ingestion</a>
@@ -1212,6 +1215,127 @@
         }
     </section>
 
+    <section id="burst-detection" class="indexed">
+        <h2>Burst detection</h2>
+        <p class="small">Rate-based burst detection counts repeated occurrences of a signal from one source within a sliding window and, when the threshold is reached, proposes an incident for review.  Proposals are review-only unless a signal is explicitly marked action-eligible.</p>
+
+        <h3>Status</h3>
+        <dl class="detail-list">
+            <dt>Settings row</dt><dd>@BurstDetectionSettingsState</dd>
+            <dt>Version</dt><dd>@(_burstSettings?.RowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")</dd>
+            <dt>Last changed</dt><dd>@BurstDetectionSettingsLastChanged</dd>
+        </dl>
+
+        @if (_burstSettings is null)
+        {
+            <p class="message">Showing deployment defaults.  The settings row seeds on the next maintenance-role startup unless an admin saves values first.</p>
+        }
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Knob</th>
+                    <th>Effective value</th>
+                    <th>Meaning</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>GlobalEnabled</code></td>
+                    <td>@(BurstValues.GlobalEnabled ? "Enabled" : "Disabled")</td>
+                    <td>Master switch for all burst signals.</td>
+                </tr>
+                <tr>
+                    <td><code>AuthFailureEnabled</code></td>
+                    <td>@(BurstValues.AuthFailureEnabled ? "Enabled" : "Disabled")</td>
+                    <td>Whether repeated admin authentication failures from one source are counted.</td>
+                </tr>
+                <tr>
+                    <td><code>AuthFailureThreshold</code></td>
+                    <td>@BurstValues.AuthFailureThreshold.ToString(System.Globalization.CultureInfo.InvariantCulture)</td>
+                    <td>Auth failures from one source within the window that propose an incident.</td>
+                </tr>
+                <tr>
+                    <td><code>AuthFailureWindowSeconds</code></td>
+                    <td>@BurstValues.AuthFailureWindowSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)</td>
+                    <td>Sliding-window length, in seconds, over which auth failures are counted.</td>
+                </tr>
+                <tr>
+                    <td><code>AuthFailureCooldownSeconds</code></td>
+                    <td>@BurstValues.AuthFailureCooldownSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)</td>
+                    <td>Minimum seconds between successive proposals for the same source.</td>
+                </tr>
+                <tr>
+                    <td><code>AuthFailureActionEligible</code></td>
+                    <td>@(BurstValues.AuthFailureActionEligible ? "Yes" : "No (propose-only)")</td>
+                    <td>Whether a fired proposal may become an unattended action.  Off keeps the signal propose-only.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Edit burst-detection settings</h3>
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/burst-detection" class="edit-form">
+                <AntiforgeryToken />
+                <input type="hidden" name="rowVersion" value="@(_burstSettings?.RowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")" />
+                <label class="checkbox-label">
+                    <input name="globalEnabled" type="checkbox" value="true" checked="@BurstValues.GlobalEnabled" />
+                    Global enabled
+                    <span class="small">Master switch for all burst signals.</span>
+                </label>
+                <label class="checkbox-label">
+                    <input name="authFailureEnabled" type="checkbox" value="true" checked="@BurstValues.AuthFailureEnabled" />
+                    Auth-failure signal enabled
+                    <span class="small">Count repeated admin authentication failures from one source.</span>
+                </label>
+                <label>
+                    Auth-failure threshold
+                    <input name="authFailureThreshold"
+                           type="number"
+                           min="1"
+                           step="1"
+                           value="@BurstValues.AuthFailureThreshold.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                           required />
+                    <span class="small">Auth failures from one source within the window that propose an incident.</span>
+                </label>
+                <label>
+                    Auth-failure window (seconds)
+                    <input name="authFailureWindowSeconds"
+                           type="number"
+                           min="1"
+                           step="1"
+                           value="@BurstValues.AuthFailureWindowSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                           required />
+                    <span class="small">Sliding-window length over which auth failures are counted.</span>
+                </label>
+                <label>
+                    Auth-failure cooldown (seconds)
+                    <input name="authFailureCooldownSeconds"
+                           type="number"
+                           min="0"
+                           step="1"
+                           value="@BurstValues.AuthFailureCooldownSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                           required />
+                    <span class="small">Minimum seconds between successive proposals for the same source.</span>
+                </label>
+                <label class="checkbox-label">
+                    <input name="authFailureActionEligible" type="checkbox" value="true" checked="@BurstValues.AuthFailureActionEligible" />
+                    Auth-failure action eligible
+                    <span class="small">Leave off to keep this signal propose-only.</span>
+                </label>
+                <button type="submit">Save burst-detection settings</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Editing burst-detection settings requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#burst-detection" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-burst-detection" />
+            </div>
+        }
+    </section>
+
     <section id="thresholds" class="indexed">
         <h2>Policy thresholds</h2>
         <p class="small">Review confidence is the propose-for-approval gate.  Action confidence is the automatic-action band; unattended actions remain disabled by posture.</p>
@@ -1476,6 +1600,7 @@
     private IReadOnlyList<LocalModelAdvisorPromptTemplateRevision> _localModelAdvisorPromptTemplateRevisions = [];
     private PolicyThresholdSettings? _thresholdSettings;
     private ClassifierSettings? _classifierSettings;
+    private Viegard.Application.Burst.BurstDetectionSettings? _burstSettings;
     private PolicyPostureSettings? _postureSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
     private IReadOnlyDictionary<string, IngestionFilter> _mdaemonFilters = new Dictionary<string, IngestionFilter>(StringComparer.Ordinal);
@@ -1589,6 +1714,17 @@
         ? "Not seeded.  Showing deployment defaults; the settings row seeds on next maintenance startup."
         : $"{_classifierSettings.UpdatedBy} at {Display.Format(_classifierSettings.UpdatedAt)}";
 
+    private Viegard.Application.Burst.BurstDetectionValues BurstValues =>
+        _burstSettings?.ToValues() ?? Viegard.Application.Burst.BurstDetectionValues.FromOptions(BurstDetectionOptions.Value);
+
+    private string BurstDetectionSettingsState => _burstSettings is null
+        ? "Not seeded"
+        : "Database-owned";
+
+    private string BurstDetectionSettingsLastChanged => _burstSettings is null
+        ? "Not seeded.  Showing deployment defaults; the settings row seeds on next maintenance startup."
+        : $"{_burstSettings.UpdatedBy} at {Display.Format(_burstSettings.UpdatedAt)}";
+
     private string ThresholdSettingsState => _thresholdSettings is null
         ? "Not seeded"
         : "Database-owned";
@@ -1621,6 +1757,7 @@
         _localModelAdvisorPromptTemplateRevisions = await LocalModelAdvisorPromptTemplateStore.ListAsync(AdvisoryIncidentClassifier.PromptTemplateId).ConfigureAwait(false);
         _thresholdSettings = await PolicyThresholdSettingsStore.GetAsync().ConfigureAwait(false);
         _classifierSettings = await ClassifierSettingsStore.GetAsync().ConfigureAwait(false);
+        _burstSettings = await BurstDetectionSettingsStore.GetAsync().ConfigureAwait(false);
         _postureSettings = await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
         _mdaemonFilters = (await IngestionFilters

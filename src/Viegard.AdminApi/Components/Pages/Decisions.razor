@@ -190,7 +190,7 @@
                         <td>@ClassificationSummary(row.Classification)</td>
                         <td>@AdminText.OneLine(row.TriggeredBy, TriggeredByListMaxChars)</td>
                         <td>
-                            @if (HasRationale(row.Decision))
+                            @if (HasDetail(row))
                             {
                                 <button
                                     type="button"
@@ -208,12 +208,68 @@
                             }
                         </td>
                     </tr>
-                    @if (HasRationale(row.Decision))
+                    @if (HasDetail(row))
                     {
                         <tr id="@($"decision-rationale-{row.Decision.Id:N}")" class="details-row rationale-detail-row" data-rationale-detail="@row.Decision.Id.ToString("N")" hidden>
                             <td colspan="8">
-                                <strong>Rationale</strong>
-                                <div class="rationale-detail-text">@row.Decision.Rationale</div>
+                                @if (HasRationale(row.Decision))
+                                {
+                                    <strong>Rationale</strong>
+                                    <div class="rationale-detail-text">@row.Decision.Rationale</div>
+                                }
+                                @if (row.Events.Count > 0)
+                                {
+                                    <div class="rationale-events">
+                                        <p class="rationale-events-summary">
+                                            <strong>Associated events:</strong>
+                                            @row.TotalEventCount@(row.TotalEventCount == 1 ? " event" : " events") found.
+                                            @{ var sources = DistinctSourceAddresses(row.Events); }
+                                            @if (sources.Count > 0)
+                                            {
+                                                <span> Source @(sources.Count == 1 ? "address" : "addresses"): @string.Join(", ", sources).</span>
+                                            }
+                                            @{ var span = EventTimeSpan(row.Events); }
+                                            @if (span is not null)
+                                            {
+                                                <span> Time span: @span.</span>
+                                            }
+                                        </p>
+                                        @foreach (var evt in row.Events)
+                                        {
+                                            <article class="rationale-event">
+                                                <h5 class="rationale-event-head">
+                                                    <a href="/events/@evt.Id">@AdminText.ShortId(evt.Id)</a>
+                                                    <span class="rationale-event-meta">
+                                                        @Display.Format(evt.OccurredAt) &middot; @AdminText.PayloadTypeName(evt.Payload) &middot; @evt.SourceId (@evt.SourceType)
+                                                    </span>
+                                                </h5>
+                                                @{ var fields = NonEmptyPayloadFields(evt.Payload); }
+                                                @if (fields.Count > 0)
+                                                {
+                                                    <table class="data-table key-value-table">
+                                                        <tbody>
+                                                            @foreach (var field in fields)
+                                                            {
+                                                                <tr><th>@field.Name</th><td>@field.Value</td></tr>
+                                                            }
+                                                        </tbody>
+                                                    </table>
+                                                }
+                                                else
+                                                {
+                                                    <p class="small">@AdminText.PayloadSummary(evt.Payload)</p>
+                                                }
+                                            </article>
+                                        }
+                                        @if (row.TotalEventCount > row.Events.Count && row.IncidentId is not null)
+                                        {
+                                            <p class="small">
+                                                Showing @row.Events.Count of @row.TotalEventCount events.
+                                                <a href="/incidents/@row.IncidentId">Open the incident</a> for the full list.
+                                            </p>
+                                        }
+                                    </div>
+                                }
                             </td>
                         </tr>
                     }
@@ -449,6 +505,39 @@
     private static bool HasRationale(Decision decision) =>
         !string.IsNullOrWhiteSpace(decision.Rationale);
 
+    private static bool HasDetail(DecisionRow row) =>
+        HasRationale(row.Decision) || row.Events.Count > 0;
+
+    private const int MaxInlineEvents = 20;
+
+    private static IReadOnlyList<string> DistinctSourceAddresses(IEnumerable<NormalizedEvent> events) =>
+        events
+            .SelectMany(evt => evt.Entities)
+            .Where(entity => entity.Kind == EntityKind.IpAddress && !string.IsNullOrWhiteSpace(entity.Value))
+            .Select(entity => entity.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToArray();
+
+    private string? EventTimeSpan(IReadOnlyList<NormalizedEvent> events)
+    {
+        if (events.Count == 0)
+        {
+            return null;
+        }
+
+        var earliest = events.Min(evt => evt.OccurredAt);
+        var latest = events.Max(evt => evt.OccurredAt);
+        return earliest == latest
+            ? Display.Format(earliest)
+            : $"{Display.Format(earliest)} to {Display.Format(latest)}";
+    }
+
+    private IReadOnlyList<PayloadField> NonEmptyPayloadFields(EventPayload payload) =>
+        AdminText.PayloadFields(payload, Display.Format)
+            .Where(field => !string.IsNullOrWhiteSpace(field.Value))
+            .ToArray();
+
     private async Task<IReadOnlyList<DecisionRow>> BuildRowsAsync(IReadOnlyList<Decision> decisions)
     {
         if (decisions.Count == 0)
@@ -480,11 +569,23 @@
                 && incidents.TryGetValue(classification.SubjectId, out var foundIncident)
                     ? foundIncident
                     : null;
+            var incidentEvents = incident is null
+                ? []
+                : IncidentEventIds(incident)
+                    .Distinct()
+                    .Select(id => eventsById.TryGetValue(id, out var found) ? found : null)
+                    .Where(found => found is not null)
+                    .Select(found => found!)
+                    .OrderByDescending(found => found.OccurredAt)
+                    .ToArray();
             rows.Add(new DecisionRow(
                 decision,
                 classification,
                 DecisionTriggeredBySummary.Summarize(classification, incident, eventsById),
-                BuildReview(decision, classification, incident)));
+                BuildReview(decision, classification, incident),
+                incidentEvents.Take(MaxInlineEvents).ToArray(),
+                incidentEvents.Length,
+                incident?.Id));
         }
 
         return rows;
@@ -535,7 +636,10 @@
         Decision Decision,
         Classification? Classification,
         string TriggeredBy,
-        DecisionRowReview? Review);
+        DecisionRowReview? Review,
+        IReadOnlyList<NormalizedEvent> Events,
+        int TotalEventCount,
+        Guid? IncidentId);
 
     private sealed record DecisionRowReview(IncidentTargetIpResult Target);
 }

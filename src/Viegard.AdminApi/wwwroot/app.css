@@ -1323,6 +1323,43 @@ th[aria-sort="descending"] button.client-sort::after {
     overflow-wrap: anywhere;
 }
 
+.rationale-events {
+    margin-top: 0.75rem;
+}
+
+.rationale-events-summary {
+    margin: 0 0 0.5rem;
+    color: var(--ink);
+    line-height: 1.45;
+}
+
+.rationale-event {
+    margin-top: 0.6rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2, rgba(127, 127, 127, 0.06));
+}
+
+.rationale-event-head {
+    margin: 0 0 0.4rem;
+    font-size: 0.9rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: baseline;
+}
+
+.rationale-event-meta {
+    font-weight: normal;
+    color: var(--ink-muted, var(--ink));
+    overflow-wrap: anywhere;
+}
+
+.rationale-event .key-value-table {
+    margin: 0;
+}
+
 td code {
     color: var(--ink);
 }

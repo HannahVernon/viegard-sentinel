@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Npgsql;
 using Viegard.Application.Actions;
 using Viegard.Application.Audit;
+using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
@@ -103,6 +104,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ILocalModelAdvisorConsultStore, PostgresLocalModelAdvisorConsultStore>();
         services.AddSingleton<IPolicyThresholdSettingsStore, PostgresPolicyThresholdSettingsStore>();
         services.AddSingleton<IClassifierSettingsStore, PostgresClassifierSettingsStore>();
+        services.AddSingleton<IBurstDetectionSettingsStore, PostgresBurstDetectionSettingsStore>();
+        services.AddSingleton<IBurstWindowStore, PostgresBurstWindowStore>();
         services.AddSingleton<IPolicyPostureSettingsStore, PostgresPolicyPostureSettingsStore>();
         services.AddSingleton<ISatelliteRoleStore, PostgresSatelliteRoleStore>();
         services.AddSingleton<IMikroTikRouterStore, PostgresMikroTikRouterStore>();

@@ -642,6 +642,51 @@ public sealed class ClassifierSettingsRow
     public string UpdatedBy { get; set; } = string.Empty;
 }
 
+public sealed class BurstDetectionSettingsRow
+{
+    public int Id { get; set; }
+
+    public bool GlobalEnabled { get; set; }
+
+    public bool AuthFailureEnabled { get; set; }
+
+    public int AuthFailureThreshold { get; set; }
+
+    public int AuthFailureWindowSeconds { get; set; }
+
+    public int AuthFailureCooldownSeconds { get; set; }
+
+    public bool AuthFailureActionEligible { get; set; }
+
+    public int RowVersion { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+}
+
+public sealed class BurstWindowRow
+{
+    public long Id { get; set; }
+
+    public string SignalId { get; set; } = string.Empty;
+
+    public string SourceKey { get; set; } = string.Empty;
+
+    public Guid EventId { get; set; }
+
+    public DateTimeOffset OccurredAt { get; set; }
+}
+
+public sealed class BurstCooldownRow
+{
+    public string SignalId { get; set; } = string.Empty;
+
+    public string SourceKey { get; set; } = string.Empty;
+
+    public DateTimeOffset LastFiredAt { get; set; }
+}
+
 public sealed class PolicyPostureSettingsRow
 {
     public int Id { get; set; }

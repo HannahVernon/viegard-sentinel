@@ -1,9 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
 using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Errors;
 using Viegard.Application.Audit;
+using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
+using Viegard.Application.Policy;
 using Viegard.Application.Stores;
 using Viegard.Application.Telemetry;
 using Viegard.Domain.Audit;
@@ -39,6 +42,8 @@ public static class ReadOnlyApiEndpoints
         api.MapGet("/decisions", ListDecisionsAsync);
         api.MapGet("/decisions/{id:guid}", GetDecisionAsync);
         api.MapGet("/classifications/{id:guid}", GetClassificationAsync);
+        api.MapGet("/classifier/settings", GetClassifierSettingsAsync);
+        api.MapGet("/policy/thresholds", GetPolicyThresholdsAsync);
         api.MapGet("/advisor/summary", GetAdvisorSummaryAsync);
         api.MapGet("/advisor/consults", ListAdvisorConsultsAsync);
         api.MapGet("/advisor/consults/by-classification/{id:guid}", GetAdvisorConsultByClassificationAsync);
@@ -266,6 +271,49 @@ public static class ReadOnlyApiEndpoints
                 createdAt = activePromptRevision.CreatedAt,
             };
         return Results.Json(new { configuration, categoryOverrides, activePromptTemplate, windows }, Json);
+    }
+
+    internal static async Task<IResult> GetClassifierSettingsAsync(
+        HttpContext context,
+        IClassifierSettingsStore settingsStore,
+        ClassifierSettingsSource source,
+        IOptions<ClassifierOptions> options)
+    {
+        var settings = await settingsStore.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        var values = settings?.ToValues() ?? source.CurrentValues(options.Value);
+        return Results.Json(new
+        {
+            scoreForFullConfidence = values.ScoreForFullConfidence,
+            severityPerScorePoint = values.SeverityPerScorePoint,
+            blockRecommendationScore = values.BlockRecommendationScore,
+            repeatConfidenceMinEvents = values.RepeatConfidenceMinEvents,
+            repeatConfidenceCoefficient = values.RepeatConfidenceCoefficient,
+            repeatConfidenceBonusCap = values.RepeatConfidenceBonusCap,
+            version = settings?.RowVersion ?? source.Current.RowVersion,
+            updatedAt = settings?.UpdatedAt,
+            updatedBy = settings?.UpdatedBy,
+            seeded = settings is not null || source.Current.IsSeeded,
+        }, Json);
+    }
+
+    internal static async Task<IResult> GetPolicyThresholdsAsync(
+        HttpContext context,
+        IPolicyThresholdSettingsStore settingsStore,
+        PolicyThresholdSource source,
+        IOptions<PolicyOptions> options)
+    {
+        var settings = await settingsStore.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        var values = settings?.ToValues() ?? source.CurrentValues(options.Value);
+        return Results.Json(new
+        {
+            reviewConfidence = values.ReviewConfidence,
+            actionConfidence = values.ActionConfidence,
+            actionMinSeverity = values.ActionMinSeverity,
+            version = settings?.RowVersion ?? source.Current.RowVersion,
+            updatedAt = settings?.UpdatedAt,
+            updatedBy = settings?.UpdatedBy,
+            seeded = settings is not null || source.Current.IsSeeded,
+        }, Json);
     }
 
     internal static async Task<IResult> GetInstancesAsync(

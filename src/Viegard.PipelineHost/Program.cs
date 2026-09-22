@@ -158,6 +158,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<ILocalModelAdvisorResponseCacheStore, InMemoryLocalModelAdvisorResponseCacheStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorConsultStore, InMemoryLocalModelAdvisorConsultStore>();
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
+        builder.Services.AddSingleton<IClassifierSettingsStore, InMemoryClassifierSettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();
 
@@ -184,6 +185,8 @@ builder.Services.AddSingleton<IIngestionFilterDiagnostics, LoggingIngestionFilte
 builder.Services.AddSingleton<IngestionFilterSource>();
 builder.Services.AddSingleton<IPolicyThresholdDiagnostics, LoggingPolicyThresholdDiagnostics>();
 builder.Services.AddSingleton<PolicyThresholdSource>();
+builder.Services.AddSingleton<IClassifierSettingsDiagnostics, LoggingClassifierSettingsDiagnostics>();
+builder.Services.AddSingleton<ClassifierSettingsSource>();
 builder.Services.AddSingleton<IPolicyPostureDiagnostics, LoggingPolicyPostureDiagnostics>();
 builder.Services.AddSingleton<PolicyPostureSource>();
 builder.Services.AddSingleton<ILocalModelAdvisorDiagnostics, StoreLocalModelAdvisorDiagnostics>();
@@ -340,6 +343,7 @@ if (configuredRoles.Contains(RoleNames.Classification, StringComparer.OrdinalIgn
 {
     builder.Services.AddSingleton<DeterministicIncidentClassifier>();
     builder.Services.AddSingleton<IClassifier, AdvisoryIncidentClassifier>();
+    builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, ClassifierSettingsRefreshWorker>());
     builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, LocalModelAdvisorRefreshWorker>());
     builder.Services.AddHostedService<ClassificationWorker>();
 }

@@ -1,9 +1,11 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Viegard.AdminApi.Api;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
+using Viegard.Application.Policy;
 using Viegard.Domain;
 using Viegard.Domain.Classifications;
 using Viegard.Domain.Decisions;
@@ -327,6 +329,136 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.Equal("pipeline", instance.GetProperty("roles").GetString());
         Assert.Equal(["events"], instance.GetProperty("queuesReported").EnumerateArray().Select(q => q.GetString()!).ToArray());
         Assert.Equal("Green", instance.GetProperty("stalenessLight").GetString());
+    }
+
+    [Fact]
+    public async Task GetClassifierSettings_returns_seeded_values_from_store()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryClassifierSettingsStore();
+        await store.UpdateAsync(
+            new ClassifierSettings
+            {
+                ScoreForFullConfidence = 6.0,
+                SeverityPerScorePoint = 2.5,
+                BlockRecommendationScore = 3.5,
+                RepeatConfidenceMinEvents = 5,
+                RepeatConfidenceCoefficient = 0.1,
+                RepeatConfidenceBonusCap = 0.25,
+                UpdatedAt = now,
+                UpdatedBy = "operator",
+            },
+            expectedRowVersion: 0,
+            updatedBy: "operator",
+            updatedAt: now);
+        var source = new ClassifierSettingsSource(store);
+        await source.RefreshAsync();
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetClassifierSettingsAsync(
+                context,
+                store,
+                source,
+                Options.Create(new ClassifierOptions())),
+            context);
+
+        Assert.Equal(6.0, json.GetProperty("scoreForFullConfidence").GetDouble());
+        Assert.Equal(2.5, json.GetProperty("severityPerScorePoint").GetDouble());
+        Assert.Equal(3.5, json.GetProperty("blockRecommendationScore").GetDouble());
+        Assert.Equal(5, json.GetProperty("repeatConfidenceMinEvents").GetInt32());
+        Assert.Equal(0.1, json.GetProperty("repeatConfidenceCoefficient").GetDouble());
+        Assert.Equal(0.25, json.GetProperty("repeatConfidenceBonusCap").GetDouble());
+        Assert.Equal(1, json.GetProperty("version").GetInt32());
+        Assert.Equal("operator", json.GetProperty("updatedBy").GetString());
+        Assert.True(json.GetProperty("seeded").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetClassifierSettings_falls_back_to_options_when_unseeded()
+    {
+        var store = new InMemoryClassifierSettingsStore();
+        var source = new ClassifierSettingsSource(store);
+        await source.RefreshAsync();
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetClassifierSettingsAsync(
+                context,
+                store,
+                source,
+                Options.Create(new ClassifierOptions())),
+            context);
+
+        Assert.Equal(5.0, json.GetProperty("scoreForFullConfidence").GetDouble());
+        Assert.Equal(2.0, json.GetProperty("severityPerScorePoint").GetDouble());
+        Assert.Equal(3.0, json.GetProperty("blockRecommendationScore").GetDouble());
+        Assert.Equal(4, json.GetProperty("repeatConfidenceMinEvents").GetInt32());
+        Assert.Equal(0.08, json.GetProperty("repeatConfidenceCoefficient").GetDouble());
+        Assert.Equal(0.30, json.GetProperty("repeatConfidenceBonusCap").GetDouble());
+        Assert.Equal(0, json.GetProperty("version").GetInt32());
+        Assert.False(json.GetProperty("seeded").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetPolicyThresholds_returns_seeded_values_from_store()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryPolicyThresholdSettingsStore();
+        await store.UpdateAsync(
+            new PolicyThresholdSettings
+            {
+                ReviewConfidence = 0.6,
+                ActionConfidence = 0.85,
+                ActionMinSeverity = 6,
+                UpdatedAt = now,
+                UpdatedBy = "operator",
+            },
+            expectedRowVersion: 0,
+            updatedBy: "operator",
+            updatedAt: now);
+        var source = new PolicyThresholdSource(store);
+        await source.RefreshAsync();
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetPolicyThresholdsAsync(
+                context,
+                store,
+                source,
+                Options.Create(new PolicyOptions())),
+            context);
+
+        Assert.Equal(0.6, json.GetProperty("reviewConfidence").GetDouble());
+        Assert.Equal(0.85, json.GetProperty("actionConfidence").GetDouble());
+        Assert.Equal(6, json.GetProperty("actionMinSeverity").GetInt32());
+        Assert.Equal(1, json.GetProperty("version").GetInt32());
+        Assert.Equal("operator", json.GetProperty("updatedBy").GetString());
+        Assert.True(json.GetProperty("seeded").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetPolicyThresholds_falls_back_to_options_when_unseeded()
+    {
+        var store = new InMemoryPolicyThresholdSettingsStore();
+        var source = new PolicyThresholdSource(store);
+        await source.RefreshAsync();
+        var options = new PolicyOptions();
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetPolicyThresholdsAsync(
+                context,
+                store,
+                source,
+                Options.Create(options)),
+            context);
+
+        Assert.Equal(options.AiReviewConfidence, json.GetProperty("reviewConfidence").GetDouble());
+        Assert.Equal(options.AiActionConfidence, json.GetProperty("actionConfidence").GetDouble());
+        Assert.Equal(options.AiActionMinSeverity, json.GetProperty("actionMinSeverity").GetInt32());
+        Assert.Equal(0, json.GetProperty("version").GetInt32());
+        Assert.False(json.GetProperty("seeded").GetBoolean());
     }
 
     private static DefaultHttpContext Context(string queryString)

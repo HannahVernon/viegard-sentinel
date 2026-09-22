@@ -1,7 +1,8 @@
 using System.Text.Json;
 using Viegard.Actions.MikroTik;
-using Viegard.Application.Configuration;
 using Viegard.Application.Audit;
+using Viegard.Application.Classifiers;
+using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
 using Viegard.Application.Retention;
 using Viegard.Domain;
@@ -312,6 +313,36 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
                 DetailJson = JsonSerializer.Serialize(new
                 {
                     Kind = "PolicyThresholdSettingsChanged",
+                    Username = username,
+                    Before = before,
+                    After = after,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
+
+    public async ValueTask RecordClassifierSettingsWriteAsync(
+        string username,
+        ClassifierSettings? before,
+        ClassifierSettings? after,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config write by {username}: changed classifier settings.",
+                SourceId = "admin:config",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "ClassifierSettingsChanged",
                     Username = username,
                     Before = before,
                     After = after,

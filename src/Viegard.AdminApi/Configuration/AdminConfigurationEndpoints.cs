@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Viegard.AdminApi.Auth;
 using Viegard.Application.Configuration;
+using Viegard.Application.Classifiers;
 using Viegard.Application.Policy;
 using Viegard.Application.Retention;
 using Viegard.Application.Stores;
@@ -22,6 +23,7 @@ public static class AdminConfigurationEndpoints
     private const string RoutersConfigurationPath = "/configuration#routers";
     private const string UpgradesConfigurationPath = "/configuration#upgrades";
     private const string ThresholdsConfigurationPath = "/configuration#thresholds";
+    private const string ClassifierSettingsConfigurationPath = "/configuration#classifier-settings";
     private const string PostureConfigurationPath = "/configuration#posture";
     internal const string EnforceConfirmationWord = "ENFORCE";
     private const string IngestionConfigurationPath = "/configuration#ingestion";
@@ -95,6 +97,9 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/thresholds", SavePolicyThresholdsAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/classifier-settings", SaveClassifierSettingsAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/posture", SavePolicyPostureAsync)
@@ -1348,6 +1353,64 @@ public static class AdminConfigurationEndpoints
         return Redirect(ThresholdsConfigurationPath, status: "Policy threshold settings saved.");
     }
 
+    internal static async Task<IResult> SaveClassifierSettingsAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IClassifierSettingsStore classifierSettings,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(ClassifierSettingsConfigurationPath, error: "Step-up verification is required before editing classifier settings.");
+        }
+
+        if (!int.TryParse(form["rowVersion"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedRowVersion)
+            || expectedRowVersion < 0)
+        {
+            return Redirect(ClassifierSettingsConfigurationPath, error: "Classifier settings version was not valid.  Reload the page and try again.");
+        }
+
+        var before = await classifierSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        if (!TryReadClassifierSettings(form, before, out var candidate, out var error))
+        {
+            return Redirect(ClassifierSettingsConfigurationPath, error: error);
+        }
+
+        var result = await classifierSettings.UpdateAsync(
+            candidate,
+            expectedRowVersion,
+            user.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(ClassifierSettingsConfigurationPath, error: "Classifier settings were changed by another session.  Review the current values and save again.");
+        }
+
+        await configAuditor.RecordClassifierSettingsWriteAsync(
+            user.Username,
+            before,
+            result.Settings,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(ClassifierSettingsConfigurationPath, status: "Classifier settings saved.");
+    }
+
     internal static async Task<IResult> SavePolicyPostureAsync(
         HttpContext context,
         IAntiforgery antiforgery,
@@ -1963,6 +2026,89 @@ public static class AdminConfigurationEndpoints
         };
 
         if (!PolicyThresholdSettingsValidator.TryValidate(settings, out error))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryReadClassifierSettings(
+        IFormCollection form,
+        ClassifierSettings? current,
+        out ClassifierSettings settings,
+        out string error)
+    {
+        settings = current ?? new ClassifierSettings
+        {
+            Id = ClassifierSettings.FixedId,
+            RowVersion = 0,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = "admin",
+        };
+        error = string.Empty;
+
+        if (!double.TryParse(
+                form["scoreForFullConfidence"].ToString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var scoreForFullConfidence)
+            || !double.TryParse(
+                form["severityPerScorePoint"].ToString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var severityPerScorePoint)
+            || !double.TryParse(
+                form["blockRecommendationScore"].ToString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var blockRecommendationScore))
+        {
+            error = ClassifierSettingsValidator.PositiveScoreError;
+            return false;
+        }
+
+        if (!int.TryParse(
+                form["repeatConfidenceMinEvents"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var repeatConfidenceMinEvents))
+        {
+            error = ClassifierSettingsValidator.RepeatMinEventsError;
+            return false;
+        }
+
+        if (!double.TryParse(
+                form["repeatConfidenceCoefficient"].ToString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var repeatConfidenceCoefficient))
+        {
+            error = ClassifierSettingsValidator.RepeatCoefficientError;
+            return false;
+        }
+
+        if (!double.TryParse(
+                form["repeatConfidenceBonusCap"].ToString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var repeatConfidenceBonusCap))
+        {
+            error = ClassifierSettingsValidator.RepeatBonusCapError;
+            return false;
+        }
+
+        settings = settings with
+        {
+            ScoreForFullConfidence = scoreForFullConfidence,
+            SeverityPerScorePoint = severityPerScorePoint,
+            BlockRecommendationScore = blockRecommendationScore,
+            RepeatConfidenceMinEvents = repeatConfidenceMinEvents,
+            RepeatConfidenceCoefficient = repeatConfidenceCoefficient,
+            RepeatConfidenceBonusCap = repeatConfidenceBonusCap,
+        };
+
+        if (!ClassifierSettingsValidator.TryValidate(settings, out error))
         {
             return false;
         }

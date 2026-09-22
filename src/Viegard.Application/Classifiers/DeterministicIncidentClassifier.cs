@@ -12,7 +12,8 @@ namespace Viegard.Application.Classifiers;
 /// </summary>
 public sealed class DeterministicIncidentClassifier(
     IIncidentStore incidentStore,
-    IOptions<ClassifierOptions> options) : IClassifier
+    IOptions<ClassifierOptions> options,
+    ClassifierSettingsSource settingsSource) : IClassifier
 {
     public const string Id = "deterministic-evidence-v1";
     private const int MaxReasons = 10;
@@ -41,11 +42,18 @@ public sealed class DeterministicIncidentClassifier(
         }
 
         var classifierOptions = options.Value;
+        var classifierValues = settingsSource.CurrentValues(classifierOptions);
         var evidence = incident.Evidence ?? [];
         var totalScore = Math.Max(0.0, evidence.Sum(e => double.IsFinite(e.Score) ? e.Score : 0.0));
-        var confidence = Math.Clamp(totalScore / classifierOptions.ScoreForFullConfidence, 0.0, 1.0);
+        var baseConfidence = Math.Clamp(totalScore / classifierValues.ScoreForFullConfidence, 0.0, 1.0);
+        var repeatBonus = incident.EventIds.Count >= classifierValues.RepeatConfidenceMinEvents
+            ? Math.Min(
+                classifierValues.RepeatConfidenceBonusCap,
+                classifierValues.RepeatConfidenceCoefficient * Math.Log2(incident.EventIds.Count))
+            : 0.0;
+        var confidence = Math.Clamp(baseConfidence + repeatBonus, 0.0, 1.0);
         var severity = (int)Math.Clamp(
-            Math.Round(totalScore * classifierOptions.SeverityPerScorePoint, MidpointRounding.AwayFromZero),
+            Math.Round(totalScore * classifierValues.SeverityPerScorePoint, MidpointRounding.AwayFromZero),
             Classification.MinSeverity,
             Classification.MaxSeverity);
         var topEvidence = evidence
@@ -68,7 +76,7 @@ public sealed class DeterministicIncidentClassifier(
                 .Select(e => e.Description)
                 .Take(MaxReasons)
                 .ToList(),
-            RecommendedAction = RecommendAction(incident, totalScore, classifierOptions),
+            RecommendedAction = RecommendAction(incident, totalScore, classifierValues),
             CreatedAt = DateTimeOffset.UtcNow,
         };
 
@@ -116,9 +124,9 @@ public sealed class DeterministicIncidentClassifier(
         return "suspicious-activity";
     }
 
-    private static string RecommendAction(Incident incident, double totalScore, ClassifierOptions options) =>
+    private static string RecommendAction(Incident incident, double totalScore, ClassifierValues values) =>
         incident.CorrelationKey.StartsWith("ip=", StringComparison.OrdinalIgnoreCase)
-            && totalScore >= options.BlockRecommendationScore
+            && totalScore >= values.BlockRecommendationScore
             ? "block-source-ip"
             : "flag-for-review";
 

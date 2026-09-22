@@ -11,6 +11,7 @@ using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Configuration;
 using Viegard.Application.Audit;
 using Viegard.Application.Auth;
+using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
 using Viegard.Application.Queues;
@@ -603,6 +604,96 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Save_classifier_settings_persists_values_and_writes_config_audit()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.ClassifierSettings.UpdateAsync(
+            ClassifierSettingsValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = ClassifierSettingsForm(
+            rowVersion: 1,
+            scoreForFullConfidence: 6.0,
+            severityPerScorePoint: 2.5,
+            blockRecommendationScore: 3.5,
+            repeatConfidenceMinEvents: 5,
+            repeatConfidenceCoefficient: 0.1,
+            repeatConfidenceBonusCap: 0.25);
+
+        var result = await fixture.InvokeSaveClassifierSettingsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Classifier%20settings%20saved", location, StringComparison.Ordinal);
+        var settings = await fixture.ClassifierSettings.GetAsync();
+        Assert.Equal(6.0, settings!.ScoreForFullConfidence);
+        Assert.Equal(2.5, settings.SeverityPerScorePoint);
+        Assert.Equal(3.5, settings.BlockRecommendationScore);
+        Assert.Equal(5, settings.RepeatConfidenceMinEvents);
+        Assert.Equal(0.1, settings.RepeatConfidenceCoefficient);
+        Assert.Equal(0.25, settings.RepeatConfidenceBonusCap);
+        Assert.Equal(2, settings.RowVersion);
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("changed classifier settings", audit.Summary, StringComparison.Ordinal);
+        Assert.Contains("ClassifierSettingsChanged", audit.DetailJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Save_classifier_settings_rejects_invalid_values_without_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.ClassifierSettings.UpdateAsync(
+            ClassifierSettingsValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = ClassifierSettingsForm(
+            rowVersion: 1,
+            scoreForFullConfidence: 5.0,
+            severityPerScorePoint: 2.0,
+            blockRecommendationScore: 3.0,
+            repeatConfidenceMinEvents: 4,
+            repeatConfidenceCoefficient: 0.08,
+            repeatConfidenceBonusCap: 1.5);
+
+        var result = await fixture.InvokeSaveClassifierSettingsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains(Uri.EscapeDataString(ClassifierSettingsValidator.RepeatBonusCapError), location, StringComparison.Ordinal);
+        var settings = await fixture.ClassifierSettings.GetAsync();
+        Assert.Equal(0.30, settings!.RepeatConfidenceBonusCap);
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Save_classifier_settings_returns_friendly_error_on_version_conflict()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.ClassifierSettings.UpdateAsync(
+            ClassifierSettingsValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = ClassifierSettingsForm(
+            rowVersion: 0,
+            scoreForFullConfidence: 6.0,
+            severityPerScorePoint: 2.0,
+            blockRecommendationScore: 3.0,
+            repeatConfidenceMinEvents: 4,
+            repeatConfidenceCoefficient: 0.08,
+            repeatConfidenceBonusCap: 0.30);
+
+        var result = await fixture.InvokeSaveClassifierSettingsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Classifier%20settings%20were%20changed", location, StringComparison.Ordinal);
+        var settings = await fixture.ClassifierSettings.GetAsync();
+        Assert.Equal(5.0, settings!.ScoreForFullConfidence);
+        Assert.Equal(1, settings.RowVersion);
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
     public async Task Request_host_upgrade_queues_command_and_writes_minimal_audit_detail()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
@@ -1007,6 +1098,31 @@ public sealed class AdminConfigurationEndpointsTests
         UpdatedBy = "test",
     };
 
+    private static FormCollection ClassifierSettingsForm(
+        int rowVersion,
+        double scoreForFullConfidence,
+        double severityPerScorePoint,
+        double blockRecommendationScore,
+        int repeatConfidenceMinEvents,
+        double repeatConfidenceCoefficient,
+        double repeatConfidenceBonusCap) => new(
+        new Dictionary<string, StringValues>(StringComparer.Ordinal)
+        {
+            ["rowVersion"] = rowVersion.ToString(CultureInfo.InvariantCulture),
+            ["scoreForFullConfidence"] = scoreForFullConfidence.ToString(CultureInfo.InvariantCulture),
+            ["severityPerScorePoint"] = severityPerScorePoint.ToString(CultureInfo.InvariantCulture),
+            ["blockRecommendationScore"] = blockRecommendationScore.ToString(CultureInfo.InvariantCulture),
+            ["repeatConfidenceMinEvents"] = repeatConfidenceMinEvents.ToString(CultureInfo.InvariantCulture),
+            ["repeatConfidenceCoefficient"] = repeatConfidenceCoefficient.ToString(CultureInfo.InvariantCulture),
+            ["repeatConfidenceBonusCap"] = repeatConfidenceBonusCap.ToString(CultureInfo.InvariantCulture),
+        });
+
+    private static ClassifierSettings ClassifierSettingsValue() => new()
+    {
+        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedBy = "test",
+    };
+
     private static JetPackFeedSettings JetPackSettings(
         string feedUrl = JetPackFeedSettings.DefaultFeedUrl,
         TimeSpan? fetchInterval = null,
@@ -1085,6 +1201,7 @@ public sealed class AdminConfigurationEndpointsTests
         InMemoryJetPackFeedSettingsStore JetPackSettings,
         InMemoryPolicyThresholdSettingsStore PolicyThresholds,
         InMemoryPolicyPostureSettingsStore PolicyPosture,
+        InMemoryClassifierSettingsStore ClassifierSettings,
         RecordingAuditLedger AuditLedger,
         DateTimeOffset Now,
         NoopAntiforgery Antiforgery,
@@ -1152,6 +1269,7 @@ public sealed class AdminConfigurationEndpointsTests
             var jetPackSettings = new InMemoryJetPackFeedSettingsStore();
             var policyThresholds = new InMemoryPolicyThresholdSettingsStore();
             var policyPosture = new InMemoryPolicyPostureSettingsStore();
+            var classifierSettings = new InMemoryClassifierSettingsStore();
             var satelliteCredentialCookie = new SatelliteRoleCredentialCookie(new NoopDataProtectionProvider());
             var services = new ServiceCollection()
                 .AddLogging()
@@ -1177,6 +1295,7 @@ public sealed class AdminConfigurationEndpointsTests
                 jetPackSettings,
                 policyThresholds,
                 policyPosture,
+                classifierSettings,
                 auditLedger,
                 now,
                 new NoopAntiforgery(),
@@ -1273,6 +1392,16 @@ public sealed class AdminConfigurationEndpointsTests
                 Context,
                 Antiforgery,
                 PolicyThresholds,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeSaveClassifierSettingsAsync() =>
+            AdminConfigurationEndpoints.SaveClassifierSettingsAsync(
+                Context,
+                Antiforgery,
+                ClassifierSettings,
                 Users,
                 Sessions,
                 AuthAuditor,

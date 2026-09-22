@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Viegard.Application.Classifiers;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
 using Viegard.Application.Retention;
@@ -867,6 +868,34 @@ internal static class Mapping
         ReviewConfidence = row.ReviewConfidence,
         ActionConfidence = row.ActionConfidence,
         ActionMinSeverity = row.ActionMinSeverity,
+        RowVersion = row.RowVersion,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+    };
+
+    public static ClassifierSettingsRow ToRow(this ClassifierSettings settings) => new()
+    {
+        Id = settings.Id,
+        ScoreForFullConfidence = settings.ScoreForFullConfidence,
+        SeverityPerScorePoint = settings.SeverityPerScorePoint,
+        BlockRecommendationScore = settings.BlockRecommendationScore,
+        RepeatConfidenceMinEvents = settings.RepeatConfidenceMinEvents,
+        RepeatConfidenceCoefficient = settings.RepeatConfidenceCoefficient,
+        RepeatConfidenceBonusCap = settings.RepeatConfidenceBonusCap,
+        RowVersion = settings.RowVersion,
+        UpdatedAt = Utc(settings.UpdatedAt),
+        UpdatedBy = settings.UpdatedBy,
+    };
+
+    public static ClassifierSettings ToDomain(this ClassifierSettingsRow row) => new()
+    {
+        Id = row.Id,
+        ScoreForFullConfidence = row.ScoreForFullConfidence,
+        SeverityPerScorePoint = row.SeverityPerScorePoint,
+        BlockRecommendationScore = row.BlockRecommendationScore,
+        RepeatConfidenceMinEvents = row.RepeatConfidenceMinEvents,
+        RepeatConfidenceCoefficient = row.RepeatConfidenceCoefficient,
+        RepeatConfidenceBonusCap = row.RepeatConfidenceBonusCap,
         RowVersion = row.RowVersion,
         UpdatedAt = row.UpdatedAt,
         UpdatedBy = row.UpdatedBy,

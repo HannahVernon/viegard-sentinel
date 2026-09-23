@@ -10,6 +10,7 @@
 @inject IClassifierSettingsStore ClassifierSettingsStore
 @inject Viegard.Application.Burst.IBurstDetectionSettingsStore BurstDetectionSettingsStore
 @inject Viegard.Application.Coalescing.IIncidentCoalescingSettingsStore IncidentCoalescingSettingsStore
+@inject ISessionSecuritySettingsStore SessionSecuritySettingsStore
 @inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
 @inject IIngestionFilterStore IngestionFilters
 @inject ISatelliteRoleStore SatelliteRoles
@@ -19,7 +20,8 @@
 @inject IAdminUserStore Users
 @inject IAdminSessionStore Sessions
 @inject IHttpContextAccessor HttpContextAccessor
-@inject IOptions<AdminAuthOptions> AuthOptions
+@inject SessionSecuritySettingsSource SessionSecuritySettings
+@inject IOptions<SessionSecurityOptions> SessionSecurityOptions
 @inject IOptions<PolicyOptions> PolicyOptions
 @inject IOptions<ClassifierOptions> ClassifierOptions
 @inject IOptions<Viegard.Application.Burst.BurstDetectionOptions> BurstDetectionOptions
@@ -42,6 +44,7 @@
         <a href="/configuration#classifier-settings">Classifier settings</a>
         <a href="/configuration#burst-detection">Burst detection</a>
         <a href="/configuration#incident-coalescing">Incident coalescing</a>
+        <a href="/configuration#session-security">Session security</a>
         <a href="/configuration#thresholds">Policy thresholds</a>
         <a href="/configuration#posture">Policy posture</a>
         <a href="/configuration#ingestion">Ingestion</a>
@@ -1425,6 +1428,82 @@
         }
     </section>
 
+    <section id="session-security" class="indexed">
+        <h2>Session security</h2>
+        <p class="small">These tunables govern step-up verification.  Step-up validity is how long a verification stays fresh (each verified action renews the window).  The resume-stash lifetime is how long a step-up-gated action (Approve, Reject, or a settings save) is held so it can be replayed after you complete verification, instead of being discarded.</p>
+
+        <h3>Status</h3>
+        <dl class="detail-list">
+            <dt>Settings row</dt><dd>@SessionSecuritySettingsState</dd>
+            <dt>Version</dt><dd>@(_sessionSecuritySettings?.RowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")</dd>
+            <dt>Last changed</dt><dd>@SessionSecuritySettingsLastChanged</dd>
+        </dl>
+
+        @if (_sessionSecuritySettings is null)
+        {
+            <p class="message">Showing deployment defaults.  The settings row seeds on the next admin-API startup unless an admin saves values first.</p>
+        }
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Knob</th>
+                    <th>Effective value</th>
+                    <th>Meaning</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>StepUpValiditySeconds</code></td>
+                    <td>@SessionSecurityValues.StepUpValiditySeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)</td>
+                    <td>Seconds a step-up verification stays valid.  Each verified sensitive action renews the window; idle time beyond this requires a fresh verification.</td>
+                </tr>
+                <tr>
+                    <td><code>ResumeStashTtlSeconds</code></td>
+                    <td>@SessionSecurityValues.ResumeStashTtlSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)</td>
+                    <td>Seconds a captured step-up-gated action waits to be resumed after verification.  Complete step-up within this window for the original action to replay.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Edit session-security settings</h3>
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/session-security" class="edit-form">
+                <AntiforgeryToken />
+                <input type="hidden" name="rowVersion" value="@(_sessionSecuritySettings?.RowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")" />
+                <label>
+                    Step-up validity (seconds)
+                    <input name="stepUpValiditySeconds"
+                           type="number"
+                           min="1"
+                           step="1"
+                           value="@SessionSecurityValues.StepUpValiditySeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                           required />
+                    <span class="small">How long a step-up verification stays fresh.</span>
+                </label>
+                <label>
+                    Resume-stash lifetime (seconds)
+                    <input name="resumeStashTtlSeconds"
+                           type="number"
+                           min="1"
+                           step="1"
+                           value="@SessionSecurityValues.ResumeStashTtlSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                           required />
+                    <span class="small">How long a captured action waits to be resumed after verification.</span>
+                </label>
+                <button type="submit">Save session-security settings</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Editing session-security settings requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#session-security" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-session-security" />
+            </div>
+        }
+    </section>
+
     <section id="thresholds" class="indexed">
         <h2>Policy thresholds</h2>
         <p class="small">Review confidence is the propose-for-approval gate.  Action confidence is the automatic-action band; unattended actions remain disabled by posture.</p>
@@ -1691,6 +1770,7 @@
     private ClassifierSettings? _classifierSettings;
     private Viegard.Application.Burst.BurstDetectionSettings? _burstSettings;
     private Viegard.Application.Coalescing.IncidentCoalescingSettings? _coalescingSettings;
+    private SessionSecuritySettings? _sessionSecuritySettings;
     private PolicyPostureSettings? _postureSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
     private IReadOnlyDictionary<string, IngestionFilter> _mdaemonFilters = new Dictionary<string, IngestionFilter>(StringComparer.Ordinal);
@@ -1826,6 +1906,17 @@
         ? "Not seeded.  Showing deployment defaults; the settings row seeds on next maintenance startup."
         : $"{_coalescingSettings.UpdatedBy} at {Display.Format(_coalescingSettings.UpdatedAt)}";
 
+    private SessionSecurityValues SessionSecurityValues =>
+        _sessionSecuritySettings?.ToValues() ?? SessionSecuritySettings.CurrentValues(SessionSecurityOptions.Value);
+
+    private string SessionSecuritySettingsState => _sessionSecuritySettings is null
+        ? "Not seeded"
+        : "Database-owned";
+
+    private string SessionSecuritySettingsLastChanged => _sessionSecuritySettings is null
+        ? "Not seeded.  Showing deployment defaults; the settings row seeds on next admin-API startup."
+        : $"{_sessionSecuritySettings.UpdatedBy} at {Display.Format(_sessionSecuritySettings.UpdatedAt)}";
+
     private string ThresholdSettingsState => _thresholdSettings is null
         ? "Not seeded"
         : "Database-owned";
@@ -1860,6 +1951,7 @@
         _classifierSettings = await ClassifierSettingsStore.GetAsync().ConfigureAwait(false);
         _burstSettings = await BurstDetectionSettingsStore.GetAsync().ConfigureAwait(false);
         _coalescingSettings = await IncidentCoalescingSettingsStore.GetAsync().ConfigureAwait(false);
+        _sessionSecuritySettings = await SessionSecuritySettingsStore.GetAsync().ConfigureAwait(false);
         _postureSettings = await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
         _mdaemonFilters = (await IngestionFilters
@@ -1886,7 +1978,7 @@
         if (Guid.TryParse(context.User.FindFirstValue(AdminCookieNames.SessionIdClaim), out var sessionId))
         {
             var session = await Sessions.GetAsync(sessionId).ConfigureAwait(false);
-            _stepUpFresh = session?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
+            _stepUpFresh = session?.StepUpAt?.Add(SessionSecuritySettings.CurrentValues(SessionSecurityOptions.Value).StepUpValidity) >= DateTimeOffset.UtcNow;
         }
 
         if (Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))

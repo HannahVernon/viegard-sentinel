@@ -7,7 +7,8 @@
 @inject RecoveryCodesCookie RecoveryCodesCookie
 @inject NewAppPasswordCookie NewAppPasswordCookie
 @inject IAppPasswordStore AppPasswords
-@inject IOptions<AdminAuthOptions> AuthOptions
+@inject SessionSecuritySettingsSource SessionSecuritySettings
+@inject IOptions<SessionSecurityOptions> SessionSecurityOptions
 @inject UserDisplay Display
 
 <PageTitle>Account</PageTitle>
@@ -433,7 +434,7 @@
             _currentSession = _sessions.FirstOrDefault(s => s.Id == sessionId);
         }
 
-        _stepUpFresh = _currentSession?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
+        _stepUpFresh = _currentSession?.StepUpAt?.Add(SessionSecuritySettings.CurrentValues(SessionSecurityOptions.Value).StepUpValidity) >= DateTimeOffset.UtcNow;
         _newRecoveryCodes = RecoveryCodesCookie.ReadAndClear(context);
         _appPasswords = await AppPasswords.ListForUserAsync(userId, context.RequestAborted).ConfigureAwait(false);
         _newAppPasswordToken = NewAppPasswordCookie.ReadAndClear(context);

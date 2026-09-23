@@ -4,7 +4,8 @@
 @inject IAdminErrorStore AdminErrors
 @inject IAdminUserStore Users
 @inject IAdminSessionStore Sessions
-@inject IOptions<AdminAuthOptions> AuthOptions
+@inject SessionSecuritySettingsSource SessionSecuritySettings
+@inject IOptions<SessionSecurityOptions> SessionSecurityOptions
 @inject IHttpContextAccessor HttpContextAccessorService
 @inject UserDisplay Display
 
@@ -89,7 +90,7 @@
         if (Guid.TryParse(context.User.FindFirstValue(AdminCookieNames.SessionIdClaim), out var sessionId))
         {
             var session = await Sessions.GetAsync(sessionId).ConfigureAwait(false);
-            _stepUpFresh = session?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
+            _stepUpFresh = session?.StepUpAt?.Add(SessionSecuritySettings.CurrentValues(SessionSecurityOptions.Value).StepUpValidity) >= DateTimeOffset.UtcNow;
         }
 
         if (Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))

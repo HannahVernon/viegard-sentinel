@@ -690,6 +690,21 @@ public sealed class IncidentCoalescingSettingsRow
     public string UpdatedBy { get; set; } = string.Empty;
 }
 
+public sealed class SessionSecuritySettingsRow
+{
+    public int Id { get; set; }
+
+    public int StepUpValiditySeconds { get; set; }
+
+    public int ResumeStashTtlSeconds { get; set; }
+
+    public int RowVersion { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+}
+
 public sealed class BurstWindowRow
 {
     public long Id { get; set; }

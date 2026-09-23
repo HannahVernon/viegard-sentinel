@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Signatures;
+using Viegard.Application.Auth;
 using Viegard.Application.Detection;
 using Viegard.Application.Stores;
 using Viegard.Domain;
@@ -283,6 +284,9 @@ public sealed class AdminSignatureEndpointTests
                 RequestServices = new ServiceCollection()
                     .AddLogging()
                     .AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider())
+                    .AddSingleton<IOptions<SessionSecurityOptions>>(Options.Create(new SessionSecurityOptions()))
+                    .AddSingleton(new SessionSecuritySettingsSource())
+                    .AddSingleton<IPendingStepUpActionStore, InMemoryPendingStepUpActionStore>()
                     .BuildServiceProvider(),
                 User = new ClaimsPrincipal(new ClaimsIdentity(
                 [

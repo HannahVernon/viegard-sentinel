@@ -86,6 +86,10 @@ public sealed class AdminStepUpGateTests
     {
         var services = new ServiceCollection()
             .AddSingleton<IOptions<AdminAuthOptions>>(Options.Create(new AdminAuthOptions { StepUpValidity = validity }))
+            .AddSingleton<IOptions<SessionSecurityOptions>>(Options.Create(
+                new SessionSecurityOptions { StepUpValiditySeconds = (int)validity.TotalSeconds }))
+            .AddSingleton(new SessionSecuritySettingsSource())
+            .AddSingleton<IPendingStepUpActionStore, InMemoryPendingStepUpActionStore>()
             .BuildServiceProvider();
         var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()) };
         if (sessionId is { } id)

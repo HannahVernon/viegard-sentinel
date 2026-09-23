@@ -256,6 +256,9 @@ public sealed class AdminAppPasswordEndpointsTests
         var services = new ServiceCollection()
             .AddLogging()
             .AddSingleton<IDataProtectionProvider>(dataProtection)
+            .AddSingleton<IOptions<SessionSecurityOptions>>(Options.Create(new SessionSecurityOptions()))
+            .AddSingleton(new SessionSecuritySettingsSource())
+            .AddSingleton<IPendingStepUpActionStore, InMemoryPendingStepUpActionStore>()
             .BuildServiceProvider();
         var context = new DefaultHttpContext
         {

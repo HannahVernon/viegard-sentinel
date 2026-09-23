@@ -77,6 +77,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<IncidentCoalescingSettingsRow> IncidentCoalescingSettings => Set<IncidentCoalescingSettingsRow>();
 
+    public DbSet<SessionSecuritySettingsRow> SessionSecuritySettings => Set<SessionSecuritySettingsRow>();
+
     public DbSet<BurstWindowRow> BurstWindows => Set<BurstWindowRow>();
 
     public DbSet<BurstCooldownRow> BurstCooldowns => Set<BurstCooldownRow>();
@@ -450,6 +452,15 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Coalescing.IncidentCoalescingSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<SessionSecuritySettingsRow>(entity =>
+        {
+            entity.ToTable("session_security_settings", table =>
+                table.HasCheckConstraint("CK_session_security_settings_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Auth.SessionSecuritySettings.MaxUpdatedByLength);
         });
 
         modelBuilder.Entity<BurstWindowRow>(entity =>

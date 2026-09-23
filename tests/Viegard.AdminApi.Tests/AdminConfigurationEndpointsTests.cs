@@ -886,6 +886,76 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Save_session_security_settings_persists_values_and_writes_config_audit()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.SessionSecurity.UpdateAsync(
+            SessionSecurityValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = SessionSecurityForm(
+            rowVersion: 1,
+            stepUpValiditySeconds: 240,
+            resumeStashTtlSeconds: 900);
+
+        var result = await fixture.InvokeSaveSessionSecuritySettingsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Session-security%20settings%20saved", location, StringComparison.Ordinal);
+        var settings = await fixture.SessionSecurity.GetAsync();
+        Assert.Equal(240, settings!.StepUpValiditySeconds);
+        Assert.Equal(900, settings.ResumeStashTtlSeconds);
+        Assert.Equal(2, settings.RowVersion);
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("SessionSecuritySettingsChanged", audit.DetailJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Save_session_security_settings_rejects_invalid_value_without_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.SessionSecurity.UpdateAsync(
+            SessionSecurityValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = SessionSecurityForm(
+            rowVersion: 1,
+            stepUpValiditySeconds: 0,
+            resumeStashTtlSeconds: 900);
+
+        var result = await fixture.InvokeSaveSessionSecuritySettingsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains(Uri.EscapeDataString(SessionSecuritySettingsValidator.StepUpValidityError), location, StringComparison.Ordinal);
+        var settings = await fixture.SessionSecurity.GetAsync();
+        Assert.Equal(300, settings!.StepUpValiditySeconds);
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Save_session_security_settings_without_step_up_captures_pending_action()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        fixture.Context.Request.Path = "/configuration/session-security";
+        fixture.Context.Request.Form = SessionSecurityForm(
+            rowVersion: 0,
+            stepUpValiditySeconds: 240,
+            resumeStashTtlSeconds: 900);
+
+        var result = await fixture.InvokeSaveSessionSecuritySettingsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        var store = fixture.Context.RequestServices.GetRequiredService<IPendingStepUpActionStore>();
+        Assert.True(StepUpResume.TryGetSessionId(fixture.Context, out var sessionId));
+        Assert.True(store.TryPeek(sessionId, DateTimeOffset.UtcNow, out var pending));
+        Assert.Equal("/configuration/session-security", pending.Path);
+        Assert.Contains(pending.Form, field => field.Key == "stepUpValiditySeconds");
+    }
+
+    [Fact]
     public async Task Request_host_upgrade_queues_command_and_writes_minimal_audit_detail()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
@@ -1383,6 +1453,27 @@ public sealed class AdminConfigurationEndpointsTests
         UpdatedBy = "test",
     };
 
+    private static FormCollection SessionSecurityForm(
+        int rowVersion,
+        int stepUpValiditySeconds,
+        int resumeStashTtlSeconds)
+    {
+        var fields = new Dictionary<string, StringValues>(StringComparer.Ordinal)
+        {
+            ["rowVersion"] = rowVersion.ToString(CultureInfo.InvariantCulture),
+            ["stepUpValiditySeconds"] = stepUpValiditySeconds.ToString(CultureInfo.InvariantCulture),
+            ["resumeStashTtlSeconds"] = resumeStashTtlSeconds.ToString(CultureInfo.InvariantCulture),
+        };
+
+        return new FormCollection(fields);
+    }
+
+    private static SessionSecuritySettings SessionSecurityValue() => new()
+    {
+        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedBy = "test",
+    };
+
     private static JetPackFeedSettings JetPackSettings(
         string feedUrl = JetPackFeedSettings.DefaultFeedUrl,
         TimeSpan? fetchInterval = null,
@@ -1464,6 +1555,7 @@ public sealed class AdminConfigurationEndpointsTests
         InMemoryClassifierSettingsStore ClassifierSettings,
         InMemoryBurstDetectionSettingsStore BurstDetection,
         InMemoryIncidentCoalescingSettingsStore Coalescing,
+        InMemorySessionSecuritySettingsStore SessionSecurity,
         RecordingAuditLedger AuditLedger,
         DateTimeOffset Now,
         NoopAntiforgery Antiforgery,
@@ -1534,11 +1626,15 @@ public sealed class AdminConfigurationEndpointsTests
             var classifierSettings = new InMemoryClassifierSettingsStore();
             var burstDetection = new InMemoryBurstDetectionSettingsStore();
             var coalescing = new InMemoryIncidentCoalescingSettingsStore();
+            var sessionSecurity = new InMemorySessionSecuritySettingsStore();
             var satelliteCredentialCookie = new SatelliteRoleCredentialCookie(new NoopDataProtectionProvider());
             var services = new ServiceCollection()
                 .AddLogging()
                 .AddSingleton<IOptions<AdminAuthOptions>>(Options.Create(new AdminAuthOptions()))
                 .AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider())
+                .AddSingleton<IOptions<SessionSecurityOptions>>(Options.Create(new SessionSecurityOptions()))
+                .AddSingleton(new SessionSecuritySettingsSource())
+                .AddSingleton<IPendingStepUpActionStore, InMemoryPendingStepUpActionStore>()
                 .BuildServiceProvider();
 
             var context = new DefaultHttpContext
@@ -1562,6 +1658,7 @@ public sealed class AdminConfigurationEndpointsTests
                 classifierSettings,
                 burstDetection,
                 coalescing,
+                sessionSecurity,
                 auditLedger,
                 now,
                 new NoopAntiforgery(),
@@ -1688,6 +1785,16 @@ public sealed class AdminConfigurationEndpointsTests
                 Context,
                 Antiforgery,
                 Coalescing,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeSaveSessionSecuritySettingsAsync() =>
+            AdminConfigurationEndpoints.SaveSessionSecuritySettingsAsync(
+                Context,
+                Antiforgery,
+                SessionSecurity,
                 Users,
                 Sessions,
                 AuthAuditor,

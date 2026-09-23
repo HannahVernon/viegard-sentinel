@@ -4,7 +4,8 @@
 @inject IActionStore ActionStore
 @inject IAdminUserStore Users
 @inject IAdminSessionStore Sessions
-@inject IOptions<AdminAuthOptions> AuthOptions
+@inject SessionSecuritySettingsSource SessionSecuritySettings
+@inject IOptions<SessionSecurityOptions> SessionSecurityOptions
 @inject UserDisplay Display
 @inject IHttpContextAccessor HttpContextAccessorService
 
@@ -145,7 +146,7 @@
         if (Guid.TryParse(context.User.FindFirstValue(AdminCookieNames.SessionIdClaim), out var sessionId))
         {
             var session = await Sessions.GetAsync(sessionId).ConfigureAwait(false);
-            _hasFreshStepUp = session?.StepUpAt?.Add(AuthOptions.Value.StepUpValidity) >= DateTimeOffset.UtcNow;
+            _hasFreshStepUp = session?.StepUpAt?.Add(SessionSecuritySettings.CurrentValues(SessionSecurityOptions.Value).StepUpValidity) >= DateTimeOffset.UtcNow;
         }
 
         _hasSecurityKeys = await HasSecurityKeysAsync(context).ConfigureAwait(false);

@@ -64,7 +64,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         // 180d window) age into purge eligibility ~24h after the run that
         // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_injection_patterns, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry, classifier_settings, burst_detection_settings, burst_windows, burst_cooldowns, incident_coalescing_settings");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_injection_patterns, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry, classifier_settings, burst_detection_settings, burst_windows, burst_cooldowns, incident_coalescing_settings, session_security_settings");
     }
 
     public async Task DisposeAsync()
@@ -1894,6 +1894,51 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
 
         var conflict = await writer.UpdateAsync(
             updated.Settings with { SettleWindowSeconds = 5 },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "stale",
+            updatedAt: now.AddMinutes(2));
+
+        Assert.False(conflict.Succeeded);
+        Assert.Equal(2, conflict.Settings!.RowVersion);
+    }
+
+    [PostgresFact]
+    public async Task Session_security_settings_store_creates_updates_and_conflicts()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var writer = new PostgresSessionSecuritySettingsStore(factory, _dataSource!);
+        var now = new DateTimeOffset(2026, 9, 23, 14, 30, 0, TimeSpan.Zero);
+
+        var saved = await writer.UpdateAsync(
+            new SessionSecuritySettings
+            {
+                StepUpValiditySeconds = 240,
+                ResumeStashTtlSeconds = 900,
+                UpdatedAt = now,
+                UpdatedBy = "hannah",
+            },
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: now);
+
+        Assert.True(saved.Succeeded);
+        var savedSettings = saved.Settings!;
+        Assert.Equal(1, savedSettings.RowVersion);
+        Assert.Equal(240, savedSettings.StepUpValiditySeconds);
+        Assert.Equal(900, savedSettings.ResumeStashTtlSeconds);
+
+        var updated = await writer.UpdateAsync(
+            savedSettings with { StepUpValiditySeconds = 180 },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "operator",
+            updatedAt: now.AddMinutes(1));
+
+        Assert.True(updated.Succeeded);
+        Assert.Equal(180, updated.Settings!.StepUpValiditySeconds);
+        Assert.Equal(2, updated.Settings.RowVersion);
+
+        var conflict = await writer.UpdateAsync(
+            updated.Settings with { StepUpValiditySeconds = 60 },
             expectedRowVersion: savedSettings.RowVersion,
             updatedBy: "stale",
             updatedAt: now.AddMinutes(2));

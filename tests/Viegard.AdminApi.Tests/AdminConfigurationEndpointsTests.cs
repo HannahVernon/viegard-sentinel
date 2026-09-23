@@ -13,6 +13,7 @@ using Viegard.Application.Audit;
 using Viegard.Application.Auth;
 using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
+using Viegard.Application.Coalescing;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
 using Viegard.Application.Queues;
@@ -811,6 +812,80 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Save_incident_coalescing_settings_persists_values_and_writes_config_audit()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.Coalescing.UpdateAsync(
+            IncidentCoalescingValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = IncidentCoalescingForm(
+            rowVersion: 1,
+            enabled: true,
+            settleWindowSeconds: 15,
+            maxCoalesceWindowSeconds: 120);
+
+        var result = await fixture.InvokeSaveIncidentCoalescingSettingsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Incident-coalescing%20settings%20saved", location, StringComparison.Ordinal);
+        var settings = await fixture.Coalescing.GetAsync();
+        Assert.True(settings!.Enabled);
+        Assert.Equal(15, settings.SettleWindowSeconds);
+        Assert.Equal(120, settings.MaxCoalesceWindowSeconds);
+        Assert.Equal(2, settings.RowVersion);
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("IncidentCoalescingSettingsChanged", audit.DetailJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Save_incident_coalescing_settings_unchecked_box_disables_flag()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.Coalescing.UpdateAsync(
+            IncidentCoalescingValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = IncidentCoalescingForm(
+            rowVersion: 1,
+            enabled: false,
+            settleWindowSeconds: 10,
+            maxCoalesceWindowSeconds: 300);
+
+        var result = await fixture.InvokeSaveIncidentCoalescingSettingsAsync();
+        await ExecuteRedirectAsync(result, fixture.Context);
+
+        var settings = await fixture.Coalescing.GetAsync();
+        Assert.False(settings!.Enabled);
+    }
+
+    [Fact]
+    public async Task Save_incident_coalescing_settings_rejects_invalid_window_without_mutating()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.Coalescing.UpdateAsync(
+            IncidentCoalescingValue(),
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: fixture.Now);
+        fixture.Context.Request.Form = IncidentCoalescingForm(
+            rowVersion: 1,
+            enabled: true,
+            settleWindowSeconds: 30,
+            maxCoalesceWindowSeconds: 10);
+
+        var result = await fixture.InvokeSaveIncidentCoalescingSettingsAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains(Uri.EscapeDataString(IncidentCoalescingSettingsValidator.MaxWindowError), location, StringComparison.Ordinal);
+        var settings = await fixture.Coalescing.GetAsync();
+        Assert.Equal(10, settings!.SettleWindowSeconds);
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
     public async Task Request_host_upgrade_queues_command_and_writes_minimal_audit_detail()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
@@ -1281,6 +1356,33 @@ public sealed class AdminConfigurationEndpointsTests
         UpdatedBy = "test",
     };
 
+    private static FormCollection IncidentCoalescingForm(
+        int rowVersion,
+        bool enabled,
+        int settleWindowSeconds,
+        int maxCoalesceWindowSeconds)
+    {
+        var fields = new Dictionary<string, StringValues>(StringComparer.Ordinal)
+        {
+            ["rowVersion"] = rowVersion.ToString(CultureInfo.InvariantCulture),
+            ["settleWindowSeconds"] = settleWindowSeconds.ToString(CultureInfo.InvariantCulture),
+            ["maxCoalesceWindowSeconds"] = maxCoalesceWindowSeconds.ToString(CultureInfo.InvariantCulture),
+        };
+
+        if (enabled)
+        {
+            fields["enabled"] = "true";
+        }
+
+        return new FormCollection(fields);
+    }
+
+    private static IncidentCoalescingSettings IncidentCoalescingValue() => new()
+    {
+        UpdatedAt = DateTimeOffset.UtcNow,
+        UpdatedBy = "test",
+    };
+
     private static JetPackFeedSettings JetPackSettings(
         string feedUrl = JetPackFeedSettings.DefaultFeedUrl,
         TimeSpan? fetchInterval = null,
@@ -1361,6 +1463,7 @@ public sealed class AdminConfigurationEndpointsTests
         InMemoryPolicyPostureSettingsStore PolicyPosture,
         InMemoryClassifierSettingsStore ClassifierSettings,
         InMemoryBurstDetectionSettingsStore BurstDetection,
+        InMemoryIncidentCoalescingSettingsStore Coalescing,
         RecordingAuditLedger AuditLedger,
         DateTimeOffset Now,
         NoopAntiforgery Antiforgery,
@@ -1430,6 +1533,7 @@ public sealed class AdminConfigurationEndpointsTests
             var policyPosture = new InMemoryPolicyPostureSettingsStore();
             var classifierSettings = new InMemoryClassifierSettingsStore();
             var burstDetection = new InMemoryBurstDetectionSettingsStore();
+            var coalescing = new InMemoryIncidentCoalescingSettingsStore();
             var satelliteCredentialCookie = new SatelliteRoleCredentialCookie(new NoopDataProtectionProvider());
             var services = new ServiceCollection()
                 .AddLogging()
@@ -1457,6 +1561,7 @@ public sealed class AdminConfigurationEndpointsTests
                 policyPosture,
                 classifierSettings,
                 burstDetection,
+                coalescing,
                 auditLedger,
                 now,
                 new NoopAntiforgery(),
@@ -1573,6 +1678,16 @@ public sealed class AdminConfigurationEndpointsTests
                 Context,
                 Antiforgery,
                 BurstDetection,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeSaveIncidentCoalescingSettingsAsync() =>
+            AdminConfigurationEndpoints.SaveIncidentCoalescingSettingsAsync(
+                Context,
+                Antiforgery,
+                Coalescing,
                 Users,
                 Sessions,
                 AuthAuditor,

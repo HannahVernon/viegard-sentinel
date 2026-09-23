@@ -5,6 +5,7 @@ using Npgsql;
 using Viegard.Application.Auth;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Burst;
+using Viegard.Application.Coalescing;
 using Viegard.Application.Configuration;
 using Viegard.Application.Detection;
 using Viegard.Application.Policy;
@@ -63,7 +64,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         // 180d window) age into purge eligibility ~24h after the run that
         // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_injection_patterns, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry, classifier_settings, burst_detection_settings, burst_windows, burst_cooldowns");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_injection_patterns, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry, classifier_settings, burst_detection_settings, burst_windows, burst_cooldowns, incident_coalescing_settings");
     }
 
     public async Task DisposeAsync()
@@ -1852,6 +1853,102 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.False(conflict.Succeeded);
         Assert.Equal(2, conflict.Settings!.RowVersion);
         Assert.Equal(8, conflict.Settings.AuthFailureThreshold);
+    }
+
+    [PostgresFact]
+    public async Task Incident_coalescing_settings_store_creates_updates_and_conflicts()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var writer = new PostgresIncidentCoalescingSettingsStore(factory, _dataSource!);
+        var now = new DateTimeOffset(2026, 9, 23, 14, 30, 0, TimeSpan.Zero);
+
+        var saved = await writer.UpdateAsync(
+            new IncidentCoalescingSettings
+            {
+                Enabled = true,
+                SettleWindowSeconds = 15,
+                MaxCoalesceWindowSeconds = 120,
+                UpdatedAt = now,
+                UpdatedBy = "hannah",
+            },
+            expectedRowVersion: 0,
+            updatedBy: "hannah",
+            updatedAt: now);
+
+        Assert.True(saved.Succeeded);
+        var savedSettings = saved.Settings!;
+        Assert.Equal(1, savedSettings.RowVersion);
+        Assert.Equal(15, savedSettings.SettleWindowSeconds);
+        Assert.Equal(120, savedSettings.MaxCoalesceWindowSeconds);
+
+        var updated = await writer.UpdateAsync(
+            savedSettings with { Enabled = false, SettleWindowSeconds = 20 },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "operator",
+            updatedAt: now.AddMinutes(1));
+
+        Assert.True(updated.Succeeded);
+        Assert.False(updated.Settings!.Enabled);
+        Assert.Equal(20, updated.Settings.SettleWindowSeconds);
+        Assert.Equal(2, updated.Settings.RowVersion);
+
+        var conflict = await writer.UpdateAsync(
+            updated.Settings with { SettleWindowSeconds = 5 },
+            expectedRowVersion: savedSettings.RowVersion,
+            updatedBy: "stale",
+            updatedAt: now.AddMinutes(2));
+
+        Assert.False(conflict.Succeeded);
+        Assert.Equal(2, conflict.Settings!.RowVersion);
+    }
+
+    [PostgresFact]
+    public async Task Incident_store_round_trips_coalescing_columns()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresIncidentStore(factory);
+        var now = new DateTimeOffset(2026, 9, 23, 14, 30, 0, TimeSpan.Zero);
+        var incident = Incident($"it-coalesce-{ViegardId.New():N}", now) with
+        {
+            CoalesceUntil = now.AddSeconds(10),
+            DecidedEventCount = 3,
+        };
+
+        await store.UpsertAsync(incident);
+        var stored = await store.GetAsync(incident.Id);
+
+        Assert.NotNull(stored);
+        Assert.Equal(now.AddSeconds(10), stored!.CoalesceUntil);
+        Assert.Equal(3, stored.DecidedEventCount);
+
+        var readyAsOf = now.AddSeconds(20);
+        var ready = await store.ListCoalescingReadyAsync(readyAsOf, 10);
+        Assert.Contains(ready, i => i.Id == incident.Id);
+
+        var coalescible = await store.FindCoalescibleByCorrelationKeyAsync(incident.CorrelationKey, now.AddSeconds(5));
+        Assert.Equal(incident.Id, coalescible!.Id);
+    }
+
+    [PostgresFact]
+    public async Task Decision_store_supersede_round_trips_and_excludes_from_queue()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var resolver = new ReferenceResolver(factory);
+        var store = new PostgresDecisionStore(factory, resolver);
+        var now = DateTimeOffset.UtcNow;
+        var pending = Decision(ViegardId.New(), $"it-supersede-{ViegardId.New():N}", DecisionOutcome.RequireApproval, "supersede", now);
+        await store.AddAsync(pending);
+        var replacement = ViegardId.New();
+
+        var superseded = await store.TrySupersedeAsync(pending.Id, replacement, now);
+
+        Assert.NotNull(superseded);
+        Assert.Equal(replacement, superseded!.SupersededByDecisionId);
+        var stored = await store.GetAsync(pending.Id);
+        Assert.NotNull(stored!.SupersededAt);
+        Assert.Equal(replacement, stored.SupersededByDecisionId);
+
+        Assert.Null(await store.TrySupersedeAsync(pending.Id, ViegardId.New(), now));
     }
 
     [PostgresFact]

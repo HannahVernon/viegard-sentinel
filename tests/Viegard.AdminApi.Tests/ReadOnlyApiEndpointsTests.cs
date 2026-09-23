@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Viegard.AdminApi.Api;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Burst;
+using Viegard.Application.Coalescing;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
 using Viegard.Domain;
@@ -466,6 +467,66 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.Equal(300, json.GetProperty("authFailureWindowSeconds").GetInt32());
         Assert.Equal(3600, json.GetProperty("authFailureCooldownSeconds").GetInt32());
         Assert.False(json.GetProperty("authFailureActionEligible").GetBoolean());
+        Assert.Equal(0, json.GetProperty("version").GetInt32());
+        Assert.False(json.GetProperty("seeded").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetIncidentCoalescingSettings_returns_seeded_values_from_store()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemoryIncidentCoalescingSettingsStore();
+        await store.UpdateAsync(
+            new IncidentCoalescingSettings
+            {
+                Enabled = true,
+                SettleWindowSeconds = 15,
+                MaxCoalesceWindowSeconds = 120,
+                UpdatedAt = now,
+                UpdatedBy = "operator",
+            },
+            expectedRowVersion: 0,
+            updatedBy: "operator",
+            updatedAt: now);
+        var source = new IncidentCoalescingSettingsSource(store);
+        await source.RefreshAsync();
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetIncidentCoalescingSettingsAsync(
+                context,
+                store,
+                source,
+                Options.Create(new IncidentCoalescingOptions())),
+            context);
+
+        Assert.True(json.GetProperty("enabled").GetBoolean());
+        Assert.Equal(15, json.GetProperty("settleWindowSeconds").GetInt32());
+        Assert.Equal(120, json.GetProperty("maxCoalesceWindowSeconds").GetInt32());
+        Assert.Equal(1, json.GetProperty("version").GetInt32());
+        Assert.Equal("operator", json.GetProperty("updatedBy").GetString());
+        Assert.True(json.GetProperty("seeded").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetIncidentCoalescingSettings_falls_back_to_options_when_unseeded()
+    {
+        var store = new InMemoryIncidentCoalescingSettingsStore();
+        var source = new IncidentCoalescingSettingsSource(store);
+        await source.RefreshAsync();
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetIncidentCoalescingSettingsAsync(
+                context,
+                store,
+                source,
+                Options.Create(new IncidentCoalescingOptions())),
+            context);
+
+        Assert.True(json.GetProperty("enabled").GetBoolean());
+        Assert.Equal(10, json.GetProperty("settleWindowSeconds").GetInt32());
+        Assert.Equal(300, json.GetProperty("maxCoalesceWindowSeconds").GetInt32());
         Assert.Equal(0, json.GetProperty("version").GetInt32());
         Assert.False(json.GetProperty("seeded").GetBoolean());
     }

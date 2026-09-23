@@ -332,6 +332,41 @@ public sealed class PostgresIncidentStore(IDbContextFactory<ViegardDbContext> fa
         return row?.ToDomain();
     }
 
+    public async ValueTask<Incident?> FindCoalescibleByCorrelationKeyAsync(
+        string correlationKey,
+        DateTimeOffset asOf,
+        CancellationToken cancellationToken = default)
+    {
+        var asOfUtc = asOf.ToUniversalTime();
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var row = await db.Incidents.AsNoTracking()
+            .Where(r => r.CorrelationKey == correlationKey
+                && r.State != (int)IncidentState.Closed
+                && r.CoalesceUntil != null
+                && r.CoalesceUntil >= asOfUtc)
+            .OrderByDescending(r => r.WindowEnd)
+            .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+        return row?.ToDomain();
+    }
+
+    public async ValueTask<IReadOnlyList<Incident>> ListCoalescingReadyAsync(
+        DateTimeOffset asOf,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var asOfUtc = asOf.ToUniversalTime();
+        var safeLimit = Math.Max(1, limit);
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await db.Incidents.AsNoTracking()
+            .Where(r => r.State != (int)IncidentState.Closed
+                && r.CoalesceUntil != null
+                && r.CoalesceUntil < asOfUtc)
+            .OrderBy(r => r.CoalesceUntil)
+            .Take(safeLimit)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        return rows.Select(r => r.ToDomain()).ToList();
+    }
+
     public async ValueTask<IReadOnlyList<Incident>> FindByEventIdAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
         var eventIdJson = JsonSerializer.Serialize(new[] { eventId }, Mapping.Json);
@@ -721,11 +756,36 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
         var updated = await db.Decisions
             .Where(row => row.Id == id
                 && row.Outcome == (int)DecisionOutcome.RequireApproval
-                && row.ReviewedAt == null)
+                && row.ReviewedAt == null
+                && row.SupersededAt == null)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(row => row.ReviewedBy, reviewedBy.Trim())
                 .SetProperty(row => row.ReviewedAt, reviewedAt.ToUniversalTime())
                 .SetProperty(row => row.ReviewOutcome, (int)outcome), cancellationToken)
+            .ConfigureAwait(false);
+        if (updated != 1)
+        {
+            return null;
+        }
+
+        return await GetAsync(id, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async ValueTask<Decision?> TrySupersedeAsync(
+        Guid id,
+        Guid supersededByDecisionId,
+        DateTimeOffset supersededAt,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var updated = await db.Decisions
+            .Where(row => row.Id == id
+                && row.Outcome == (int)DecisionOutcome.RequireApproval
+                && row.ReviewedAt == null
+                && row.SupersededAt == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.SupersededAt, supersededAt.ToUniversalTime())
+                .SetProperty(row => row.SupersededByDecisionId, supersededByDecisionId), cancellationToken)
             .ConfigureAwait(false);
         if (updated != 1)
         {
@@ -745,6 +805,7 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
         return await db.Decisions
             .Where(row => row.Outcome == (int)DecisionOutcome.RequireApproval
                 && row.ReviewedAt == null
+                && row.SupersededAt == null
                 && db.Classifications.Any(c => c.Id == row.ClassificationId && c.Severity <= maxSeverity))
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(row => row.ReviewedBy, reviewedBy.Trim())
@@ -761,6 +822,7 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
         return await db.Decisions
             .Where(row => row.Outcome == (int)DecisionOutcome.RequireApproval
                 && row.ReviewedAt == null
+                && row.SupersededAt == null
                 && db.Classifications.Any(c => c.Id == row.ClassificationId && c.Severity <= maxSeverity))
             .CountAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -805,6 +867,7 @@ public sealed class PostgresDecisionStore(IDbContextFactory<ViegardDbContext> fa
         if (filter?.UnreviewedOnly == true)
         {
             conditions.Add("d.reviewed_at IS NULL");
+            conditions.Add("d.superseded_at IS NULL");
         }
 
         if (boundaryOffset is null)

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
+using Viegard.Application.Coalescing;
 using Viegard.Application.Configuration;
 using Viegard.Application.Policy;
 using Viegard.Application.Retention;
@@ -95,6 +96,8 @@ internal static class Mapping
         EventIdsJson = ToJson(incident.EventIds),
         EvidenceJson = ToJson(incident.Evidence),
         State = (int)incident.State,
+        CoalesceUntil = Utc(incident.CoalesceUntil),
+        DecidedEventCount = incident.DecidedEventCount,
     };
 
     public static Incident ToDomain(this IncidentRow row) => new()
@@ -106,6 +109,8 @@ internal static class Mapping
         EventIds = FromJson<List<Guid>>(row.EventIdsJson),
         Evidence = FromJson<List<EvidenceItem>>(row.EvidenceJson),
         State = (IncidentState)row.State,
+        CoalesceUntil = row.CoalesceUntil,
+        DecidedEventCount = row.DecidedEventCount,
     };
 
     public static ClassificationRow ToRow(this Classification classification, int classifierRefId) => new()
@@ -154,6 +159,8 @@ internal static class Mapping
         ReviewedBy = decision.ReviewedBy,
         ReviewedAt = Utc(decision.ReviewedAt),
         ReviewOutcome = decision.ReviewOutcome is null ? null : (int)decision.ReviewOutcome,
+        SupersededAt = Utc(decision.SupersededAt),
+        SupersededByDecisionId = decision.SupersededByDecisionId,
     };
 
     public static Decision ToDomain(this DecisionRow row, string policyKey, string policyVersion) => new()
@@ -171,6 +178,8 @@ internal static class Mapping
         ReviewedBy = row.ReviewedBy,
         ReviewedAt = row.ReviewedAt,
         ReviewOutcome = row.ReviewOutcome is null ? null : (DecisionReviewOutcome)row.ReviewOutcome,
+        SupersededAt = row.SupersededAt,
+        SupersededByDecisionId = row.SupersededByDecisionId,
     };
 
     public static ActionRecordRow ToRow(this ActionRecord action, int providerRefId) => new()
@@ -925,6 +934,28 @@ internal static class Mapping
         AuthFailureWindowSeconds = row.AuthFailureWindowSeconds,
         AuthFailureCooldownSeconds = row.AuthFailureCooldownSeconds,
         AuthFailureActionEligible = row.AuthFailureActionEligible,
+        RowVersion = row.RowVersion,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+    };
+
+    public static IncidentCoalescingSettingsRow ToRow(this IncidentCoalescingSettings settings) => new()
+    {
+        Id = settings.Id,
+        Enabled = settings.Enabled,
+        SettleWindowSeconds = settings.SettleWindowSeconds,
+        MaxCoalesceWindowSeconds = settings.MaxCoalesceWindowSeconds,
+        RowVersion = settings.RowVersion,
+        UpdatedAt = Utc(settings.UpdatedAt),
+        UpdatedBy = settings.UpdatedBy,
+    };
+
+    public static IncidentCoalescingSettings ToDomain(this IncidentCoalescingSettingsRow row) => new()
+    {
+        Id = row.Id,
+        Enabled = row.Enabled,
+        SettleWindowSeconds = row.SettleWindowSeconds,
+        MaxCoalesceWindowSeconds = row.MaxCoalesceWindowSeconds,
         RowVersion = row.RowVersion,
         UpdatedAt = row.UpdatedAt,
         UpdatedBy = row.UpdatedBy,

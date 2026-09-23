@@ -75,6 +75,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<BurstDetectionSettingsRow> BurstDetectionSettings => Set<BurstDetectionSettingsRow>();
 
+    public DbSet<IncidentCoalescingSettingsRow> IncidentCoalescingSettings => Set<IncidentCoalescingSettingsRow>();
+
     public DbSet<BurstWindowRow> BurstWindows => Set<BurstWindowRow>();
 
     public DbSet<BurstCooldownRow> BurstCooldowns => Set<BurstCooldownRow>();
@@ -439,6 +441,15 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Burst.BurstDetectionSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<IncidentCoalescingSettingsRow>(entity =>
+        {
+            entity.ToTable("incident_coalescing_settings", table =>
+                table.HasCheckConstraint("CK_incident_coalescing_settings_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Coalescing.IncidentCoalescingSettings.MaxUpdatedByLength);
         });
 
         modelBuilder.Entity<BurstWindowRow>(entity =>

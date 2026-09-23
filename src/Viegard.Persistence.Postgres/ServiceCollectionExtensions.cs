@@ -105,6 +105,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPolicyThresholdSettingsStore, PostgresPolicyThresholdSettingsStore>();
         services.AddSingleton<IClassifierSettingsStore, PostgresClassifierSettingsStore>();
         services.AddSingleton<IBurstDetectionSettingsStore, PostgresBurstDetectionSettingsStore>();
+        services.AddSingleton<Viegard.Application.Coalescing.IIncidentCoalescingSettingsStore, PostgresIncidentCoalescingSettingsStore>();
         services.AddSingleton<IBurstWindowStore, PostgresBurstWindowStore>();
         services.AddSingleton<IPolicyPostureSettingsStore, PostgresPolicyPostureSettingsStore>();
         services.AddSingleton<ISatelliteRoleStore, PostgresSatelliteRoleStore>();

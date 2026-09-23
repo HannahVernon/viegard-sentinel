@@ -112,6 +112,11 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<Viegard.Application.Burst.BurstDetectionOptions>, Viegard.Application.Burst.BurstDetectionOptionsValidator>();
 builder.Services
+    .AddOptions<Viegard.Application.Coalescing.IncidentCoalescingOptions>()
+    .Bind(builder.Configuration.GetSection(Viegard.Application.Coalescing.IncidentCoalescingOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<Viegard.Application.Coalescing.IncidentCoalescingOptions>, Viegard.Application.Coalescing.IncidentCoalescingOptionsValidator>();
+builder.Services
     .AddOptions<JetPackFeedOptions>()
     .Bind(builder.Configuration.GetSection(JetPackFeedOptions.SectionName))
     .ValidateOnStart();
@@ -146,6 +151,7 @@ builder.Services.AddSingleton<RouterConnectivityTester>();
 builder.Services.AddSingleton<DecisionTargetResolver>();
 builder.Services.AddSingleton<ClassifierSettingsSource>();
 builder.Services.AddSingleton<Viegard.Application.Burst.BurstDetectionSettingsSource>();
+builder.Services.AddSingleton<Viegard.Application.Coalescing.IncidentCoalescingSettingsSource>();
 builder.Services.AddSingleton<PolicyThresholdSource>();
 builder.Services.AddSingleton<LocalModelAdvisorSource>();
 builder.Services.AddSingleton<LocalModelAdvisorCategoryBandSource>();
@@ -278,6 +284,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IClassifierSettingsStore, InMemoryClassifierSettingsStore>();
         builder.Services.AddSingleton<Viegard.Application.Burst.IBurstDetectionSettingsStore, InMemoryBurstDetectionSettingsStore>();
+        builder.Services.AddSingleton<Viegard.Application.Coalescing.IIncidentCoalescingSettingsStore, InMemoryIncidentCoalescingSettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<ISatelliteRoleStore, InMemorySatelliteRoleStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();

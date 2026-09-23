@@ -1,3 +1,4 @@
+using Viegard.Application.Coalescing;
 using Viegard.Application.Detection;
 using Viegard.Application.Stores;
 using Viegard.Domain;
@@ -9,9 +10,12 @@ namespace Viegard.Application.Correlation;
 public sealed class TimeWindowCorrelator(
     IEnumerable<IDetectionRule> detectionRules,
     IIncidentStore incidentStore,
-    CorrelationOptions options) : ICorrelator
+    CorrelationOptions options,
+    IncidentCoalescingSettingsSource? coalescingSource = null,
+    IncidentCoalescingOptions? coalescingOptions = null) : ICorrelator
 {
     private const string EvidenceTruncatedDescription = "Evidence truncated: incident evidence item cap reached.";
+    private static readonly IncidentCoalescingValues DisabledCoalescing = new(false, 10, 300);
 
     private readonly IReadOnlyList<IDetectionRule> _detectionRules = detectionRules.ToList();
     private readonly TimeSpan _windowDuration = options.WindowDuration > TimeSpan.Zero
@@ -19,6 +23,7 @@ public sealed class TimeWindowCorrelator(
         : TimeSpan.FromMinutes(10);
     private readonly int _maxEventIds = Math.Max(1, options.MaxEventIdsPerIncident);
     private readonly int _maxEvidenceItems = Math.Max(1, options.MaxEvidenceItemsPerIncident);
+    private readonly IncidentCoalescingOptions _coalescingFallback = coalescingOptions ?? new IncidentCoalescingOptions();
 
     public async ValueTask<IReadOnlyList<Incident>> CorrelateAsync(
         NormalizedEvent normalizedEvent,
@@ -33,39 +38,52 @@ public sealed class TimeWindowCorrelator(
         }
 
         var evidence = EvaluateRules(normalizedEvent);
-        var open = await incidentStore.FindOpenByCorrelationKeyAsync(correlationKey, cancellationToken)
-            .ConfigureAwait(false);
+        var coalescing = CoalescingValues();
 
-        if (open is null)
+        var existing = coalescing.Enabled
+            ? await incidentStore
+                .FindCoalescibleByCorrelationKeyAsync(correlationKey, normalizedEvent.OccurredAt, cancellationToken)
+                .ConfigureAwait(false)
+            : await incidentStore
+                .FindOpenByCorrelationKeyAsync(correlationKey, cancellationToken)
+                .ConfigureAwait(false);
+
+        if (existing is null)
         {
             if (evidence.Count == 0)
             {
                 return [];
             }
 
-            var created = CreateIncident(normalizedEvent, correlationKey, evidence);
+            var created = CreateIncident(normalizedEvent, correlationKey, evidence, coalescing);
             await incidentStore.UpsertAsync(created, cancellationToken).ConfigureAwait(false);
             return [created];
         }
 
-        var openEventIds = open.EventIds ?? [];
-        var openEvidence = open.Evidence ?? [];
+        var openEventIds = existing.EventIds ?? [];
+        var openEvidence = existing.Evidence ?? [];
         if (openEventIds.Contains(normalizedEvent.Id))
         {
             return [];
         }
 
-        var withinReach = normalizedEvent.OccurredAt <= open.WindowEnd.Add(_windowDuration);
-        if (!withinReach)
+        // When coalescing is disabled, absorbability is bounded by the classic
+        // sliding window; when enabled, the coalescing find already guarantees
+        // the event arrived inside the incident's live coalescing window.
+        if (!coalescing.Enabled)
         {
-            if (evidence.Count == 0)
+            var withinReach = normalizedEvent.OccurredAt <= existing.WindowEnd.Add(_windowDuration);
+            if (!withinReach)
             {
-                return [];
-            }
+                if (evidence.Count == 0)
+                {
+                    return [];
+                }
 
-            var created = CreateIncident(normalizedEvent, correlationKey, evidence);
-            await incidentStore.UpsertAsync(created, cancellationToken).ConfigureAwait(false);
-            return [created];
+                var created = CreateIncident(normalizedEvent, correlationKey, evidence, coalescing);
+                await incidentStore.UpsertAsync(created, cancellationToken).ConfigureAwait(false);
+                return [created];
+            }
         }
 
         if (evidence.Count == 0 && openEventIds.Count >= _maxEventIds)
@@ -73,22 +91,29 @@ public sealed class TimeWindowCorrelator(
             return [];
         }
 
-        var updated = open with
+        var updated = existing with
         {
-            WindowStart = Min(open.WindowStart, normalizedEvent.OccurredAt),
-            WindowEnd = Max(open.WindowEnd, normalizedEvent.OccurredAt),
+            WindowStart = Min(existing.WindowStart, normalizedEvent.OccurredAt),
+            WindowEnd = Max(existing.WindowEnd, normalizedEvent.OccurredAt),
             EventIds = AppendEventId(openEventIds, normalizedEvent.Id),
             Evidence = AppendEvidence(openEvidence, evidence),
+            CoalesceUntil = ExtendCoalesceUntil(existing, normalizedEvent, coalescing),
         };
 
         await incidentStore.UpsertAsync(updated, cancellationToken).ConfigureAwait(false);
         return [updated];
     }
 
+    private IncidentCoalescingValues CoalescingValues() =>
+        coalescingSource is not null
+            ? coalescingSource.CurrentValues(_coalescingFallback)
+            : DisabledCoalescing;
+
     private Incident CreateIncident(
         NormalizedEvent normalizedEvent,
         string correlationKey,
-        IReadOnlyList<EvidenceItem> evidence) => new()
+        IReadOnlyList<EvidenceItem> evidence,
+        IncidentCoalescingValues coalescing) => new()
     {
         Id = ViegardId.New(),
         CorrelationKey = correlationKey,
@@ -97,7 +122,27 @@ public sealed class TimeWindowCorrelator(
         EventIds = [normalizedEvent.Id],
         Evidence = AppendEvidence([], evidence),
         State = IncidentState.Open,
+        CoalesceUntil = coalescing.Enabled
+            ? normalizedEvent.OccurredAt + coalescing.SettleWindow
+            : null,
     };
+
+    private static DateTimeOffset? ExtendCoalesceUntil(
+        Incident existing,
+        NormalizedEvent normalizedEvent,
+        IncidentCoalescingValues coalescing)
+    {
+        if (!coalescing.Enabled)
+        {
+            return existing.CoalesceUntil;
+        }
+
+        var candidate = normalizedEvent.OccurredAt + coalescing.SettleWindow;
+        var extended = existing.CoalesceUntil is { } current && current > candidate ? current : candidate;
+        var windowStart = Min(existing.WindowStart, normalizedEvent.OccurredAt);
+        var cap = windowStart + coalescing.MaxCoalesceWindow;
+        return extended > cap ? cap : extended;
+    }
 
     private IReadOnlyList<EvidenceItem> EvaluateRules(NormalizedEvent normalizedEvent)
     {

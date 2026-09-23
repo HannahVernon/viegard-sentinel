@@ -12,8 +12,10 @@ using Viegard.Application.Queues;
 using Viegard.Application.Stores;
 using Viegard.Domain;
 using Viegard.Domain.Actions;
+using Viegard.Domain.Classifications;
 using Viegard.Domain.Decisions;
 using Viegard.Domain.Events;
+using Viegard.Domain.Incidents;
 
 namespace Viegard.AdminApi.Decisions;
 
@@ -40,6 +42,8 @@ public static class AdminDecisionEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         IDecisionStore decisions,
+        IClassificationStore classifications,
+        IIncidentStore incidents,
         DecisionTargetResolver targetResolver,
         IActionStore actions,
         IWorkQueue<ActionWorkItem> actionQueue,
@@ -88,6 +92,11 @@ public static class AdminDecisionEndpoints
             return Redirect(path, error: "This decision has already been reviewed.");
         }
 
+        if (decision.SupersededAt is not null)
+        {
+            return Redirect(path, error: "This decision was superseded by a merged decision and can no longer be reviewed.");
+        }
+
         if (reviewOutcome == DecisionReviewOutcome.Rejected)
         {
             var rejected = await decisions.TryReviewAsync(
@@ -100,6 +109,8 @@ public static class AdminDecisionEndpoints
             {
                 return Redirect(path, error: "This decision was reviewed by another session.");
             }
+
+            await FinalizeCoalescingIncidentAsync(classifications, incidents, decision, context.RequestAborted).ConfigureAwait(false);
 
             await configAuditor.RecordDecisionReviewAsync(
                 gate.User.Username,
@@ -134,6 +145,8 @@ public static class AdminDecisionEndpoints
         {
             return Redirect(path, error: "This decision was reviewed by another session.");
         }
+
+        await FinalizeCoalescingIncidentAsync(classifications, incidents, decision, context.RequestAborted).ConfigureAwait(false);
 
         var timeout = MikroTikBanActionProvider.FormatRouterOsDuration(duration.Duration);
         var action = new ActionRecord
@@ -318,6 +331,32 @@ public static class AdminDecisionEndpoints
 
     private static Guid ReadDecisionIdOrEmpty(IFormCollection form) =>
         Guid.TryParse(form["id"].ToString(), out var id) ? id : Guid.Empty;
+
+    private static async Task FinalizeCoalescingIncidentAsync(
+        IClassificationStore classifications,
+        IIncidentStore incidents,
+        Decision decision,
+        CancellationToken cancellationToken)
+    {
+        var classification = await classifications.GetAsync(decision.ClassificationId, cancellationToken).ConfigureAwait(false);
+        if (classification is not { SubjectKind: ClassificationSubjectKind.Incident })
+        {
+            return;
+        }
+
+        var incident = await incidents.GetAsync(classification.SubjectId, cancellationToken).ConfigureAwait(false);
+        if (incident is null || incident.CoalesceUntil is null || incident.State == IncidentState.Closed)
+        {
+            return;
+        }
+
+        // A human has acted on the provisional decision, so stop the incident
+        // from absorbing further events.  Later same-source events start a fresh
+        // incident instead of reopening one that was already reviewed.
+        await incidents.UpsertAsync(
+            incident with { State = IncidentState.Closed, CoalesceUntil = null },
+            cancellationToken).ConfigureAwait(false);
+    }
 
     private static bool TryReadVerdict(string value, out DecisionReviewOutcome outcome, out string error)
     {

@@ -9,6 +9,7 @@
 @inject IPolicyThresholdSettingsStore PolicyThresholdSettingsStore
 @inject IClassifierSettingsStore ClassifierSettingsStore
 @inject Viegard.Application.Burst.IBurstDetectionSettingsStore BurstDetectionSettingsStore
+@inject Viegard.Application.Coalescing.IIncidentCoalescingSettingsStore IncidentCoalescingSettingsStore
 @inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
 @inject IIngestionFilterStore IngestionFilters
 @inject ISatelliteRoleStore SatelliteRoles
@@ -22,6 +23,7 @@
 @inject IOptions<PolicyOptions> PolicyOptions
 @inject IOptions<ClassifierOptions> ClassifierOptions
 @inject IOptions<Viegard.Application.Burst.BurstDetectionOptions> BurstDetectionOptions
+@inject IOptions<Viegard.Application.Coalescing.IncidentCoalescingOptions> IncidentCoalescingOptions
 @inject IOptions<JetPackFeedOptions> JetPackOptions
 @inject IOptions<LocalModelAdvisorOptions> LocalModelAdvisorOptions
 @inject UserDisplay Display
@@ -39,6 +41,7 @@
         <a href="/configuration#upgrades">Upgrades</a>
         <a href="/configuration#classifier-settings">Classifier settings</a>
         <a href="/configuration#burst-detection">Burst detection</a>
+        <a href="/configuration#incident-coalescing">Incident coalescing</a>
         <a href="/configuration#thresholds">Policy thresholds</a>
         <a href="/configuration#posture">Policy posture</a>
         <a href="/configuration#ingestion">Ingestion</a>
@@ -1336,6 +1339,92 @@
         }
     </section>
 
+    <section id="incident-coalescing" class="indexed">
+        <h2>Incident coalescing</h2>
+        <p class="small">Coalescing merges same-source events that arrive seconds apart into a single incident.  The first event emits an immediate provisional decision; late same-source events extend a settle window and, when it closes, produce one merged final decision that supersedes the still-pending provisional one.</p>
+
+        <h3>Status</h3>
+        <dl class="detail-list">
+            <dt>Settings row</dt><dd>@IncidentCoalescingSettingsState</dd>
+            <dt>Version</dt><dd>@(_coalescingSettings?.RowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")</dd>
+            <dt>Last changed</dt><dd>@IncidentCoalescingSettingsLastChanged</dd>
+        </dl>
+
+        @if (_coalescingSettings is null)
+        {
+            <p class="message">Showing deployment defaults.  The settings row seeds on the next maintenance-role startup unless an admin saves values first.</p>
+        }
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Knob</th>
+                    <th>Effective value</th>
+                    <th>Meaning</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>Enabled</code></td>
+                    <td>@(CoalescingValues.Enabled ? "Enabled" : "Disabled")</td>
+                    <td>Master switch.  When disabled, correlation uses the classic sliding-window reach check and no coalescing occurs.</td>
+                </tr>
+                <tr>
+                    <td><code>SettleWindowSeconds</code></td>
+                    <td>@CoalescingValues.SettleWindowSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)</td>
+                    <td>Seconds after each absorbed event that the incident stays open for further same-source events before finalizing.</td>
+                </tr>
+                <tr>
+                    <td><code>MaxCoalesceWindowSeconds</code></td>
+                    <td>@CoalescingValues.MaxCoalesceWindowSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)</td>
+                    <td>Upper bound, from the first event, on how long an incident may keep absorbing events.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Edit incident-coalescing settings</h3>
+        @if (_stepUpFresh)
+        {
+            <form method="post" action="/configuration/incident-coalescing" class="edit-form">
+                <AntiforgeryToken />
+                <input type="hidden" name="rowVersion" value="@(_coalescingSettings?.RowVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0")" />
+                <label class="checkbox-label">
+                    <input name="enabled" type="checkbox" value="true" checked="@CoalescingValues.Enabled" />
+                    Enabled
+                    <span class="small">Master switch for incident coalescing.</span>
+                </label>
+                <label>
+                    Settle window (seconds)
+                    <input name="settleWindowSeconds"
+                           type="number"
+                           min="1"
+                           step="1"
+                           value="@CoalescingValues.SettleWindowSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                           required />
+                    <span class="small">Seconds an incident stays open after each absorbed event before finalizing.</span>
+                </label>
+                <label>
+                    Max coalesce window (seconds)
+                    <input name="maxCoalesceWindowSeconds"
+                           type="number"
+                           min="1"
+                           step="1"
+                           value="@CoalescingValues.MaxCoalesceWindowSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                           required />
+                    <span class="small">Upper bound, from the first event, on total absorption time.</span>
+                </label>
+                <button type="submit">Save incident-coalescing settings</button>
+            </form>
+        }
+        else
+        {
+            <div class="step-up-strip">
+                <span>Editing incident-coalescing settings requires step-up verification.</span>
+                <StepUpPrompt ReturnTo="/configuration#incident-coalescing" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-incident-coalescing" />
+            </div>
+        }
+    </section>
+
     <section id="thresholds" class="indexed">
         <h2>Policy thresholds</h2>
         <p class="small">Review confidence is the propose-for-approval gate.  Action confidence is the automatic-action band; unattended actions remain disabled by posture.</p>
@@ -1601,6 +1690,7 @@
     private PolicyThresholdSettings? _thresholdSettings;
     private ClassifierSettings? _classifierSettings;
     private Viegard.Application.Burst.BurstDetectionSettings? _burstSettings;
+    private Viegard.Application.Coalescing.IncidentCoalescingSettings? _coalescingSettings;
     private PolicyPostureSettings? _postureSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
     private IReadOnlyDictionary<string, IngestionFilter> _mdaemonFilters = new Dictionary<string, IngestionFilter>(StringComparer.Ordinal);
@@ -1725,6 +1815,17 @@
         ? "Not seeded.  Showing deployment defaults; the settings row seeds on next maintenance startup."
         : $"{_burstSettings.UpdatedBy} at {Display.Format(_burstSettings.UpdatedAt)}";
 
+    private Viegard.Application.Coalescing.IncidentCoalescingValues CoalescingValues =>
+        _coalescingSettings?.ToValues() ?? Viegard.Application.Coalescing.IncidentCoalescingValues.FromOptions(IncidentCoalescingOptions.Value);
+
+    private string IncidentCoalescingSettingsState => _coalescingSettings is null
+        ? "Not seeded"
+        : "Database-owned";
+
+    private string IncidentCoalescingSettingsLastChanged => _coalescingSettings is null
+        ? "Not seeded.  Showing deployment defaults; the settings row seeds on next maintenance startup."
+        : $"{_coalescingSettings.UpdatedBy} at {Display.Format(_coalescingSettings.UpdatedAt)}";
+
     private string ThresholdSettingsState => _thresholdSettings is null
         ? "Not seeded"
         : "Database-owned";
@@ -1758,6 +1859,7 @@
         _thresholdSettings = await PolicyThresholdSettingsStore.GetAsync().ConfigureAwait(false);
         _classifierSettings = await ClassifierSettingsStore.GetAsync().ConfigureAwait(false);
         _burstSettings = await BurstDetectionSettingsStore.GetAsync().ConfigureAwait(false);
+        _coalescingSettings = await IncidentCoalescingSettingsStore.GetAsync().ConfigureAwait(false);
         _postureSettings = await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
         _mdaemonFilters = (await IngestionFilters

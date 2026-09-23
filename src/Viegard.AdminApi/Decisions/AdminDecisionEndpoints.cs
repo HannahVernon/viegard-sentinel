@@ -53,24 +53,33 @@ public static class AdminDecisionEndpoints
         AdminConfigAuditor configAuditor)
     {
         var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var decisionId = ReadDecisionIdOrEmpty(form);
+        // When the review is initiated from the decisions list, returnTo carries
+        // the current list URL (filters, sort, page) so the operator lands back
+        // on the list with the reviewed row now badged Approved or Rejected,
+        // rather than on the decision detail page.  Absent or invalid values
+        // fall back to the decision detail page (the DecisionDetail page forms
+        // send no returnTo).
+        var returnTo = AdminAuthEndpoints.SafeReturnPath(form["returnTo"].ToString(), DecisionDetailPath(decisionId));
         var gate = await RequireStepUpAsync(
             context,
             users,
             sessions,
             authAuditor,
-            DecisionDetailPath(ReadDecisionIdOrEmpty(form)),
+            returnTo,
             "reviewing decisions").ConfigureAwait(false);
         if (gate.Failure is not null)
         {
             return gate.Failure;
         }
 
-        if (!TryReadDecisionId(form, out var decisionId, out var error))
+        if (!TryReadDecisionId(form, out var parsedDecisionId, out var error))
         {
-            return Redirect(DecisionsPath, error: error);
+            return Redirect(returnTo, error: error);
         }
 
-        var path = DecisionDetailPath(decisionId);
+        decisionId = parsedDecisionId;
+        var path = returnTo;
         if (!TryReadVerdict(form["verdict"].ToString(), out var reviewOutcome, out error))
         {
             return Redirect(path, error: error);

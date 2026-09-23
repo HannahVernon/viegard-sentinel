@@ -912,7 +912,9 @@ public static class AdminAuthEndpoints
     /// Constrains a caller-supplied return path to a local relative path so
     /// the redirect can never leave the site (open-redirect guard).
     /// </summary>
-    public static string SafeReturnPath(string? candidate)
+    public static string SafeReturnPath(string? candidate) => SafeReturnPath(candidate, "/account");
+
+    public static string SafeReturnPath(string? candidate, string fallback)
     {
         if (string.IsNullOrWhiteSpace(candidate)
             || candidate[0] != '/'
@@ -921,7 +923,7 @@ public static class AdminAuthEndpoints
             || candidate.Contains('\r', StringComparison.Ordinal)
             || candidate.Contains('\n', StringComparison.Ordinal))
         {
-            return "/account";
+            return fallback;
         }
 
         return candidate;

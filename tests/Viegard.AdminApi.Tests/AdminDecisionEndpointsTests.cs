@@ -101,6 +101,37 @@ public sealed class AdminDecisionEndpointsTests
     }
 
     [Fact]
+    public async Task ReviewDecision_returns_to_list_url_when_returnTo_supplied()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        var decision = await fixture.AddDecisionChainAsync("ip=198.51.100.10|window=60s");
+        var listUrl = "/decisions?outcome=RequireApproval&unreviewed=1&sort=severity&dir=desc";
+        fixture.Context.Request.Form = ReviewForm(decision.Id, "approve", "1d", returnTo: listUrl);
+
+        var result = await fixture.InvokeReviewAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.StartsWith(listUrl, location, StringComparison.Ordinal);
+        Assert.Contains("Decision%20approved", location, StringComparison.Ordinal);
+        Assert.Equal(DecisionReviewOutcome.Approved, (await fixture.Decisions.GetAsync(decision.Id))!.ReviewOutcome);
+    }
+
+    [Fact]
+    public async Task ReviewDecision_falls_back_to_detail_when_returnTo_is_not_local()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        var decision = await fixture.AddDecisionChainAsync("source=not-needed-for-reject");
+        fixture.Context.Request.Form = ReviewForm(decision.Id, "reject", null, returnTo: "https://evil.example.com/phish");
+
+        var result = await fixture.InvokeReviewAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.StartsWith($"/decisions/{decision.Id:N}", location, StringComparison.Ordinal);
+        Assert.DoesNotContain("evil.example.com", location, StringComparison.Ordinal);
+        Assert.Contains("Decision%20rejected", location, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReviewDecision_double_review_loses_claim_and_does_not_queue_second_action()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
@@ -324,6 +355,9 @@ public sealed class AdminDecisionEndpointsTests
 
     private static FormCollection ReviewForm(Guid id, string verdict, string? duration) =>
         Form(("id", id.ToString("N")), ("verdict", verdict), ("duration", duration ?? string.Empty));
+
+    private static FormCollection ReviewForm(Guid id, string verdict, string? duration, string returnTo) =>
+        Form(("id", id.ToString("N")), ("verdict", verdict), ("duration", duration ?? string.Empty), ("returnTo", returnTo));
 
     private static FormCollection UnbanForm(string ip) =>
         Form(("ip", ip));

@@ -407,6 +407,9 @@ public sealed class AdminDecisionEndpointsTests
                 .AddLogging()
                 .AddSingleton<IOptions<AdminAuthOptions>>(Options.Create(new AdminAuthOptions()))
                 .AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider())
+                .AddSingleton<IOptions<SessionSecurityOptions>>(Options.Create(new SessionSecurityOptions()))
+                .AddSingleton(new SessionSecuritySettingsSource())
+                .AddSingleton<IPendingStepUpActionStore, InMemoryPendingStepUpActionStore>()
                 .BuildServiceProvider();
 
             var context = new DefaultHttpContext

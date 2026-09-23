@@ -117,6 +117,11 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<Viegard.Application.Coalescing.IncidentCoalescingOptions>, Viegard.Application.Coalescing.IncidentCoalescingOptionsValidator>();
 builder.Services
+    .AddOptions<SessionSecurityOptions>()
+    .Bind(builder.Configuration.GetSection(SessionSecurityOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<SessionSecurityOptions>, SessionSecurityOptionsValidator>();
+builder.Services
     .AddOptions<JetPackFeedOptions>()
     .Bind(builder.Configuration.GetSection(JetPackFeedOptions.SectionName))
     .ValidateOnStart();
@@ -128,6 +133,7 @@ builder.Services
 builder.Services.AddSingleton<IValidateOptions<LocalModelAdvisorOptions>, LocalModelAdvisorOptionsValidator>();
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddRazorComponents();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddDataProtection();
@@ -152,6 +158,8 @@ builder.Services.AddSingleton<DecisionTargetResolver>();
 builder.Services.AddSingleton<ClassifierSettingsSource>();
 builder.Services.AddSingleton<Viegard.Application.Burst.BurstDetectionSettingsSource>();
 builder.Services.AddSingleton<Viegard.Application.Coalescing.IncidentCoalescingSettingsSource>();
+builder.Services.AddSingleton<SessionSecuritySettingsSource>();
+builder.Services.AddSingleton<IPendingStepUpActionStore, InMemoryPendingStepUpActionStore>();
 builder.Services.AddSingleton<PolicyThresholdSource>();
 builder.Services.AddSingleton<LocalModelAdvisorSource>();
 builder.Services.AddSingleton<LocalModelAdvisorCategoryBandSource>();
@@ -285,6 +293,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IClassifierSettingsStore, InMemoryClassifierSettingsStore>();
         builder.Services.AddSingleton<Viegard.Application.Burst.IBurstDetectionSettingsStore, InMemoryBurstDetectionSettingsStore>();
         builder.Services.AddSingleton<Viegard.Application.Coalescing.IIncidentCoalescingSettingsStore, InMemoryIncidentCoalescingSettingsStore>();
+        builder.Services.AddSingleton<ISessionSecuritySettingsStore, InMemorySessionSecuritySettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<ISatelliteRoleStore, InMemorySatelliteRoleStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();
@@ -311,6 +320,7 @@ switch (persistenceProvider)
 
 builder.Services.AddHostedService<AdminInstanceRegistrationService>();
 builder.Services.AddHostedService<AdminLocalModelAdvisorRefreshWorker>();
+builder.Services.AddHostedService<AdminSessionSecurityRefreshWorker>();
 
 var app = builder.Build();
 

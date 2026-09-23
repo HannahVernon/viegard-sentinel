@@ -33,6 +33,9 @@ public static class AdminAuthEndpoints
         app.MapPost("/auth/step-up", StepUpAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
+        app.MapGet("/auth/step-up/continue", StepUpContinueAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
         app.MapPost("/auth/sessions/revoke", RevokeSessionsAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
@@ -784,6 +787,11 @@ public static class AdminAuthEndpoints
         await sessions.StampStepUpAsync(sessionId, now, context.RequestAborted).ConfigureAwait(false);
         await auditor.RecordAsync(AdminAuthEventKind.StepUpSucceeded, assertionUser.Username, context, cancellationToken: context.RequestAborted)
             .ConfigureAwait(false);
+        if (StepUpResume.HasPending(context))
+        {
+            return JsonRedirect(StepUpResume.ContinuePath);
+        }
+
         return JsonRedirect(stepUpReturn).WithFlash(status: "Step-up verification complete.");
     }
 
@@ -863,7 +871,41 @@ public static class AdminAuthEndpoints
         await sessions.StampStepUpAsync(sessionId, DateTimeOffset.UtcNow, context.RequestAborted).ConfigureAwait(false);
         await auditor.RecordAsync(AdminAuthEventKind.StepUpSucceeded, user.Username, context, cancellationToken: context.RequestAborted)
             .ConfigureAwait(false);
+        if (StepUpResume.HasPending(context))
+        {
+            return Results.Redirect(StepUpResume.ContinuePath);
+        }
+
         return Redirect(returnTo, status: "Step-up verification complete.");
+    }
+
+    /// <summary>
+    /// Replays a step-up-gated POST that was captured when verification was
+    /// missing.  Reached only from a successful step-up when a pending action
+    /// exists for the session (D-0053).  The captured request is consumed and
+    /// re-dispatched to its original endpoint, which re-runs its own gate and
+    /// antiforgery checks.  When nothing resumable remains the operator lands on
+    /// the account page.
+    /// </summary>
+    private static async Task StepUpContinueAsync(HttpContext context)
+    {
+        if (!StepUpResume.TryGetSessionId(context, out var sessionId))
+        {
+            context.Response.Redirect("/login");
+            return;
+        }
+
+        var store = context.RequestServices.GetRequiredService<IPendingStepUpActionStore>();
+        if (!store.TryConsume(sessionId, DateTimeOffset.UtcNow, out var action))
+        {
+            context.Response.Redirect("/account");
+            return;
+        }
+
+        if (!await StepUpResume.TryDispatchAsync(context, action).ConfigureAwait(false))
+        {
+            context.Response.Redirect("/account");
+        }
     }
 
     /// <summary>

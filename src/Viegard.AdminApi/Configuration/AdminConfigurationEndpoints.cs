@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Viegard.AdminApi.Auth;
+using Viegard.Application.Auth;
 using Viegard.Application.Configuration;
 using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
@@ -28,6 +29,7 @@ public static class AdminConfigurationEndpoints
     private const string ClassifierSettingsConfigurationPath = "/configuration#classifier-settings";
     private const string BurstDetectionSettingsConfigurationPath = "/configuration#burst-detection";
     private const string IncidentCoalescingSettingsConfigurationPath = "/configuration#incident-coalescing";
+    private const string SessionSecuritySettingsConfigurationPath = "/configuration#session-security";
     private const string PostureConfigurationPath = "/configuration#posture";
     internal const string EnforceConfirmationWord = "ENFORCE";
     private const string IngestionConfigurationPath = "/configuration#ingestion";
@@ -110,6 +112,9 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/incident-coalescing", SaveIncidentCoalescingSettingsAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/session-security", SaveSessionSecuritySettingsAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/posture", SavePolicyPostureAsync)
@@ -1537,6 +1542,64 @@ public static class AdminConfigurationEndpoints
         return Redirect(IncidentCoalescingSettingsConfigurationPath, status: "Incident-coalescing settings saved.");
     }
 
+    internal static async Task<IResult> SaveSessionSecuritySettingsAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ISessionSecuritySettingsStore sessionSecuritySettings,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(SessionSecuritySettingsConfigurationPath, error: "Step-up verification is required before editing session-security settings.");
+        }
+
+        if (!int.TryParse(form["rowVersion"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedRowVersion)
+            || expectedRowVersion < 0)
+        {
+            return Redirect(SessionSecuritySettingsConfigurationPath, error: "Session-security settings version was not valid.  Reload the page and try again.");
+        }
+
+        var before = await sessionSecuritySettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        if (!TryReadSessionSecuritySettings(form, before, out var candidate, out var error))
+        {
+            return Redirect(SessionSecuritySettingsConfigurationPath, error: error);
+        }
+
+        var result = await sessionSecuritySettings.UpdateAsync(
+            candidate,
+            expectedRowVersion,
+            user.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(SessionSecuritySettingsConfigurationPath, error: "Session-security settings were changed by another session.  Review the current values and save again.");
+        }
+
+        await configAuditor.RecordSessionSecuritySettingsWriteAsync(
+            user.Username,
+            before,
+            result.Settings,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(SessionSecuritySettingsConfigurationPath, status: "Session-security settings saved.");
+    }
+
     internal static async Task<IResult> SavePolicyPostureAsync(
         HttpContext context,
         IAntiforgery antiforgery,
@@ -2348,6 +2411,55 @@ public static class AdminConfigurationEndpoints
         };
 
         if (!IncidentCoalescingSettingsValidator.TryValidate(settings, out error))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryReadSessionSecuritySettings(
+        IFormCollection form,
+        SessionSecuritySettings? current,
+        out SessionSecuritySettings settings,
+        out string error)
+    {
+        settings = current ?? new SessionSecuritySettings
+        {
+            Id = SessionSecuritySettings.FixedId,
+            RowVersion = 0,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = "admin",
+        };
+        error = string.Empty;
+
+        if (!int.TryParse(
+                form["stepUpValiditySeconds"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var stepUpValiditySeconds))
+        {
+            error = SessionSecuritySettingsValidator.StepUpValidityError;
+            return false;
+        }
+
+        if (!int.TryParse(
+                form["resumeStashTtlSeconds"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var resumeStashTtlSeconds))
+        {
+            error = SessionSecuritySettingsValidator.ResumeStashTtlError;
+            return false;
+        }
+
+        settings = settings with
+        {
+            StepUpValiditySeconds = stepUpValiditySeconds,
+            ResumeStashTtlSeconds = resumeStashTtlSeconds,
+        };
+
+        if (!SessionSecuritySettingsValidator.TryValidate(settings, out error))
         {
             return false;
         }

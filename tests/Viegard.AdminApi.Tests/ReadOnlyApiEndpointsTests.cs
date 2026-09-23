@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Viegard.AdminApi.Api;
 using Viegard.Application.Classifiers;
+using Viegard.Application.Auth;
 using Viegard.Application.Burst;
 using Viegard.Application.Coalescing;
 using Viegard.Application.Configuration;
@@ -527,6 +528,63 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.True(json.GetProperty("enabled").GetBoolean());
         Assert.Equal(10, json.GetProperty("settleWindowSeconds").GetInt32());
         Assert.Equal(300, json.GetProperty("maxCoalesceWindowSeconds").GetInt32());
+        Assert.Equal(0, json.GetProperty("version").GetInt32());
+        Assert.False(json.GetProperty("seeded").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetSessionSecuritySettings_returns_seeded_values_from_store()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new InMemorySessionSecuritySettingsStore();
+        await store.UpdateAsync(
+            new SessionSecuritySettings
+            {
+                StepUpValiditySeconds = 240,
+                ResumeStashTtlSeconds = 900,
+                UpdatedAt = now,
+                UpdatedBy = "operator",
+            },
+            expectedRowVersion: 0,
+            updatedBy: "operator",
+            updatedAt: now);
+        var source = new SessionSecuritySettingsSource(store);
+        await source.RefreshAsync();
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetSessionSecuritySettingsAsync(
+                context,
+                store,
+                source,
+                Options.Create(new SessionSecurityOptions())),
+            context);
+
+        Assert.Equal(240, json.GetProperty("stepUpValiditySeconds").GetInt32());
+        Assert.Equal(900, json.GetProperty("resumeStashTtlSeconds").GetInt32());
+        Assert.Equal(1, json.GetProperty("version").GetInt32());
+        Assert.Equal("operator", json.GetProperty("updatedBy").GetString());
+        Assert.True(json.GetProperty("seeded").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetSessionSecuritySettings_falls_back_to_options_when_unseeded()
+    {
+        var store = new InMemorySessionSecuritySettingsStore();
+        var source = new SessionSecuritySettingsSource(store);
+        await source.RefreshAsync();
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetSessionSecuritySettingsAsync(
+                context,
+                store,
+                source,
+                Options.Create(new SessionSecurityOptions())),
+            context);
+
+        Assert.Equal(300, json.GetProperty("stepUpValiditySeconds").GetInt32());
+        Assert.Equal(600, json.GetProperty("resumeStashTtlSeconds").GetInt32());
         Assert.Equal(0, json.GetProperty("version").GetInt32());
         Assert.False(json.GetProperty("seeded").GetBoolean());
     }

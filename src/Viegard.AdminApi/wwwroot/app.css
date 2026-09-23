@@ -887,6 +887,11 @@ section {
 }
 
 .step-up-popover {
+    /* border-box: the width calc already accounts for the page gutter, so
+       the 2rem horizontal padding must come out of it, not add to it.
+       content-box made the popover 4rem wider than the viewport allowance,
+       which produced a horizontal scrollbar on narrow viewports. */
+    box-sizing: border-box;
     background: var(--panel);
     color: var(--ink);
     border: 1px solid var(--panel-border);

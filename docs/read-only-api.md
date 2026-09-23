@@ -41,6 +41,7 @@ Path | Returns
 `GET /api/v1/policy/thresholds` | Policy review/action confidence and action minimum severity, with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
 `GET /api/v1/burst/settings` | Rate-based burst-detection controls (global and auth-failure signal enables, threshold, window seconds, cooldown seconds, action-eligible flag), with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
 `GET /api/v1/coalescing/settings` | Incident-coalescing controls (enabled, settle window seconds, max coalesce window seconds), with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
+`GET /api/v1/session-security/settings` | Session-security controls (step-up validity seconds, resume-stash TTL seconds), with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
 `GET /status/queues` | Queue and instance health (display-formatted)
 `GET /status/upgrades` | Recent host upgrade commands (display-formatted)
 `GET /status/bans` | Bans (display-formatted for the live UI)
@@ -127,3 +128,14 @@ maintenance role seeds the row) the values, version, and last-writer reflect the
 `updatedBy` are `null`; once an operator saves on `/configuration` (or the
 maintenance role seeds the row) the values, version, and last-writer reflect the
 `incident_coalescing_settings` row.
+
+`GET /api/v1/session-security/settings` returns `stepUpValiditySeconds` and
+`resumeStashTtlSeconds`, plus `version`, `updatedAt`, `updatedBy`, and `seeded`.
+When `seeded` is `false` the values are the code-defined `SessionSecurityOptions`
+fallback, `version` is `0`, and `updatedAt` and `updatedBy` are `null`; once an
+operator saves on `/configuration#session-security` (or the admin API seeds the
+row on startup) the values, version, and last-writer reflect the
+`session_security_settings` row.  `stepUpValiditySeconds` is how long a step-up
+verification stays fresh (each verified action renews the window);
+`resumeStashTtlSeconds` is how long a step-up-gated action captured on a failed
+gate waits to be replayed after the operator completes verification.

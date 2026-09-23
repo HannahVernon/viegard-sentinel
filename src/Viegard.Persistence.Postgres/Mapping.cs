@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Viegard.Application.Auth;
 using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Coalescing;
@@ -956,6 +957,26 @@ internal static class Mapping
         Enabled = row.Enabled,
         SettleWindowSeconds = row.SettleWindowSeconds,
         MaxCoalesceWindowSeconds = row.MaxCoalesceWindowSeconds,
+        RowVersion = row.RowVersion,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+    };
+
+    public static SessionSecuritySettingsRow ToRow(this SessionSecuritySettings settings) => new()
+    {
+        Id = settings.Id,
+        StepUpValiditySeconds = settings.StepUpValiditySeconds,
+        ResumeStashTtlSeconds = settings.ResumeStashTtlSeconds,
+        RowVersion = settings.RowVersion,
+        UpdatedAt = Utc(settings.UpdatedAt),
+        UpdatedBy = settings.UpdatedBy,
+    };
+
+    public static SessionSecuritySettings ToDomain(this SessionSecuritySettingsRow row) => new()
+    {
+        Id = row.Id,
+        StepUpValiditySeconds = row.StepUpValiditySeconds,
+        ResumeStashTtlSeconds = row.ResumeStashTtlSeconds,
         RowVersion = row.RowVersion,
         UpdatedAt = row.UpdatedAt,
         UpdatedBy = row.UpdatedBy,

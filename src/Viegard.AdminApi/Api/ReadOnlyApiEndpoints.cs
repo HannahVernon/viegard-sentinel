@@ -45,6 +45,7 @@ public static class ReadOnlyApiEndpoints
         api.MapGet("/classifier/settings", GetClassifierSettingsAsync);
         api.MapGet("/burst/settings", GetBurstDetectionSettingsAsync);
         api.MapGet("/coalescing/settings", GetIncidentCoalescingSettingsAsync);
+        api.MapGet("/session-security/settings", GetSessionSecuritySettingsAsync);
         api.MapGet("/policy/thresholds", GetPolicyThresholdsAsync);
         api.MapGet("/advisor/summary", GetAdvisorSummaryAsync);
         api.MapGet("/advisor/consults", ListAdvisorConsultsAsync);
@@ -334,6 +335,25 @@ public static class ReadOnlyApiEndpoints
             enabled = values.Enabled,
             settleWindowSeconds = values.SettleWindowSeconds,
             maxCoalesceWindowSeconds = values.MaxCoalesceWindowSeconds,
+            version = settings?.RowVersion ?? source.Current.RowVersion,
+            updatedAt = settings?.UpdatedAt,
+            updatedBy = settings?.UpdatedBy,
+            seeded = settings is not null || source.Current.IsSeeded,
+        }, Json);
+    }
+
+    internal static async Task<IResult> GetSessionSecuritySettingsAsync(
+        HttpContext context,
+        Viegard.Application.Auth.ISessionSecuritySettingsStore settingsStore,
+        Viegard.Application.Auth.SessionSecuritySettingsSource source,
+        IOptions<Viegard.Application.Auth.SessionSecurityOptions> options)
+    {
+        var settings = await settingsStore.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        var values = settings?.ToValues() ?? source.CurrentValues(options.Value);
+        return Results.Json(new
+        {
+            stepUpValiditySeconds = values.StepUpValiditySeconds,
+            resumeStashTtlSeconds = values.ResumeStashTtlSeconds,
             version = settings?.RowVersion ?? source.Current.RowVersion,
             updatedAt = settings?.UpdatedAt,
             updatedBy = settings?.UpdatedBy,

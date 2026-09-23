@@ -824,6 +824,117 @@ section {
     }
 }
 
+/* Flash toast: a fixed, out-of-flow confirmation so success and error notices
+   never shift the list content beneath them, on appearance or on dismissal.
+   The inner .message keeps its colour and border; positioning and the dismiss
+   timer live on the wrapper. */
+.flash-toast {
+    position: fixed;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    width: max-content;
+    max-width: min(40rem, calc(100vw - 2rem));
+    padding: 0.25rem 0.5rem;
+    background: var(--panel);
+    border-radius: 0.5rem;
+    box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.4);
+}
+
+.flash-toast .message {
+    margin: 0;
+    flex: 1 1 auto;
+    /* The wrapper owns positioning and dismissal; cancel the shared in-flow
+       collapse so nothing about the toast animates height. */
+    animation: none;
+}
+
+/* Success toasts fade out after a few seconds.  Only opacity changes, and the
+   wrapper is out of flow, so the list never moves. */
+.flash-toast:not(.flash-toast-error) {
+    animation: flash-toast-out 0.5s ease-in 6s forwards;
+}
+
+@keyframes flash-toast-out {
+    to {
+        opacity: 0;
+        visibility: hidden;
+    }
+}
+
+/* Reduced motion: hide at the same moment without a fade. */
+@media (prefers-reduced-motion: reduce) {
+    .flash-toast:not(.flash-toast-error) {
+        animation: flash-toast-hide 0s linear 6s forwards;
+    }
+}
+
+@keyframes flash-toast-hide {
+    to {
+        opacity: 0;
+        visibility: hidden;
+    }
+}
+
+/* Hold the toast while the operator is reading or interacting with it. */
+.flash-toast:hover,
+.flash-toast:focus-within {
+    animation-play-state: paused;
+}
+
+.flash-close {
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: var(--ink);
+    font-size: 1.2rem;
+    line-height: 1;
+    padding: 0.25rem 0.4rem;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.flash-close:hover,
+.flash-close:focus-visible {
+    opacity: 1;
+}
+
+/* Sequential review: keep the operator's place after a review redirect.  Each
+   decision row carries a fragment id; scroll-margin keeps the anchored row
+   clear of the top so the just-reviewed row above stays partly visible. */
+tr[id^="decision-"] {
+    scroll-margin-top: 5rem;
+}
+
+tr[id^="decision-"]:target,
+tr[id^="decision-"]:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+tr[id^="decision-"]:focus:not(:focus-visible) {
+    outline: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    tr[id^="decision-"]:target {
+        animation: decision-target-fade 2s ease-out 1;
+    }
+}
+
+@keyframes decision-target-fade {
+    from {
+        background: rgba(232, 163, 61, 0.22);
+    }
+    to {
+        background: transparent;
+    }
+}
+
 .secret-block,
 .json-block {
     overflow-wrap: anywhere;

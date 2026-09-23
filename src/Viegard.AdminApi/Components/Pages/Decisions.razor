@@ -131,7 +131,7 @@
             <tbody>
                 @foreach (var row in _rows)
                 {
-                    <tr>
+                    <tr id="decision-@row.Decision.Id.ToString("N")" tabindex="-1">
                         <td><a href="/decisions/@row.Decision.Id">@Display.Format(row.Decision.CreatedAt)</a></td>
                         <td>@row.Decision.PolicyId @row.Decision.PolicyVersion</td>
                         <td><span class="@AdminText.OutcomeCss(row.Decision.Outcome)">@AdminText.DecisionOutcomeLabel(row.Decision.Outcome)</span></td>
@@ -161,14 +161,14 @@
                                                 <input type="hidden" name="id" value="@row.Decision.Id" />
                                                 <input type="hidden" name="verdict" value="approve" />
                                                 <input type="hidden" name="duration" value="@DecisionReviewDurations.OneDay" />
-                                                <input type="hidden" name="returnTo" value="@_stepUpReturnTo" />
+                                                <input type="hidden" name="returnTo" value="@ReviewReturnTo(row.Decision.Id)" />
                                                 <button type="submit">Approve</button>
                                             </form>
                                             <form method="post" action="/decisions/review" class="decision-review-form decision-inline-form">
                                                 <AntiforgeryToken />
                                                 <input type="hidden" name="id" value="@row.Decision.Id" />
                                                 <input type="hidden" name="verdict" value="reject" />
-                                                <input type="hidden" name="returnTo" value="@_stepUpReturnTo" />
+                                                <input type="hidden" name="returnTo" value="@ReviewReturnTo(row.Decision.Id)" />
                                                 <button type="submit" class="secondary-button">Reject</button>
                                             </form>
                                         </div>
@@ -187,7 +187,7 @@
                                                 <AntiforgeryToken />
                                                 <input type="hidden" name="id" value="@row.Decision.Id" />
                                                 <input type="hidden" name="verdict" value="reject" />
-                                                <input type="hidden" name="returnTo" value="@_stepUpReturnTo" />
+                                                <input type="hidden" name="returnTo" value="@ReviewReturnTo(row.Decision.Id)" />
                                                 <button type="submit" class="secondary-button">Reject</button>
                                             </form>
                                         </div>
@@ -310,6 +310,7 @@
     private int _bulkSeverity = DefaultBulkSeverity;
     private int _bulkCount;
     private string _stepUpReturnTo = "/decisions";
+    private Dictionary<Guid, Guid> _reviewReturnAnchor = new();
 
     private const int DefaultBulkSeverity = 3;
     private const int TriggeredByListMaxChars = 96;
@@ -418,6 +419,7 @@
             _searchTimedOut = true;
         }
         _rows = await BuildRowsAsync(_page.Items).ConfigureAwait(false);
+        BuildReviewReturnAnchors();
 
         if (_outcome == DecisionOutcome.RequireApproval)
         {
@@ -441,6 +443,32 @@
             }
         }
     }
+
+    // After a review redirect the operator should land on the row they will act
+    // on next, not back at the top of a long queue.  Map each still-reviewable
+    // row to the id of the next still-reviewable row in list order, falling back
+    // to itself when it is the last one.  Anchoring to the next row is robust to
+    // the just-reviewed row changing height (buttons collapse to a badge) or
+    // dropping out of the list entirely under the unreviewed-only filter.
+    private void BuildReviewReturnAnchors()
+    {
+        _reviewReturnAnchor = new Dictionary<Guid, Guid>();
+        var reviewable = _rows
+            .Where(static row => row.Review is not null && row.Decision.SupersededAt is null)
+            .Select(static row => row.Decision.Id)
+            .ToList();
+
+        for (var i = 0; i < reviewable.Count; i++)
+        {
+            var next = i + 1 < reviewable.Count ? reviewable[i + 1] : reviewable[i];
+            _reviewReturnAnchor[reviewable[i]] = next;
+        }
+    }
+
+    private string ReviewReturnTo(Guid decisionId) =>
+        _reviewReturnAnchor.TryGetValue(decisionId, out var anchor)
+            ? $"{_stepUpReturnTo}#decision-{anchor:N}"
+            : _stepUpReturnTo;
 
     private static string ClassificationSummary(Classification? classification) => classification is null
         ? "not found"

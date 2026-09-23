@@ -161,12 +161,14 @@
                                                 <input type="hidden" name="id" value="@row.Decision.Id" />
                                                 <input type="hidden" name="verdict" value="approve" />
                                                 <input type="hidden" name="duration" value="@DecisionReviewDurations.OneDay" />
+                                                <input type="hidden" name="returnTo" value="@_stepUpReturnTo" />
                                                 <button type="submit">Approve</button>
                                             </form>
                                             <form method="post" action="/decisions/review" class="decision-review-form decision-inline-form">
                                                 <AntiforgeryToken />
                                                 <input type="hidden" name="id" value="@row.Decision.Id" />
                                                 <input type="hidden" name="verdict" value="reject" />
+                                                <input type="hidden" name="returnTo" value="@_stepUpReturnTo" />
                                                 <button type="submit" class="secondary-button">Reject</button>
                                             </form>
                                         </div>
@@ -185,6 +187,7 @@
                                                 <AntiforgeryToken />
                                                 <input type="hidden" name="id" value="@row.Decision.Id" />
                                                 <input type="hidden" name="verdict" value="reject" />
+                                                <input type="hidden" name="returnTo" value="@_stepUpReturnTo" />
                                                 <button type="submit" class="secondary-button">Reject</button>
                                             </form>
                                         </div>

@@ -7,6 +7,7 @@ using Viegard.AdminApi.Auth;
 using Viegard.Application.Configuration;
 using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
+using Viegard.Application.Coalescing;
 using Viegard.Application.Policy;
 using Viegard.Application.Retention;
 using Viegard.Application.Stores;
@@ -26,6 +27,7 @@ public static class AdminConfigurationEndpoints
     private const string ThresholdsConfigurationPath = "/configuration#thresholds";
     private const string ClassifierSettingsConfigurationPath = "/configuration#classifier-settings";
     private const string BurstDetectionSettingsConfigurationPath = "/configuration#burst-detection";
+    private const string IncidentCoalescingSettingsConfigurationPath = "/configuration#incident-coalescing";
     private const string PostureConfigurationPath = "/configuration#posture";
     internal const string EnforceConfirmationWord = "ENFORCE";
     private const string IngestionConfigurationPath = "/configuration#ingestion";
@@ -105,6 +107,9 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/burst-detection", SaveBurstDetectionSettingsAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/incident-coalescing", SaveIncidentCoalescingSettingsAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/posture", SavePolicyPostureAsync)
@@ -1474,6 +1479,64 @@ public static class AdminConfigurationEndpoints
         return Redirect(BurstDetectionSettingsConfigurationPath, status: "Burst-detection settings saved.");
     }
 
+    internal static async Task<IResult> SaveIncidentCoalescingSettingsAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IIncidentCoalescingSettingsStore coalescingSettings,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(IncidentCoalescingSettingsConfigurationPath, error: "Step-up verification is required before editing incident-coalescing settings.");
+        }
+
+        if (!int.TryParse(form["rowVersion"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedRowVersion)
+            || expectedRowVersion < 0)
+        {
+            return Redirect(IncidentCoalescingSettingsConfigurationPath, error: "Incident-coalescing settings version was not valid.  Reload the page and try again.");
+        }
+
+        var before = await coalescingSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        if (!TryReadIncidentCoalescingSettings(form, before, out var candidate, out var error))
+        {
+            return Redirect(IncidentCoalescingSettingsConfigurationPath, error: error);
+        }
+
+        var result = await coalescingSettings.UpdateAsync(
+            candidate,
+            expectedRowVersion,
+            user.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(IncidentCoalescingSettingsConfigurationPath, error: "Incident-coalescing settings were changed by another session.  Review the current values and save again.");
+        }
+
+        await configAuditor.RecordIncidentCoalescingSettingsWriteAsync(
+            user.Username,
+            before,
+            result.Settings,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(IncidentCoalescingSettingsConfigurationPath, status: "Incident-coalescing settings saved.");
+    }
+
     internal static async Task<IResult> SavePolicyPostureAsync(
         HttpContext context,
         IAntiforgery antiforgery,
@@ -2235,6 +2298,56 @@ public static class AdminConfigurationEndpoints
         };
 
         if (!BurstDetectionSettingsValidator.TryValidate(settings, out error))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryReadIncidentCoalescingSettings(
+        IFormCollection form,
+        IncidentCoalescingSettings? current,
+        out IncidentCoalescingSettings settings,
+        out string error)
+    {
+        settings = current ?? new IncidentCoalescingSettings
+        {
+            Id = IncidentCoalescingSettings.FixedId,
+            RowVersion = 0,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = "admin",
+        };
+        error = string.Empty;
+
+        if (!int.TryParse(
+                form["settleWindowSeconds"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var settleWindowSeconds))
+        {
+            error = IncidentCoalescingSettingsValidator.SettleWindowError;
+            return false;
+        }
+
+        if (!int.TryParse(
+                form["maxCoalesceWindowSeconds"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var maxCoalesceWindowSeconds))
+        {
+            error = IncidentCoalescingSettingsValidator.MaxWindowError;
+            return false;
+        }
+
+        settings = settings with
+        {
+            Enabled = ReadCheckbox(form, "enabled"),
+            SettleWindowSeconds = settleWindowSeconds,
+            MaxCoalesceWindowSeconds = maxCoalesceWindowSeconds,
+        };
+
+        if (!IncidentCoalescingSettingsValidator.TryValidate(settings, out error))
         {
             return false;
         }

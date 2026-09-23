@@ -486,6 +486,8 @@ public sealed class AdminDecisionEndpointsTests
                 Context,
                 Antiforgery,
                 Decisions,
+                Classifications,
+                Incidents,
                 TargetResolver,
                 Actions,
                 ActionQueue,

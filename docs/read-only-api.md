@@ -40,6 +40,7 @@ Path | Returns
 `GET /api/v1/classifier/settings` | Deterministic classifier tunables (score controls plus the count-aware repeat-confidence terms), with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
 `GET /api/v1/policy/thresholds` | Policy review/action confidence and action minimum severity, with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
 `GET /api/v1/burst/settings` | Rate-based burst-detection controls (global and auth-failure signal enables, threshold, window seconds, cooldown seconds, action-eligible flag), with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
+`GET /api/v1/coalescing/settings` | Incident-coalescing controls (enabled, settle window seconds, max coalesce window seconds), with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
 `GET /status/queues` | Queue and instance health (display-formatted)
 `GET /status/upgrades` | Recent host upgrade commands (display-formatted)
 `GET /status/bans` | Bans (display-formatted for the live UI)
@@ -118,3 +119,11 @@ and `authFailureActionEligible`, plus `version`, `updatedAt`, `updatedBy`, and
 `updatedBy` are `null`; once an operator saves on `/configuration` (or the
 maintenance role seeds the row) the values, version, and last-writer reflect the
 `burst_detection_settings` row.
+
+`GET /api/v1/coalescing/settings` returns `enabled`, `settleWindowSeconds`, and
+`maxCoalesceWindowSeconds`, plus `version`, `updatedAt`, `updatedBy`, and
+`seeded`.  When `seeded` is `false` the values are the code-defined
+`IncidentCoalescingOptions` fallback, `version` is `0`, and `updatedAt` and
+`updatedBy` are `null`; once an operator saves on `/configuration` (or the
+maintenance role seeds the row) the values, version, and last-writer reflect the
+`incident_coalescing_settings` row.

@@ -137,7 +137,11 @@
                         <td>@SeverityBadge(row.Classification)</td>
                         <td class="actions-cell">
                             <span class="@ReviewCss(row.Decision)">@ReviewLabel(row.Decision)</span>
-                            @if (row.Review is not null)
+                            @if (row.Decision.SupersededAt is not null)
+                            {
+                                <div class="small">Superseded by a merged decision.</div>
+                            }
+                            else if (row.Review is not null)
                             {
                                 <div class="small">waiting @WaitingAge(row.Decision.CreatedAt)</div>
                                 @if (!_stepUpFresh)
@@ -479,6 +483,11 @@
 
     private static string ReviewLabel(Decision decision)
     {
+        if (decision.SupersededAt is not null)
+        {
+            return "Superseded";
+        }
+
         if (decision.Outcome != DecisionOutcome.RequireApproval)
         {
             return "-";
@@ -489,6 +498,11 @@
 
     private static string ReviewCss(Decision decision)
     {
+        if (decision.SupersededAt is not null)
+        {
+            return "badge";
+        }
+
         if (decision.Outcome != DecisionOutcome.RequireApproval)
         {
             return "small";

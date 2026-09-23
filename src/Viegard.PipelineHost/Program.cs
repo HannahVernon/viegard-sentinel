@@ -106,6 +106,12 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<BurstDetectionOptions>, BurstDetectionOptionsValidator>();
 
+builder.Services
+    .AddOptions<Viegard.Application.Coalescing.IncidentCoalescingOptions>()
+    .Bind(builder.Configuration.GetSection(Viegard.Application.Coalescing.IncidentCoalescingOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<Viegard.Application.Coalescing.IncidentCoalescingOptions>, Viegard.Application.Coalescing.IncidentCoalescingOptionsValidator>();
+
 // Secrets (D-0006): mounted secret files in production, user-secrets-backed
 // configuration in development.  Selection is configuration, never code.
 var secretProviderKind = builder.Configuration["Viegard:Secrets:Provider"] ?? "configuration";
@@ -167,6 +173,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IClassifierSettingsStore, InMemoryClassifierSettingsStore>();
 builder.Services.AddSingleton<IBurstDetectionSettingsStore, InMemoryBurstDetectionSettingsStore>();
+builder.Services.AddSingleton<Viegard.Application.Coalescing.IIncidentCoalescingSettingsStore, InMemoryIncidentCoalescingSettingsStore>();
 builder.Services.AddSingleton<IBurstWindowStore, InMemoryBurstWindowStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();
         builder.Services.AddSingleton<IMikroTikRouterStore, InMemoryMikroTikRouterStore>();
@@ -198,6 +205,8 @@ builder.Services.AddSingleton<IClassifierSettingsDiagnostics, LoggingClassifierS
 builder.Services.AddSingleton<ClassifierSettingsSource>();
 builder.Services.AddSingleton<IBurstDetectionSettingsDiagnostics, LoggingBurstDetectionSettingsDiagnostics>();
 builder.Services.AddSingleton<BurstDetectionSettingsSource>();
+builder.Services.AddSingleton<Viegard.Application.Coalescing.IIncidentCoalescingSettingsDiagnostics, LoggingIncidentCoalescingSettingsDiagnostics>();
+builder.Services.AddSingleton<Viegard.Application.Coalescing.IncidentCoalescingSettingsSource>();
 builder.Services.AddSingleton<IBurstSignal, AuthFailureBurstSignal>();
 builder.Services.AddSingleton(sp => new BurstDetector(
     sp.GetServices<IBurstSignal>(),
@@ -351,9 +360,13 @@ if (configuredRoles.Contains(RoleNames.Correlation, StringComparer.OrdinalIgnore
         new TimeWindowCorrelator(
             sp.GetRequiredService<IEnumerable<IDetectionRule>>(),
             sp.GetRequiredService<IIncidentStore>(),
-            sp.GetRequiredService<IOptions<CorrelationOptions>>().Value));
+            sp.GetRequiredService<IOptions<CorrelationOptions>>().Value,
+            sp.GetRequiredService<Viegard.Application.Coalescing.IncidentCoalescingSettingsSource>(),
+            sp.GetRequiredService<IOptions<Viegard.Application.Coalescing.IncidentCoalescingOptions>>().Value));
     builder.Services.AddHostedService<CorrelationWorker>();
+    builder.Services.AddHostedService<CoalescingFinalizerWorker>();
     builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, BurstDetectionSettingsRefreshWorker>());
+    builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, IncidentCoalescingSettingsRefreshWorker>());
 }
 
 // The classification worker runs only in the singleton classification role (D-0011, D-0028).

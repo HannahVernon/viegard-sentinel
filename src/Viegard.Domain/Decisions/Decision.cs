@@ -71,4 +71,14 @@ public sealed record Decision
     public DateTimeOffset? ReviewedAt { get; init; }
 
     public DecisionReviewOutcome? ReviewOutcome { get; init; }
+
+    /// <summary>
+    /// Set when a later merged decision replaced this provisional one during
+    /// incident coalescing.  A superseded decision is no longer actionable but
+    /// remains listed for audit, badged "Superseded".
+    /// </summary>
+    public DateTimeOffset? SupersededAt { get; init; }
+
+    /// <summary>The merged decision that superseded this one, when applicable.</summary>
+    public Guid? SupersededByDecisionId { get; init; }
 }

@@ -44,6 +44,7 @@ public static class ReadOnlyApiEndpoints
         api.MapGet("/classifications/{id:guid}", GetClassificationAsync);
         api.MapGet("/classifier/settings", GetClassifierSettingsAsync);
         api.MapGet("/burst/settings", GetBurstDetectionSettingsAsync);
+        api.MapGet("/coalescing/settings", GetIncidentCoalescingSettingsAsync);
         api.MapGet("/policy/thresholds", GetPolicyThresholdsAsync);
         api.MapGet("/advisor/summary", GetAdvisorSummaryAsync);
         api.MapGet("/advisor/consults", ListAdvisorConsultsAsync);
@@ -313,6 +314,26 @@ public static class ReadOnlyApiEndpoints
             authFailureWindowSeconds = values.AuthFailureWindowSeconds,
             authFailureCooldownSeconds = values.AuthFailureCooldownSeconds,
             authFailureActionEligible = values.AuthFailureActionEligible,
+            version = settings?.RowVersion ?? source.Current.RowVersion,
+            updatedAt = settings?.UpdatedAt,
+            updatedBy = settings?.UpdatedBy,
+            seeded = settings is not null || source.Current.IsSeeded,
+        }, Json);
+    }
+
+    internal static async Task<IResult> GetIncidentCoalescingSettingsAsync(
+        HttpContext context,
+        Viegard.Application.Coalescing.IIncidentCoalescingSettingsStore settingsStore,
+        Viegard.Application.Coalescing.IncidentCoalescingSettingsSource source,
+        IOptions<Viegard.Application.Coalescing.IncidentCoalescingOptions> options)
+    {
+        var settings = await settingsStore.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        var values = settings?.ToValues() ?? source.CurrentValues(options.Value);
+        return Results.Json(new
+        {
+            enabled = values.Enabled,
+            settleWindowSeconds = values.SettleWindowSeconds,
+            maxCoalesceWindowSeconds = values.MaxCoalesceWindowSeconds,
             version = settings?.RowVersion ?? source.Current.RowVersion,
             updatedAt = settings?.UpdatedAt,
             updatedBy = settings?.UpdatedBy,

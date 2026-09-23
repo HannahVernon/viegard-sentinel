@@ -76,7 +76,7 @@ public sealed class PolicyWorker(
                     .ConfigureAwait(false);
 
                 await decisionStore.AddAsync(decision, stoppingToken).ConfigureAwait(false);
-                await MarkIncidentDecidedAsync(classification, stoppingToken).ConfigureAwait(false);
+                await MarkIncidentDecidedAsync(classification, decision, stoppingToken).ConfigureAwait(false);
                 await auditLedger.AppendAsync(new AuditRecord
                 {
                     Id = ViegardId.New(),
@@ -205,6 +205,7 @@ public sealed class PolicyWorker(
 
     private async Task MarkIncidentDecidedAsync(
         Classification classification,
+        Viegard.Domain.Decisions.Decision decision,
         CancellationToken cancellationToken)
     {
         if (classification.SubjectKind != ClassificationSubjectKind.Incident)
@@ -222,8 +223,80 @@ public sealed class PolicyWorker(
         }
 
         await incidentStore
-            .UpsertAsync(incident with { State = IncidentState.Decided }, cancellationToken)
+            .UpsertAsync(
+                incident with
+                {
+                    State = IncidentState.Decided,
+                    DecidedEventCount = incident.EventIds.Count,
+                },
+                cancellationToken)
             .ConfigureAwait(false);
+
+        await SupersedeProvisionalDecisionsAsync(incident.Id, classification.Id, decision, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// When a merged decision is produced for a coalesced incident, withdraw the
+    /// earlier provisional decision(s) from a prior classification pass that are
+    /// still pending review, so <c>/decisions</c> shows one actionable decision.
+    /// A decision a human already actioned is never withdrawn.
+    /// </summary>
+    private async Task SupersedeProvisionalDecisionsAsync(
+        Guid incidentId,
+        Guid currentClassificationId,
+        Viegard.Domain.Decisions.Decision decision,
+        CancellationToken cancellationToken)
+    {
+        var classifications = await classificationStore
+            .ListForSubjectAsync(ClassificationSubjectKind.Incident, incidentId, cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var priorClassification in classifications)
+        {
+            if (priorClassification.Id == currentClassificationId)
+            {
+                continue;
+            }
+
+            var priorDecisions = await decisionStore
+                .ListForClassificationAsync(priorClassification.Id, cancellationToken)
+                .ConfigureAwait(false);
+            foreach (var prior in priorDecisions)
+            {
+                if (prior.Id == decision.Id
+                    || prior.Outcome != Viegard.Domain.Decisions.DecisionOutcome.RequireApproval
+                    || prior.ReviewedAt is not null
+                    || prior.SupersededAt is not null)
+                {
+                    continue;
+                }
+
+                var superseded = await decisionStore
+                    .TrySupersedeAsync(prior.Id, decision.Id, DateTimeOffset.UtcNow, cancellationToken)
+                    .ConfigureAwait(false);
+                if (superseded is null)
+                {
+                    continue;
+                }
+
+                await auditLedger.AppendAsync(new AuditRecord
+                {
+                    Id = ViegardId.New(),
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Stage = PipelineStage.Policy,
+                    Summary = $"Provisional decision {prior.Id} superseded by merged decision {decision.Id} for incident {incidentId}.",
+                    IncidentId = incidentId,
+                    ClassificationId = priorClassification.Id,
+                    DecisionId = prior.Id,
+                    DetailJson = JsonSerializer.Serialize(new
+                    {
+                        Kind = "DecisionSuperseded",
+                        SupersededByDecisionId = decision.Id,
+                    }, Json),
+                }, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     private static string DecisionDetailJson(Viegard.Domain.Decisions.Decision decision) =>

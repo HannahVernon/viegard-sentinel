@@ -171,6 +171,68 @@ public sealed class DecisionStoreTests
         Assert.Equal(0, await store.CountUnreviewedAtOrBelowAsync(3));
     }
 
+    [Fact]
+    public async Task TrySupersedeAsync_marks_only_pending_requireapproval_decisions()
+    {
+        var store = new InMemoryDecisionStore();
+        var now = DateTimeOffset.UtcNow;
+        var pending = Decision(DecisionOutcome.RequireApproval);
+        var authorized = Decision(DecisionOutcome.ActionAuthorized);
+        var reviewed = Decision(DecisionOutcome.RequireApproval) with
+        {
+            ReviewedBy = "hannah",
+            ReviewedAt = now.AddMinutes(-1),
+            ReviewOutcome = DecisionReviewOutcome.Approved,
+        };
+        await store.AddAsync(pending);
+        await store.AddAsync(authorized);
+        await store.AddAsync(reviewed);
+        var replacement = ViegardId.New();
+
+        Assert.Null(await store.TrySupersedeAsync(authorized.Id, replacement, now));
+        Assert.Null(await store.TrySupersedeAsync(reviewed.Id, replacement, now));
+
+        var superseded = await store.TrySupersedeAsync(pending.Id, replacement, now);
+
+        Assert.NotNull(superseded);
+        Assert.Equal(now.ToUniversalTime(), superseded!.SupersededAt);
+        Assert.Equal(replacement, superseded.SupersededByDecisionId);
+    }
+
+    [Fact]
+    public async Task TrySupersedeAsync_is_idempotent_after_first_supersede()
+    {
+        var store = new InMemoryDecisionStore();
+        var now = DateTimeOffset.UtcNow;
+        var pending = Decision(DecisionOutcome.RequireApproval);
+        await store.AddAsync(pending);
+
+        Assert.NotNull(await store.TrySupersedeAsync(pending.Id, ViegardId.New(), now));
+        Assert.Null(await store.TrySupersedeAsync(pending.Id, ViegardId.New(), now));
+    }
+
+    [Fact]
+    public async Task Superseded_decisions_are_excluded_from_review_queue_and_counts()
+    {
+        var classifications = new InMemoryClassificationStore();
+        var store = new InMemoryDecisionStore(classifications);
+        var now = DateTimeOffset.UtcNow;
+        var pending = await AddWithSeverityAsync(store, classifications, DecisionOutcome.RequireApproval, 3);
+        var superseded = await AddWithSeverityAsync(store, classifications, DecisionOutcome.RequireApproval, 3);
+        await store.TrySupersedeAsync(superseded.Id, pending.Id, now);
+
+        Assert.Equal(1, await store.CountUnreviewedAtOrBelowAsync(10));
+        var claimSet = await store.ListPageAsync(
+            null,
+            10,
+            new DecisionListFilter(null, DecisionOutcome.RequireApproval, MaxSeverity: 10, UnreviewedOnly: true));
+        Assert.Single(claimSet.Items);
+        Assert.Equal(pending.Id, claimSet.Items[0].Id);
+
+        Assert.Equal(1, await store.BulkRejectUnreviewedAsync(10, "operator", now));
+        Assert.Null((await store.GetAsync(superseded.Id))!.ReviewedAt);
+    }
+
     private static async Task<Decision> AddWithSeverityAsync(
         InMemoryDecisionStore store,
         InMemoryClassificationStore classifications,

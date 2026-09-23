@@ -101,6 +101,10 @@ public sealed class IncidentRow
     public string EvidenceJson { get; set; } = "[]";
 
     public int State { get; set; }
+
+    public DateTimeOffset? CoalesceUntil { get; set; }
+
+    public int DecidedEventCount { get; set; }
 }
 
 public sealed class ClassificationRow
@@ -157,6 +161,10 @@ public sealed class DecisionRow
     public DateTimeOffset? ReviewedAt { get; set; }
 
     public int? ReviewOutcome { get; set; }
+
+    public DateTimeOffset? SupersededAt { get; set; }
+
+    public Guid? SupersededByDecisionId { get; set; }
 }
 
 public sealed class ActionRecordRow
@@ -657,6 +665,23 @@ public sealed class BurstDetectionSettingsRow
     public int AuthFailureCooldownSeconds { get; set; }
 
     public bool AuthFailureActionEligible { get; set; }
+
+    public int RowVersion { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+}
+
+public sealed class IncidentCoalescingSettingsRow
+{
+    public int Id { get; set; }
+
+    public bool Enabled { get; set; }
+
+    public int SettleWindowSeconds { get; set; }
+
+    public int MaxCoalesceWindowSeconds { get; set; }
 
     public int RowVersion { get; set; }
 

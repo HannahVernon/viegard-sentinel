@@ -129,6 +129,30 @@ public sealed class InMemoryIncidentStore : IIncidentStore
             .OrderByDescending(i => i.WindowEnd)
             .FirstOrDefault());
 
+    public ValueTask<Incident?> FindCoalescibleByCorrelationKeyAsync(
+        string correlationKey,
+        DateTimeOffset asOf,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(_incidents.Values
+            .Where(i => i.State != IncidentState.Closed
+                && i.CorrelationKey == correlationKey
+                && i.CoalesceUntil.HasValue
+                && i.CoalesceUntil.Value >= asOf)
+            .OrderByDescending(i => i.WindowEnd)
+            .FirstOrDefault());
+
+    public ValueTask<IReadOnlyList<Incident>> ListCoalescingReadyAsync(
+        DateTimeOffset asOf,
+        int limit,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult<IReadOnlyList<Incident>>(_incidents.Values
+            .Where(i => i.State != IncidentState.Closed
+                && i.CoalesceUntil.HasValue
+                && i.CoalesceUntil.Value < asOf)
+            .OrderBy(i => i.CoalesceUntil!.Value)
+            .Take(Math.Max(1, limit))
+            .ToList());
+
     public ValueTask<IReadOnlyList<Incident>> FindByEventIdAsync(Guid eventId, CancellationToken cancellationToken = default) =>
         ValueTask.FromResult<IReadOnlyList<Incident>>(_incidents.Values
             .Where(i => i.EventIds.Contains(eventId))
@@ -281,7 +305,7 @@ public sealed class InMemoryDecisionStore : IDecisionStore
 
         if (filter?.UnreviewedOnly == true)
         {
-            query = query.Where(d => d.ReviewedAt is null);
+            query = query.Where(d => d.ReviewedAt is null && d.SupersededAt is null);
         }
 
         return query;
@@ -303,7 +327,8 @@ public sealed class InMemoryDecisionStore : IDecisionStore
         {
             if (!_decisions.TryGetValue(id, out var decision)
                 || decision.Outcome != DecisionOutcome.RequireApproval
-                || decision.ReviewedAt is not null)
+                || decision.ReviewedAt is not null
+                || decision.SupersededAt is not null)
             {
                 return ValueTask.FromResult<Decision?>(null);
             }
@@ -316,6 +341,32 @@ public sealed class InMemoryDecisionStore : IDecisionStore
             };
             _decisions[id] = reviewed;
             return ValueTask.FromResult<Decision?>(reviewed);
+        }
+    }
+
+    public ValueTask<Decision?> TrySupersedeAsync(
+        Guid id,
+        Guid supersededByDecisionId,
+        DateTimeOffset supersededAt,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (!_decisions.TryGetValue(id, out var decision)
+                || decision.Outcome != DecisionOutcome.RequireApproval
+                || decision.ReviewedAt is not null
+                || decision.SupersededAt is not null)
+            {
+                return ValueTask.FromResult<Decision?>(null);
+            }
+
+            var superseded = decision with
+            {
+                SupersededAt = supersededAt.ToUniversalTime(),
+                SupersededByDecisionId = supersededByDecisionId,
+            };
+            _decisions[id] = superseded;
+            return ValueTask.FromResult<Decision?>(superseded);
         }
     }
 
@@ -332,6 +383,7 @@ public sealed class InMemoryDecisionStore : IDecisionStore
             {
                 if (decision.Outcome != DecisionOutcome.RequireApproval
                     || decision.ReviewedAt is not null
+                    || decision.SupersededAt is not null
                     || _classifications?.TryGetSeverity(decision.ClassificationId) is not { } severity
                     || severity > maxSeverity)
                 {
@@ -357,6 +409,7 @@ public sealed class InMemoryDecisionStore : IDecisionStore
         ValueTask.FromResult(_decisions.Values.Count(decision =>
             decision.Outcome == DecisionOutcome.RequireApproval
             && decision.ReviewedAt is null
+            && decision.SupersededAt is null
             && _classifications?.TryGetSeverity(decision.ClassificationId) is { } severity
             && severity <= maxSeverity));
 }

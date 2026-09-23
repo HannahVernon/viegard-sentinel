@@ -63,6 +63,27 @@ public interface IIncidentStore
 
     ValueTask<Incident?> FindOpenByCorrelationKeyAsync(string correlationKey, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Finds the most recent incident for a correlation key that is still within
+    /// its coalescing window (not finalized and <c>CoalesceUntil</c> at or after
+    /// <paramref name="asOf"/>), so a same-source event can be merged into it
+    /// instead of starting a separate incident.
+    /// </summary>
+    ValueTask<Incident?> FindCoalescibleByCorrelationKeyAsync(
+        string correlationKey,
+        DateTimeOffset asOf,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists incidents whose coalescing window has closed (not finalized and
+    /// <c>CoalesceUntil</c> before <paramref name="asOf"/>) so the finalizer can
+    /// merge late arrivals and close them.
+    /// </summary>
+    ValueTask<IReadOnlyList<Incident>> ListCoalescingReadyAsync(
+        DateTimeOffset asOf,
+        int limit,
+        CancellationToken cancellationToken = default);
+
     ValueTask<IReadOnlyList<Incident>> FindByEventIdAsync(Guid eventId, CancellationToken cancellationToken = default);
 
     ValueTask<KeysetPage<Incident>> ListPageAsync(
@@ -132,6 +153,18 @@ public interface IDecisionStore
         DecisionReviewOutcome outcome,
         string reviewedBy,
         DateTimeOffset reviewedAt,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Marks a provisional decision as superseded by a later merged decision
+    /// during incident coalescing.  Succeeds only when the decision is still a
+    /// pending RequireApproval that has not been reviewed or already superseded,
+    /// so a human-actioned decision is never withdrawn.
+    /// </summary>
+    ValueTask<Decision?> TrySupersedeAsync(
+        Guid id,
+        Guid supersededByDecisionId,
+        DateTimeOffset supersededAt,
         CancellationToken cancellationToken = default);
 
     /// <summary>

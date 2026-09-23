@@ -54,9 +54,17 @@ public sealed class CorrelationWorker(
                         IncidentId = incident.Id,
                         DetailJson = CorrelationDetailJson(incident.Evidence, eventId),
                     }, stoppingToken).ConfigureAwait(false);
-                    await incidentQueue
-                        .EnqueueAsync(new IncidentWorkItem(incident.Id), stoppingToken)
-                        .ConfigureAwait(false);
+
+                    // Only a newly created incident (its first and only event) is
+                    // enqueued for a provisional decision.  Events coalesced into
+                    // an existing incident do not re-decide; the coalescing
+                    // finalizer merges them once the window closes.
+                    if (incident.EventIds.Count == 1)
+                    {
+                        await incidentQueue
+                            .EnqueueAsync(new IncidentWorkItem(incident.Id), stoppingToken)
+                            .ConfigureAwait(false);
+                    }
                 }
 
                 await ObserveBurstsAsync(normalizedEvent, eventId, stoppingToken).ConfigureAwait(false);

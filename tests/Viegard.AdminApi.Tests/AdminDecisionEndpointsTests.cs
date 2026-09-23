@@ -117,6 +117,21 @@ public sealed class AdminDecisionEndpointsTests
     }
 
     [Fact]
+    public async Task ReviewDecision_preserves_returnTo_row_fragment()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        var decision = await fixture.AddDecisionChainAsync("ip=198.51.100.11|window=60s");
+        var anchor = Guid.NewGuid().ToString("N");
+        var returnTo = $"/decisions?outcome=RequireApproval#decision-{anchor}";
+        fixture.Context.Request.Form = ReviewForm(decision.Id, "approve", "1d", returnTo: returnTo);
+
+        var result = await fixture.InvokeReviewAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.EndsWith($"#decision-{anchor}", location, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReviewDecision_falls_back_to_detail_when_returnTo_is_not_local()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);

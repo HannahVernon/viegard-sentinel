@@ -2,7 +2,15 @@
 
 @if (_flash is not null)
 {
-    <p class="@(_flash.IsError ? "message error" : "message")">@_flash.Message</p>
+    @* Rendered as a fixed, out-of-flow toast so its appearance and dismissal
+       never shift page content.  role="status" announces it politely without
+       stealing focus.  The dismiss button is progressive enhancement (wired by
+       list-review.js); with scripting off the success toast still fades on its
+       own timer and error toasts persist harmlessly at the top. *@
+    <div class="flash-toast @(_flash.IsError ? "flash-toast-error" : null)" role="status" aria-live="polite">
+        <p class="@(_flash.IsError ? "message error" : "message")">@_flash.Message</p>
+        <button type="button" class="flash-close" data-flash-close aria-label="Dismiss message">&times;</button>
+    </div>
 }
 
 @code {

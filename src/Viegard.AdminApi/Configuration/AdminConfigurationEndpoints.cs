@@ -122,6 +122,9 @@ public static class AdminConfigurationEndpoints
         app.MapPost("/configuration/doh", SaveDohBlocklistSettingsAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
+        app.MapPost("/configuration/doh/probe-now", RequestDohProbeAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
         app.MapPost("/configuration/posture", SavePolicyPostureAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
@@ -1545,6 +1548,37 @@ public static class AdminConfigurationEndpoints
             result.Settings,
             context.RequestAborted).ConfigureAwait(false);
         return Redirect(DohBlocklistSettingsConfigurationPath, status: "DoH blocklist settings saved.");
+    }
+
+    internal static async Task<IResult> RequestDohProbeAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IDohBlocklistSettingsStore dohSettings,
+        IDohProbeTrigger probeTrigger,
+        IAdminUserStore users,
+        AdminConfigAuditor configAuditor)
+    {
+        await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        var settings = await dohSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        if (settings is null || !settings.Enabled)
+        {
+            return Redirect(DohBlocklistSettingsConfigurationPath, error: "Enable the DoH blocklist before requesting a probe.");
+        }
+
+        if (!settings.ProbeEnabled)
+        {
+            return Redirect(DohBlocklistSettingsConfigurationPath, error: "Canary probing is disabled, so there is nothing to run.  Enable probing first.");
+        }
+
+        await probeTrigger.RequestAsync(context.RequestAborted).ConfigureAwait(false);
+        await configAuditor.RecordDohProbeRequestedAsync(user.Username, context.RequestAborted).ConfigureAwait(false);
+        return Redirect(DohBlocklistSettingsConfigurationPath, status: "Probe requested.  The next cycle runs shortly; results appear once it completes.");
     }
 
     internal static async Task<IResult> SaveIncidentCoalescingSettingsAsync(

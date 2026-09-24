@@ -15,6 +15,7 @@ using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Coalescing;
 using Viegard.Application.Configuration;
+using Viegard.Application.Doh;
 using Viegard.Application.Policy;
 using Viegard.Application.Queues;
 using Viegard.Application.Retention;
@@ -1083,6 +1084,17 @@ public sealed class AdminConfigurationEndpointsTests
         Assert.Equal(2, commands.Count);
     }
 
+    private static InstanceRegistration Registration(string instanceId, string upgradeTarget) => new()
+    {
+        InstanceId = instanceId,
+        Version = "test",
+        Roles = "sources",
+        UpgradeTarget = upgradeTarget,
+        HostName = instanceId,
+        StartedAt = DateTimeOffset.UtcNow.AddHours(-1),
+        ReportedAt = DateTimeOffset.UtcNow,
+    };
+
     [Fact]
     public async Task Request_all_host_upgrades_with_everything_in_flight_reports_error()
     {
@@ -1098,16 +1110,63 @@ public sealed class AdminConfigurationEndpointsTests
         Assert.Single(await fixture.HostUpgrades.ListRecentAsync());
     }
 
-    private static InstanceRegistration Registration(string instanceId, string upgradeTarget) => new()
+    [Fact]
+    public async Task Request_doh_probe_signals_the_trigger_and_audits_when_probing_enabled()
     {
-        InstanceId = instanceId,
-        Version = "test",
-        Roles = "sources",
-        UpgradeTarget = upgradeTarget,
-        HostName = instanceId,
-        StartedAt = DateTimeOffset.UtcNow.AddHours(-1),
-        ReportedAt = DateTimeOffset.UtcNow,
-    };
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.DohSettings.UpdateAsync(
+            new DohBlocklistSettings { Enabled = true, ProbeEnabled = true },
+            expectedRowVersion: 0,
+            "hannah",
+            DateTimeOffset.UtcNow);
+        fixture.Context.Request.Form = EmptyForm();
+
+        var result = await fixture.InvokeRequestDohProbeAsync();
+        var location = Uri.UnescapeDataString(await ExecuteRedirectAsync(result, fixture.Context));
+
+        Assert.Contains("Probe requested", location, StringComparison.Ordinal);
+        Assert.True(await fixture.DohProbeTrigger.WaitForRequestAsync(TimeSpan.Zero));
+        Assert.Equal(1, fixture.AuditLedger.Records.Count(r =>
+            r.Summary.Contains("requested an immediate DoH probe cycle", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task Request_doh_probe_is_rejected_when_the_blocklist_is_disabled()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.DohSettings.UpdateAsync(
+            new DohBlocklistSettings { Enabled = false },
+            expectedRowVersion: 0,
+            "hannah",
+            DateTimeOffset.UtcNow);
+        fixture.Context.Request.Form = EmptyForm();
+
+        var result = await fixture.InvokeRequestDohProbeAsync();
+        var location = Uri.UnescapeDataString(await ExecuteRedirectAsync(result, fixture.Context));
+
+        Assert.Contains("Enable the DoH blocklist", location, StringComparison.Ordinal);
+        Assert.False(await fixture.DohProbeTrigger.WaitForRequestAsync(TimeSpan.Zero));
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
+
+    [Fact]
+    public async Task Request_doh_probe_is_rejected_when_probing_is_disabled()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        await fixture.DohSettings.UpdateAsync(
+            new DohBlocklistSettings { Enabled = true, ProbeEnabled = false },
+            expectedRowVersion: 0,
+            "hannah",
+            DateTimeOffset.UtcNow);
+        fixture.Context.Request.Form = EmptyForm();
+
+        var result = await fixture.InvokeRequestDohProbeAsync();
+        var location = Uri.UnescapeDataString(await ExecuteRedirectAsync(result, fixture.Context));
+
+        Assert.Contains("Canary probing is disabled", location, StringComparison.Ordinal);
+        Assert.False(await fixture.DohProbeTrigger.WaitForRequestAsync(TimeSpan.Zero));
+        Assert.Empty(fixture.AuditLedger.Records);
+    }
 
     private static FormCollection EmptyForm() =>
         new(new Dictionary<string, StringValues>(StringComparer.Ordinal));
@@ -1570,7 +1629,9 @@ public sealed class AdminConfigurationEndpointsTests
         InMemoryInstanceRegistryStore InstanceRegistry,
         InMemoryIngestionFilterStore IngestionFilters,
         InMemoryAdminErrorStore AdminErrors,
-        SatelliteRoleCredentialCookie SatelliteCredentialCookie)
+        SatelliteRoleCredentialCookie SatelliteCredentialCookie,
+        InMemoryDohBlocklistSettingsStore DohSettings,
+        InMemoryDohProbeTrigger DohProbeTrigger)
     {
         public static async Task<EndpointFixture> CreateAsync(bool freshStepUp)
         {
@@ -1627,6 +1688,8 @@ public sealed class AdminConfigurationEndpointsTests
             var burstDetection = new InMemoryBurstDetectionSettingsStore();
             var coalescing = new InMemoryIncidentCoalescingSettingsStore();
             var sessionSecurity = new InMemorySessionSecuritySettingsStore();
+            var dohSettings = new InMemoryDohBlocklistSettingsStore();
+            var dohProbeTrigger = new InMemoryDohProbeTrigger();
             var satelliteCredentialCookie = new SatelliteRoleCredentialCookie(new NoopDataProtectionProvider());
             var services = new ServiceCollection()
                 .AddLogging()
@@ -1673,7 +1736,9 @@ public sealed class AdminConfigurationEndpointsTests
                 new InMemoryInstanceRegistryStore(),
                 ingestionFilters,
                 new InMemoryAdminErrorStore(),
-                satelliteCredentialCookie);
+                satelliteCredentialCookie,
+                dohSettings,
+                dohProbeTrigger);
         }
 
         public Task<IResult> InvokeAsync() =>
@@ -1748,6 +1813,15 @@ public sealed class AdminConfigurationEndpointsTests
                 Users,
                 Sessions,
                 AuthAuditor,
+                ConfigAuditor);
+
+        public Task<IResult> InvokeRequestDohProbeAsync() =>
+            AdminConfigurationEndpoints.RequestDohProbeAsync(
+                Context,
+                Antiforgery,
+                DohSettings,
+                DohProbeTrigger,
+                Users,
                 ConfigAuditor);
 
         public Task<IResult> InvokeSavePolicyThresholdsAsync() =>

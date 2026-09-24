@@ -445,6 +445,32 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
         }
     }
 
+    public async ValueTask RecordDohProbeRequestedAsync(
+        string username,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin action by {username}: requested an immediate DoH probe cycle.",
+                SourceId = "admin:config",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "DohProbeRequested",
+                    Username = username,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
+
     public async ValueTask RecordSessionSecuritySettingsWriteAsync(
         string username,
         Viegard.Application.Auth.SessionSecuritySettings? before,

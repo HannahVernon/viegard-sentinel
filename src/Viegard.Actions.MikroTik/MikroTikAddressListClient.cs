@@ -108,6 +108,42 @@ public sealed class MikroTikAddressListClient(HttpClient client, MikroTikRouter 
         throw new InvalidOperationException(snippet.Length == 0 ? detail : $"{detail}  Router response: {snippet}");
     }
 
+    /// <summary>Updates the comment on an existing address-list entry.</summary>
+    public async Task<bool> SetCommentAsync(
+        string entryId,
+        string comment,
+        int maxErrorBodyBytes,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsValidEntryId(entryId))
+        {
+            throw new InvalidOperationException("Router entry id was missing or unrecognized.");
+        }
+
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["comment"] = comment ?? string.Empty,
+        };
+
+        using var request = AuthorizedRequest(HttpMethod.Patch, AddressListEntryUrl(router, entryId), authBytes);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            .ConfigureAwait(false);
+        var responseBody = await ReadBodyPrefixTextAsync(response.Content, maxErrorBodyBytes, cancellationToken).ConfigureAwait(false);
+        if (response.IsSuccessStatusCode)
+        {
+            return true;
+        }
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+
+        throw new InvalidOperationException(
+            $"Router comment update returned HTTP {(int)response.StatusCode} {OneLine(response.ReasonPhrase, 80)}.".Trim());
+    }
+
     public static string AddressListUrl(MikroTikRouter router) =>
         $"{router.BaseUrl.TrimEnd('/')}/rest/ip/firewall/address-list";
 

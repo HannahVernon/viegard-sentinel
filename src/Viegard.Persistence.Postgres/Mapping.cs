@@ -4,6 +4,7 @@ using Viegard.Application.Burst;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Coalescing;
 using Viegard.Application.Configuration;
+using Viegard.Application.Doh;
 using Viegard.Application.Policy;
 using Viegard.Application.Retention;
 using Viegard.Domain.Admin;
@@ -648,6 +649,86 @@ internal static class Mapping
         Address = row.Address,
         FirstSeenAt = row.FirstSeenAt,
         LastSeenAt = row.LastSeenAt,
+    };
+
+    public static DohBlocklistSettingsRow ToRow(this DohBlocklistSettings settings) => new()
+    {
+        Id = settings.Id,
+        Enabled = settings.Enabled,
+        PrimaryFeedUrl = settings.PrimaryFeedUrl,
+        SecondaryFeedUrl = settings.SecondaryFeedUrl,
+        AddressListName = settings.AddressListName,
+        FetchIntervalSeconds = settings.FetchIntervalSeconds,
+        ProbeEnabled = settings.ProbeEnabled,
+        ProbeCanaryFqdn = settings.ProbeCanaryFqdn,
+        ProbeExpectedToken = settings.ProbeExpectedToken,
+        ProbeEndpointPath = settings.ProbeEndpointPath,
+        ProbeTimeoutSeconds = settings.ProbeTimeoutSeconds,
+        ProbeConcurrency = settings.ProbeConcurrency,
+        ProbeIntervalSeconds = settings.ProbeIntervalSeconds,
+        ApplyToRouters = settings.ApplyToRouters,
+        RowVersion = settings.RowVersion,
+        UpdatedAt = Utc(settings.UpdatedAt),
+        UpdatedBy = settings.UpdatedBy,
+    };
+
+    public static DohBlocklistSettings ToDomain(this DohBlocklistSettingsRow row) => new()
+    {
+        Id = row.Id,
+        Enabled = row.Enabled,
+        PrimaryFeedUrl = row.PrimaryFeedUrl,
+        SecondaryFeedUrl = row.SecondaryFeedUrl,
+        AddressListName = row.AddressListName,
+        FetchIntervalSeconds = row.FetchIntervalSeconds,
+        ProbeEnabled = row.ProbeEnabled,
+        ProbeCanaryFqdn = row.ProbeCanaryFqdn,
+        ProbeExpectedToken = row.ProbeExpectedToken,
+        ProbeEndpointPath = row.ProbeEndpointPath,
+        ProbeTimeoutSeconds = row.ProbeTimeoutSeconds,
+        ProbeConcurrency = row.ProbeConcurrency,
+        ProbeIntervalSeconds = row.ProbeIntervalSeconds,
+        ApplyToRouters = row.ApplyToRouters,
+        RowVersion = row.RowVersion,
+        UpdatedAt = row.UpdatedAt,
+        UpdatedBy = row.UpdatedBy,
+    };
+
+    public static DohDesiredAddressRow ToRow(this DohDesiredAddress address) => new()
+    {
+        Address = address.Address,
+        FirstSeenAt = Utc(address.FirstSeenAt),
+        LastSeenAt = Utc(address.LastSeenAt),
+    };
+
+    public static DohDesiredAddress ToDomain(this DohDesiredAddressRow row) => new()
+    {
+        Address = row.Address,
+        FirstSeenAt = row.FirstSeenAt,
+        LastSeenAt = row.LastSeenAt,
+    };
+
+    public static DohProbeResultRow ToRow(this DohProbeResult result) => new()
+    {
+        Address = result.Address,
+        Status = (int)result.Status,
+        HttpStatus = result.HttpStatus,
+        TokenMatched = result.TokenMatched,
+        ConsecutiveFailures = result.ConsecutiveFailures,
+        FirstSeenAt = Utc(result.FirstSeenAt),
+        LastProbedAt = Utc(result.LastProbedAt),
+        LastConfirmedAt = Utc(result.LastConfirmedAt),
+    };
+
+    public static DohProbeResult ToDomain(this DohProbeResultRow row) => new()
+    {
+        Address = row.Address,
+        Status = (DohProbeStatus)row.Status,
+        HttpStatus = row.HttpStatus,
+        TokenMatched = row.TokenMatched,
+        ConsecutiveFailures = row.ConsecutiveFailures,
+        FirstSeenAt = row.FirstSeenAt,
+        LastProbedAt = row.LastProbedAt,
+        LastConfirmedAt = row.LastConfirmedAt,
     };
 
     public static LocalModelAdvisorSettingsRow ToRow(this LocalModelAdvisorSettings settings) => new()

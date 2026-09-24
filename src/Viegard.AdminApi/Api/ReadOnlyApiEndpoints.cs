@@ -46,6 +46,7 @@ public static class ReadOnlyApiEndpoints
         api.MapGet("/burst/settings", GetBurstDetectionSettingsAsync);
         api.MapGet("/coalescing/settings", GetIncidentCoalescingSettingsAsync);
         api.MapGet("/session-security/settings", GetSessionSecuritySettingsAsync);
+        api.MapGet("/doh/settings", GetDohBlocklistSettingsAsync);
         api.MapGet("/policy/thresholds", GetPolicyThresholdsAsync);
         api.MapGet("/advisor/summary", GetAdvisorSummaryAsync);
         api.MapGet("/advisor/consults", ListAdvisorConsultsAsync);
@@ -354,6 +355,36 @@ public static class ReadOnlyApiEndpoints
         {
             stepUpValiditySeconds = values.StepUpValiditySeconds,
             resumeStashTtlSeconds = values.ResumeStashTtlSeconds,
+            version = settings?.RowVersion ?? source.Current.RowVersion,
+            updatedAt = settings?.UpdatedAt,
+            updatedBy = settings?.UpdatedBy,
+            seeded = settings is not null || source.Current.IsSeeded,
+        }, Json);
+    }
+
+    internal static async Task<IResult> GetDohBlocklistSettingsAsync(
+        HttpContext context,
+        Viegard.Application.Doh.IDohBlocklistSettingsStore settingsStore,
+        Viegard.Application.Doh.DohBlocklistSettingsSource source,
+        IOptions<Viegard.Application.Doh.DohBlocklistOptions> options)
+    {
+        var settings = await settingsStore.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        var values = settings?.ToValues() ?? source.CurrentValues(options.Value);
+        return Results.Json(new
+        {
+            enabled = values.Enabled,
+            primaryFeedUrl = values.PrimaryFeedUrl,
+            secondaryFeedUrl = values.SecondaryFeedUrl,
+            addressListName = values.AddressListName,
+            fetchIntervalSeconds = values.FetchIntervalSeconds,
+            probeEnabled = values.ProbeEnabled,
+            probeCanaryFqdn = values.ProbeCanaryFqdn,
+            probeExpectedToken = values.ProbeExpectedToken,
+            probeEndpointPath = values.ProbeEndpointPath,
+            probeTimeoutSeconds = values.ProbeTimeoutSeconds,
+            probeConcurrency = values.ProbeConcurrency,
+            probeIntervalSeconds = values.ProbeIntervalSeconds,
+            applyToRouters = values.ApplyToRouters,
             version = settings?.RowVersion ?? source.Current.RowVersion,
             updatedAt = settings?.UpdatedAt,
             updatedBy = settings?.UpdatedBy,

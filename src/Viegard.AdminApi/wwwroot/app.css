@@ -399,6 +399,31 @@ a:hover {
     color: var(--accent-strong);
 }
 
+.page-index ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.page-index li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.page-index a {
+    display: block;
+}
+
+.page-index-sub {
+    margin-left: 0.55rem;
+    padding-left: 0.6rem;
+    border-left: 1px solid var(--panel-border);
+}
+
 /* On narrow screens the index column would stack above the content and
    consume half the viewport (same failure mode as the wrapped nav bar).
    Collapse it to a single horizontally scrollable chip row pinned just
@@ -426,12 +451,24 @@ a:hover {
         scrollbar-width: thin;
     }
 
+    /* Flatten the nested list so every link becomes a direct flex item of
+       the chip strip, regardless of nesting depth. */
+    .page-index ul,
+    .page-index li {
+        display: contents;
+    }
+
     .page-index a {
         flex: 0 0 auto;
         /* Taller chips approach the recommended touch-target size. */
         padding: 0.45rem 0.7rem;
         border: 1px solid var(--panel-border);
         border-radius: 1rem;
+    }
+
+    /* Distinguish router-scoped sub-features from top-level sections. */
+    .page-index-sub a {
+        border-style: dashed;
     }
 
     .page-index a[aria-current="location"] {
@@ -992,7 +1029,47 @@ tr[id^="decision-"]:focus:not(:focus-visible) {
     margin-top: 0.5rem;
 }
 
-/* Step-up strip and overlay */
+/* Progressive-disclosure add/edit forms: the summary stands in for the
+   section's former <h3>, so data-entry fields stay collapsed until the
+   operator opens them.  Reopened by the server (form= query) on a
+   validation error, or when the underlying list is empty. */
+
+.disclosure-form {
+    margin: 1.1rem 0 0;
+}
+
+.disclosure-form > summary {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--ink);
+    padding: 0.2rem 0;
+}
+
+.disclosure-form > summary::-webkit-details-marker {
+    display: none;
+}
+
+.disclosure-form > summary::before {
+    content: "+";
+    display: inline-block;
+    width: 1rem;
+    font-weight: 700;
+    color: var(--accent);
+}
+
+.disclosure-form[open] > summary::before {
+    content: "\2212";
+}
+
+.disclosure-form > summary:hover {
+    color: var(--accent-strong);
+}
 
 .step-up-strip {
     display: flex;

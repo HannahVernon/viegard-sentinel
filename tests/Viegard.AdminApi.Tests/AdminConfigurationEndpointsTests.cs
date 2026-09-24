@@ -152,6 +152,7 @@ public sealed class AdminConfigurationEndpointsTests
         var location = await ExecuteRedirectAsync(result, fixture.Context);
 
         Assert.Contains(Uri.EscapeDataString(JetPackFeedSettingsValidator.FeedUrlError), location, StringComparison.Ordinal);
+        Assert.Contains("form=jetpack", location, StringComparison.Ordinal);
         Assert.Null(await fixture.JetPackSettings.GetAsync());
         Assert.Empty(fixture.AuditLedger.Records);
     }
@@ -213,6 +214,7 @@ public sealed class AdminConfigurationEndpointsTests
         var location = await ExecuteRedirectAsync(result, fixture.Context);
 
         Assert.Contains(Uri.EscapeDataString(SatelliteRoleName.ValidationError), location, StringComparison.Ordinal);
+        Assert.Contains("form=add-satellite", location, StringComparison.Ordinal);
         Assert.Empty(await fixture.SatelliteRoles.ListAsync());
         Assert.Empty(fixture.AuditLedger.Records);
     }
@@ -1145,6 +1147,7 @@ public sealed class AdminConfigurationEndpointsTests
         var location = Uri.UnescapeDataString(await ExecuteRedirectAsync(result, fixture.Context));
 
         Assert.Contains("Enable the DoH blocklist", location, StringComparison.Ordinal);
+        Assert.Contains("form=doh", location, StringComparison.Ordinal);
         Assert.False(await fixture.DohProbeTrigger.WaitForRequestAsync(TimeSpan.Zero));
         Assert.Empty(fixture.AuditLedger.Records);
     }
@@ -1164,6 +1167,7 @@ public sealed class AdminConfigurationEndpointsTests
         var location = Uri.UnescapeDataString(await ExecuteRedirectAsync(result, fixture.Context));
 
         Assert.Contains("Canary probing is disabled", location, StringComparison.Ordinal);
+        Assert.Contains("form=doh", location, StringComparison.Ordinal);
         Assert.False(await fixture.DohProbeTrigger.WaitForRequestAsync(TimeSpan.Zero));
         Assert.Empty(fixture.AuditLedger.Records);
     }

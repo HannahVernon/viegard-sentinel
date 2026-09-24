@@ -38,20 +38,26 @@
 
 <main class="admin-panel wide page-layout">
     <nav class="page-index" aria-label="Configuration sections">
-        <a class="index-default-link" href="/configuration#retention">Retention</a>
-        <a href="/configuration#satellites">Satellites</a>
-        <a href="/configuration#routers">Routers</a>
-        <a href="/configuration#jetpack">JetPack allowlist</a>
-        <a href="/configuration#local-model-advisor">Local-model advisor</a>
-        <a href="/configuration#upgrades">Upgrades</a>
-        <a href="/configuration#classifier-settings">Classifier settings</a>
-        <a href="/configuration#burst-detection">Burst detection</a>
-        <a href="/configuration#incident-coalescing">Incident coalescing</a>
-        <a href="/configuration#session-security">Session security</a>
-        <a href="/configuration#doh-blocklist">DoH blocklist</a>
-        <a href="/configuration#thresholds">Policy thresholds</a>
-        <a href="/configuration#posture">Policy posture</a>
-        <a href="/configuration#ingestion">Ingestion</a>
+        <ul>
+            <li><a class="index-default-link" href="/configuration#retention">Retention</a></li>
+            <li><a href="/configuration#satellites">Satellites</a></li>
+            <li>
+                <a href="/configuration#routers">Routers</a>
+                <ul class="page-index-sub">
+                    <li><a href="/configuration#jetpack">JetPack allowlist</a></li>
+                    <li><a href="/configuration#doh-blocklist">DoH blocklist</a></li>
+                </ul>
+            </li>
+            <li><a href="/configuration#local-model-advisor">Local-model advisor</a></li>
+            <li><a href="/configuration#classifier-settings">Classifier settings</a></li>
+            <li><a href="/configuration#burst-detection">Burst detection</a></li>
+            <li><a href="/configuration#incident-coalescing">Incident coalescing</a></li>
+            <li><a href="/configuration#thresholds">Policy thresholds</a></li>
+            <li><a href="/configuration#posture">Policy posture</a></li>
+            <li><a href="/configuration#session-security">Session security</a></li>
+            <li><a href="/configuration#upgrades">Upgrades</a></li>
+            <li><a href="/configuration#ingestion">Ingestion</a></li>
+        </ul>
     </nav>
     <div class="page-content">
     @* No page h1: the highlighted nav item names the page, and the section
@@ -330,7 +336,8 @@
             </table>
         }
 
-        <h3>Add satellite</h3>
+        <details class="disclosure-form" open="@SatelliteAddOpen">
+            <summary>Add satellite</summary>
         @if (_stepUpFresh)
         {
             <form method="post" action="/configuration/satellites/create" class="edit-form">
@@ -350,11 +357,13 @@
                 <StepUpPrompt ReturnTo="/configuration#satellites" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-satellites" />
             </div>
         }
+        </details>
     </section>
 
     <section id="routers" class="indexed">
         <h2>Routers</h2>
         <p class="small">Manage MikroTik border routers for the future address-list action provider.  The list carries no enforcement behavior until the MikroTik action provider ships in the next increment.</p>
+        <p class="small">Router-scoped features: <a href="/configuration#jetpack">JetPack allowlist</a> and <a href="/configuration#doh-blocklist">DoH blocklist</a>.</p>
 
         <h3>Existing routers</h3>
         @if (_routers.Count == 0)
@@ -493,7 +502,8 @@
             </table>
         }
 
-        <h3>Add router</h3>
+        <details class="disclosure-form" open="@RouterAddOpen">
+            <summary>Add router</summary>
         @if (_stepUpFresh)
         {
             <form method="post" action="/configuration/routers/create" class="edit-form">
@@ -544,6 +554,7 @@
                 <StepUpPrompt ReturnTo="/configuration#routers" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-routers" />
             </div>
         }
+        </details>
     </section>
 
     <section id="jetpack" class="indexed">
@@ -595,7 +606,8 @@
             </tbody>
         </table>
 
-        <h3>Edit JetPack allowlist settings</h3>
+        <details class="disclosure-form" open="@JetPackEditOpen">
+            <summary>Edit JetPack allowlist settings</summary>
         @if (_stepUpFresh)
         {
             <form method="post" action="/configuration/jetpack" class="edit-form">
@@ -636,6 +648,7 @@
                 <StepUpPrompt ReturnTo="/configuration#jetpack" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-jetpack" />
             </div>
         }
+        </details>
     </section>
 
     <section id="local-model-advisor" class="indexed">
@@ -1657,7 +1670,8 @@
             <span class="small">Requests an immediate canary-probe cycle instead of waiting for the periodic interval.  The worker reprobes every candidate address; updated confirmation results and the next reconciliation proposal appear once the cycle completes.</span>
         </form>
 
-        <h3>Edit DoH blocklist settings</h3>
+        <details class="disclosure-form" open="@DohEditOpen">
+            <summary>Edit DoH blocklist settings</summary>
         @if (_stepUpFresh)
         {
             <form method="post" action="/configuration/doh" class="edit-form">
@@ -1776,6 +1790,7 @@
                 <StepUpPrompt ReturnTo="/configuration#doh-blocklist" ShowSecurityKey="_hasSecurityKeys" PopoverId="step-up-popover-doh-blocklist" />
             </div>
         }
+        </details>
     </section>
 
     <section id="thresholds" class="indexed">
@@ -2070,6 +2085,14 @@
 
     [SupplyParameterFromQuery(Name = "routerPin")]
     public string? RouterPin { get; set; }
+
+    [SupplyParameterFromQuery(Name = "form")]
+    public string? OpenForm { get; set; }
+
+    private bool RouterAddOpen => OpenForm == "add-router" || _routers.Count == 0;
+    private bool SatelliteAddOpen => OpenForm == "add-satellite" || _satelliteRoles.Count == 0;
+    private bool JetPackEditOpen => OpenForm == "jetpack";
+    private bool DohEditOpen => OpenForm == "doh";
 
     private string SettingsState => _settings switch
     {

@@ -172,6 +172,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<Viegard.Application.Doh.IDohBlocklistSettingsStore, InMemoryDohBlocklistSettingsStore>();
         builder.Services.AddSingleton<Viegard.Application.Doh.IDohDesiredAddressStore, InMemoryDohDesiredAddressStore>();
         builder.Services.AddSingleton<Viegard.Application.Doh.IDohProbeResultStore, InMemoryDohProbeResultStore>();
+        builder.Services.AddSingleton<Viegard.Application.Doh.IDohReconciliationProposalStore, InMemoryDohReconciliationProposalStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorSettingsStore, InMemoryLocalModelAdvisorSettingsStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorCategoryBandStore, InMemoryLocalModelAdvisorCategoryBandStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorInjectionPatternStore, InMemoryLocalModelAdvisorInjectionPatternStore>();

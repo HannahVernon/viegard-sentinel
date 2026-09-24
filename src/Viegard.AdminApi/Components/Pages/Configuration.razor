@@ -29,6 +29,7 @@
 @inject IOptions<JetPackFeedOptions> JetPackOptions
 @inject IOptions<LocalModelAdvisorOptions> LocalModelAdvisorOptions
 @inject Viegard.Application.Doh.IDohBlocklistSettingsStore DohBlocklistSettingsStore
+@inject Viegard.Application.Doh.IDohReconciliationProposalStore DohReconciliationProposalStore
 @inject IOptions<Viegard.Application.Doh.DohBlocklistOptions> DohBlocklistOptions
 @inject UserDisplay Display
 @inject SatelliteRoleCredentialCookie SatelliteCredentialCookie
@@ -1600,6 +1601,55 @@
             </tbody>
         </table>
 
+        <h3>Latest reconciliation proposal</h3>
+        @if (_dohProposal is null)
+        {
+            <p class="small">No reconciliation cycle has run yet.  Once the feature is enabled and the reconciliation worker completes a cycle, the proposed (or applied) address-list changes appear here.</p>
+        }
+        else
+        {
+            <p class="small">
+                @(_dohProposal.DryRun ? "Propose-only" : "Applied") - generated @Display.Format(_dohProposal.GeneratedAt).
+                Reconciling toward <strong>@_dohProposal.DesiredCount.ToString(System.Globalization.CultureInfo.InvariantCulture)</strong> candidate address@(_dohProposal.DesiredCount == 1 ? "" : "es") in <code>@_dohProposal.AddressListName</code>.
+                @if (_dohProposal.DryRun)
+                {
+                    <span>Router writes stay off until "Apply to routers" is enabled and global dry-run is off.</span>
+                }
+            </p>
+            @if (!_dohProposal.HasChanges)
+            {
+                <p class="small">Every managed router already matches the desired set; no changes @(_dohProposal.DryRun ? "pending" : "were needed").</p>
+            }
+            else
+            {
+                <dl class="status-grid">
+                    <dt>@(_dohProposal.DryRun ? "Pending add" : "Added")</dt><dd>@_dohProposal.TotalAdd.ToString(System.Globalization.CultureInfo.InvariantCulture)</dd>
+                    <dt>@(_dohProposal.DryRun ? "Pending remove" : "Removed")</dt><dd>@_dohProposal.TotalRemove.ToString(System.Globalization.CultureInfo.InvariantCulture)</dd>
+                    <dt>@(_dohProposal.DryRun ? "Pending comment update" : "Comment updated")</dt><dd>@_dohProposal.TotalCommentUpdate.ToString(System.Globalization.CultureInfo.InvariantCulture)</dd>
+                </dl>
+                @foreach (var router in _dohProposal.Routers)
+                {
+                    <div class="doh-proposal-router">
+                        <h4>@router.RouterName</h4>
+                        @if (router.Skipped)
+                        {
+                            <p class="small message error">Skipped: @(string.IsNullOrEmpty(router.Detail) ? "unknown error" : router.Detail)</p>
+                        }
+                        else if (router.ToAdd.Count == 0 && router.ToRemove.Count == 0 && router.CommentUpdate.Count == 0)
+                        {
+                            <p class="small">No changes @(_dohProposal.DryRun ? "pending" : "applied").</p>
+                        }
+                        else
+                        {
+                            @DohProposalAddresses(_dohProposal.DryRun ? "Would add" : "Added", router.ToAdd)
+                            @DohProposalAddresses(_dohProposal.DryRun ? "Would remove" : "Removed", router.ToRemove)
+                            @DohProposalAddresses(_dohProposal.DryRun ? "Would update comment" : "Comment updated", router.CommentUpdate)
+                        }
+                    </div>
+                }
+            }
+        }
+
         <h3>Edit DoH blocklist settings</h3>
         @if (_stepUpFresh)
         {
@@ -1989,6 +2039,7 @@
     private Viegard.Application.Coalescing.IncidentCoalescingSettings? _coalescingSettings;
     private SessionSecuritySettings? _sessionSecuritySettings;
     private Viegard.Application.Doh.DohBlocklistSettings? _dohSettings;
+    private Viegard.Application.Doh.DohReconciliationProposal? _dohProposal;
     private PolicyPostureSettings? _postureSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
     private IReadOnlyDictionary<string, IngestionFilter> _mdaemonFilters = new Dictionary<string, IngestionFilter>(StringComparer.Ordinal);
@@ -2138,6 +2189,22 @@
     private Viegard.Application.Doh.DohBlocklistValues DohValues =>
         _dohSettings?.ToValues() ?? Viegard.Application.Doh.DohBlocklistValues.FromOptions(DohBlocklistOptions.Value);
 
+    private RenderFragment DohProposalAddresses(string label, IReadOnlyList<string> addresses) =>
+        @<text>
+            @if (addresses.Count > 0)
+            {
+                <details class="doh-proposal-list">
+                    <summary>@label (@addresses.Count.ToString(System.Globalization.CultureInfo.InvariantCulture))</summary>
+                    <ul>
+                        @foreach (var address in addresses)
+                        {
+                            <li><code>@address</code></li>
+                        }
+                    </ul>
+                </details>
+            }
+        </text>;
+
     private string DohBlocklistSettingsState => _dohSettings is null
         ? "Not seeded"
         : "Database-owned";
@@ -2182,6 +2249,7 @@
         _coalescingSettings = await IncidentCoalescingSettingsStore.GetAsync().ConfigureAwait(false);
         _sessionSecuritySettings = await SessionSecuritySettingsStore.GetAsync().ConfigureAwait(false);
         _dohSettings = await DohBlocklistSettingsStore.GetAsync().ConfigureAwait(false);
+        _dohProposal = await DohReconciliationProposalStore.GetAsync().ConfigureAwait(false);
         _postureSettings = await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
         _mdaemonFilters = (await IngestionFilters

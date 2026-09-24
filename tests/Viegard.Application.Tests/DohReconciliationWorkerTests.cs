@@ -95,16 +95,29 @@ public sealed class DohReconciliationWorkerTests
         var desired = new InMemoryDohDesiredAddressStore();
         await desired.ReplaceSnapshotAsync(["1.1.1.1"], fixture.Time.GetUtcNow());
         fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, $$"""[{".id":"*1","list":"{{ListName}}","address":"203.0.113.9"}]"""));
+        var proposals = new InMemoryDohReconciliationProposalStore();
 
-        var result = await Worker(fixture, settings, desired, new InMemoryDohProbeResultStore(), audit).RunCycleAsync();
+        var result = await Worker(fixture, settings, desired, new InMemoryDohProbeResultStore(), audit, proposals).RunCycleAsync();
 
         Assert.False(result.Changed);
+        Assert.True(result.HasChanges);
         Assert.Single(fixture.Http.Requests);
         Assert.Equal("GET", fixture.Http.Requests[0].Method);
         var routerResult = Assert.Single(result.Routers);
         Assert.Equal("1.1.1.1", Assert.Single(routerResult.Added));
         Assert.Equal("203.0.113.9", Assert.Single(routerResult.Removed));
-        Assert.Empty(audit.Snapshot());
+
+        // Propose-only cycles now record an audit proposal and persist the snapshot.
+        var record = Assert.Single(audit.Snapshot());
+        Assert.Contains("propose-only", record.Summary, StringComparison.Ordinal);
+        var proposal = await proposals.GetAsync();
+        Assert.NotNull(proposal);
+        Assert.True(proposal!.DryRun);
+        Assert.Equal(1, proposal.TotalAdd);
+        Assert.Equal(1, proposal.TotalRemove);
+        var proposalRouter = Assert.Single(proposal.Routers);
+        Assert.Equal("1.1.1.1", Assert.Single(proposalRouter.ToAdd));
+        Assert.Equal("203.0.113.9", Assert.Single(proposalRouter.ToRemove));
     }
 
     [Fact]
@@ -128,11 +141,13 @@ public sealed class DohReconciliationWorkerTests
         IDohBlocklistSettingsStore settings,
         IDohDesiredAddressStore desired,
         IDohProbeResultStore probes,
-        InMemoryAuditLedger audit) =>
+        InMemoryAuditLedger audit,
+        IDohReconciliationProposalStore? proposals = null) =>
         new(
             settings,
             desired,
             probes,
+            proposals ?? new InMemoryDohReconciliationProposalStore(),
             fixture.Routers,
             fixture.Credentials,
             Options.Create(new ActionWorkerOptions()),

@@ -47,6 +47,7 @@ public static class ReadOnlyApiEndpoints
         api.MapGet("/coalescing/settings", GetIncidentCoalescingSettingsAsync);
         api.MapGet("/session-security/settings", GetSessionSecuritySettingsAsync);
         api.MapGet("/doh/settings", GetDohBlocklistSettingsAsync);
+        api.MapGet("/doh/proposals", GetDohReconciliationProposalsAsync);
         api.MapGet("/policy/thresholds", GetPolicyThresholdsAsync);
         api.MapGet("/advisor/summary", GetAdvisorSummaryAsync);
         api.MapGet("/advisor/consults", ListAdvisorConsultsAsync);
@@ -389,6 +390,47 @@ public static class ReadOnlyApiEndpoints
             updatedAt = settings?.UpdatedAt,
             updatedBy = settings?.UpdatedBy,
             seeded = settings is not null || source.Current.IsSeeded,
+        }, Json);
+    }
+
+    internal static async Task<IResult> GetDohReconciliationProposalsAsync(
+        HttpContext context,
+        Viegard.Application.Doh.IDohReconciliationProposalStore proposalStore)
+    {
+        var proposal = await proposalStore.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        if (proposal is null)
+        {
+            return Results.Json(new
+            {
+                generatedAt = (DateTimeOffset?)null,
+                dryRun = (bool?)null,
+                addressListName = (string?)null,
+                desiredCount = 0,
+                totalAdd = 0,
+                totalRemove = 0,
+                totalCommentUpdate = 0,
+                routers = Array.Empty<object>(),
+            }, Json);
+        }
+
+        return Results.Json(new
+        {
+            generatedAt = proposal.GeneratedAt,
+            dryRun = proposal.DryRun,
+            addressListName = proposal.AddressListName,
+            desiredCount = proposal.DesiredCount,
+            totalAdd = proposal.TotalAdd,
+            totalRemove = proposal.TotalRemove,
+            totalCommentUpdate = proposal.TotalCommentUpdate,
+            routers = proposal.Routers.Select(router => new
+            {
+                routerName = router.RouterName,
+                skipped = router.Skipped,
+                detail = router.Detail,
+                toAdd = router.ToAdd,
+                toRemove = router.ToRemove,
+                commentUpdate = router.CommentUpdate,
+            }),
         }, Json);
     }
 

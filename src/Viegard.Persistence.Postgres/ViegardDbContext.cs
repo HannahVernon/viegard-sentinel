@@ -63,6 +63,8 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<DohProbeResultRow> DohProbeResults => Set<DohProbeResultRow>();
 
+    public DbSet<DohReconciliationProposalRow> DohReconciliationProposals => Set<DohReconciliationProposalRow>();
+
     public DbSet<LocalModelAdvisorSettingsRow> LocalModelAdvisorSettings => Set<LocalModelAdvisorSettingsRow>();
 
     public DbSet<LocalModelAdvisorCategoryBandRow> LocalModelAdvisorCategoryBands => Set<LocalModelAdvisorCategoryBandRow>();
@@ -368,6 +370,16 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.FirstSeenAt).HasColumnType("timestamp with time zone");
             entity.Property(e => e.LastProbedAt).HasColumnType("timestamp with time zone");
             entity.Property(e => e.LastConfirmedAt).HasColumnType("timestamp with time zone");
+        });
+
+        modelBuilder.Entity<DohReconciliationProposalRow>(entity =>
+        {
+            entity.ToTable("doh_reconciliation_proposal", table =>
+                table.HasCheckConstraint("CK_doh_reconciliation_proposal_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.GeneratedAt).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.DetailJson).HasColumnType("text");
         });
 
         modelBuilder.Entity<LocalModelAdvisorSettingsRow>(entity =>

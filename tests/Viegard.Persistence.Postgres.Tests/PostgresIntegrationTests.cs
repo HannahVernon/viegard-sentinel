@@ -8,6 +8,7 @@ using Viegard.Application.Burst;
 using Viegard.Application.Coalescing;
 using Viegard.Application.Configuration;
 using Viegard.Application.Detection;
+using Viegard.Application.Doh;
 using Viegard.Application.Policy;
 using Viegard.Application.Retention;
 using Viegard.Application.Stores;
@@ -64,7 +65,7 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         // 180d window) age into purge eligibility ~24h after the run that
         // created them and then corrupt the next day's purge counts.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_injection_patterns, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry, classifier_settings, burst_detection_settings, burst_windows, burst_cooldowns, incident_coalescing_settings, session_security_settings, doh_blocklist_settings, doh_desired_addresses, doh_probe_results");
+            "TRUNCATE raw_observations, events, incidents, classifications, decisions, corrections, audit_records, admin_sessions, actions, active_bans, queue_messages, queue_counters, retention_settings, jetpack_feed_settings, jetpack_desired_addresses, local_model_advisor_settings, local_model_advisor_category_bands, local_model_advisor_injection_patterns, local_model_advisor_prompt_templates, local_model_advisor_response_cache, local_model_advisor_consults, policy_threshold_settings, policy_posture_settings, admin_errors, app_passwords, mikrotik_routers, host_upgrade_commands, ingestion_filters, instance_registry, classifier_settings, burst_detection_settings, burst_windows, burst_cooldowns, incident_coalescing_settings, session_security_settings, doh_blocklist_settings, doh_desired_addresses, doh_probe_results, doh_reconciliation_proposal");
     }
 
     public async Task DisposeAsync()
@@ -1231,6 +1232,62 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
         Assert.Equal(2, afterCycle!.Version);
         Assert.Equal(3, afterCycle.LastCycleCounts()[RetentionTarget.Events]);
         Assert.Equal(now.AddHours(1), afterCycle.LastCycleAt);
+    }
+
+    [PostgresFact]
+    public async Task Doh_reconciliation_proposal_store_round_trips_latest_snapshot()
+    {
+        var factory = new TestDbContextFactory(_dataSource!);
+        var store = new PostgresDohReconciliationProposalStore(factory);
+        var now = new DateTimeOffset(2026, 9, 24, 20, 0, 0, TimeSpan.Zero);
+
+        Assert.Null(await store.GetAsync());
+
+        await store.SaveAsync(new DohReconciliationProposal
+        {
+            GeneratedAt = now,
+            DryRun = true,
+            AddressListName = "dns_over_https_servers",
+            DesiredCount = 2,
+            Routers =
+            [
+                new DohRouterProposal
+                {
+                    RouterName = "gr1",
+                    ToAdd = ["1.1.1.1", "8.8.8.8"],
+                    ToRemove = ["203.0.113.9"],
+                    CommentUpdate = [],
+                },
+            ],
+        });
+
+        var loaded = await store.GetAsync();
+        Assert.NotNull(loaded);
+        Assert.True(loaded!.DryRun);
+        Assert.Equal(now, loaded.GeneratedAt);
+        Assert.Equal("dns_over_https_servers", loaded.AddressListName);
+        Assert.Equal(2, loaded.DesiredCount);
+        Assert.Equal(2, loaded.TotalAdd);
+        Assert.Equal(1, loaded.TotalRemove);
+        var router = Assert.Single(loaded.Routers);
+        Assert.Equal("gr1", router.RouterName);
+        Assert.Equal(["1.1.1.1", "8.8.8.8"], router.ToAdd);
+
+        // The snapshot is single-row: a second save replaces the first.
+        await store.SaveAsync(new DohReconciliationProposal
+        {
+            GeneratedAt = now.AddMinutes(30),
+            DryRun = false,
+            AddressListName = "dns_over_https_servers",
+            DesiredCount = 1,
+            Routers = [],
+        });
+
+        var replaced = await store.GetAsync();
+        Assert.NotNull(replaced);
+        Assert.False(replaced!.DryRun);
+        Assert.Equal(now.AddMinutes(30), replaced.GeneratedAt);
+        Assert.Empty(replaced.Routers);
     }
 
     [PostgresFact]

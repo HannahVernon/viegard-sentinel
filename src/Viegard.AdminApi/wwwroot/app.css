@@ -830,7 +830,10 @@ section {
    timer live on the wrapper. */
 .flash-toast {
     position: fixed;
-    top: 1rem;
+    /* Clear the sticky header (position: sticky; top: 0; z-index: 100) so the
+       toast is never clipped behind the navigation.  Matches html
+       scroll-padding-top, which reserves the same band for fragment jumps. */
+    top: 5.25rem;
     left: 50%;
     transform: translateX(-50%);
     z-index: 50;
@@ -843,6 +846,15 @@ section {
     background: var(--panel);
     border-radius: 0.5rem;
     box-shadow: 0 0.4rem 1.2rem rgba(0, 0, 0, 0.4);
+}
+
+/* On narrow screens the header collapses to a single row and pages with a
+   section index pin a sticky chip row just below it; drop the toast to match
+   the wider mobile scroll-padding-top so it clears both. */
+@media (max-width: 900px) {
+    .flash-toast {
+        top: 6.75rem;
+    }
 }
 
 .flash-toast .message {

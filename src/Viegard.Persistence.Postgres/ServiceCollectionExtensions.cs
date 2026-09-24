@@ -100,6 +100,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Viegard.Application.Doh.IDohDesiredAddressStore, PostgresDohDesiredAddressStore>();
         services.AddSingleton<Viegard.Application.Doh.IDohProbeResultStore, PostgresDohProbeResultStore>();
         services.AddSingleton<Viegard.Application.Doh.IDohReconciliationProposalStore, PostgresDohReconciliationProposalStore>();
+        services.AddSingleton<Viegard.Application.Doh.IDohProbeTrigger, PostgresDohProbeTrigger>();
         services.AddSingleton<ILocalModelAdvisorSettingsStore, PostgresLocalModelAdvisorSettingsStore>();
         services.AddSingleton<ILocalModelAdvisorCategoryBandStore, PostgresLocalModelAdvisorCategoryBandStore>();
         services.AddSingleton<ILocalModelAdvisorInjectionPatternStore, PostgresLocalModelAdvisorInjectionPatternStore>();

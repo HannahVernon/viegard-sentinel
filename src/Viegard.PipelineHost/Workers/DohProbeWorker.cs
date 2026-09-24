@@ -24,6 +24,7 @@ public sealed class DohProbeWorker(
     IDohDesiredAddressStore desiredAddresses,
     IDohProbeResultStore probeResults,
     DohProbeHttpClient probeClient,
+    IDohProbeTrigger probeTrigger,
     IOptions<DohBlocklistOptions> options,
     TimeProvider timeProvider,
     ILogger<DohProbeWorker> logger) : BackgroundService
@@ -37,7 +38,11 @@ public sealed class DohProbeWorker(
             while (!stoppingToken.IsCancellationRequested)
             {
                 var interval = await RunCycleAsync(stoppingToken).ConfigureAwait(false);
-                await DelayAsync(interval, stoppingToken).ConfigureAwait(false);
+                var requested = await probeTrigger.WaitForRequestAsync(interval, stoppingToken).ConfigureAwait(false);
+                if (requested)
+                {
+                    logger.LogInformation("DoH probe cycle requested on demand; running early.");
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -126,15 +131,5 @@ public sealed class DohProbeWorker(
             failed,
             desired.Count - probeTargets.Count);
         return settings.ProbeInterval;
-    }
-
-    private async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)
-    {
-        if (delay <= TimeSpan.Zero)
-        {
-            return;
-        }
-
-        await Task.Delay(delay, timeProvider, cancellationToken).ConfigureAwait(false);
     }
 }

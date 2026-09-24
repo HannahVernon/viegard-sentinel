@@ -1650,6 +1650,13 @@
             }
         }
 
+        <h3>Run a probe now</h3>
+        <form method="post" action="/configuration/doh/probe-now" class="secondary-form">
+            <AntiforgeryToken />
+            <button type="submit" class="secondary-button">Probe now</button>
+            <span class="small">Requests an immediate canary-probe cycle instead of waiting for the periodic interval.  The worker reprobes every candidate address; updated confirmation results and the next reconciliation proposal appear once the cycle completes.</span>
+        </form>
+
         <h3>Edit DoH blocklist settings</h3>
         @if (_stepUpFresh)
         {

@@ -9,6 +9,37 @@ namespace Viegard.Application.Tests;
 public sealed class DohBlocklistTests
 {
     [Fact]
+    public async Task Probe_trigger_wakes_a_waiter_after_a_request()
+    {
+        using var trigger = new InMemoryDohProbeTrigger();
+
+        await trigger.RequestAsync();
+
+        Assert.True(await trigger.WaitForRequestAsync(TimeSpan.Zero));
+    }
+
+    [Fact]
+    public async Task Probe_trigger_reports_no_request_when_none_was_made()
+    {
+        using var trigger = new InMemoryDohProbeTrigger();
+
+        Assert.False(await trigger.WaitForRequestAsync(TimeSpan.Zero));
+    }
+
+    [Fact]
+    public async Task Probe_trigger_coalesces_repeated_requests_into_one_wake()
+    {
+        using var trigger = new InMemoryDohProbeTrigger();
+
+        await trigger.RequestAsync();
+        await trigger.RequestAsync();
+        await trigger.RequestAsync();
+
+        Assert.True(await trigger.WaitForRequestAsync(TimeSpan.Zero));
+        Assert.False(await trigger.WaitForRequestAsync(TimeSpan.Zero));
+    }
+
+    [Fact]
     public void Feed_parser_keeps_ipv4_and_cidr_drops_ipv6_and_comments()
     {
         const string payload =

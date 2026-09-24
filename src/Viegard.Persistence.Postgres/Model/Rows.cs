@@ -495,6 +495,15 @@ public sealed class DohProbeResultRow
     public DateTimeOffset? LastConfirmedAt { get; set; }
 }
 
+public sealed class DohReconciliationProposalRow
+{
+    public int Id { get; set; }
+
+    public DateTimeOffset GeneratedAt { get; set; }
+
+    public string DetailJson { get; set; } = string.Empty;
+}
+
 public sealed class LocalModelAdvisorSettingsRow
 {
     public int Id { get; set; }

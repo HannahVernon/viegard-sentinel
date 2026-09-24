@@ -1479,3 +1479,31 @@ th[aria-sort="descending"] button.client-sort::after {
 td code {
     color: var(--ink);
 }
+
+/* DoH reconciliation proposal panel: per-router disclosures of the proposed or
+   applied address-list changes.  Kept compact so a large add set stays
+   scannable behind a summary count. */
+.doh-proposal-router {
+    margin: 0.75rem 0;
+    padding-left: 0.75rem;
+    border-left: 2px solid var(--panel-border);
+}
+
+.doh-proposal-router h4 {
+    margin: 0 0 0.25rem;
+}
+
+.doh-proposal-list {
+    margin: 0.25rem 0;
+}
+
+.doh-proposal-list summary {
+    cursor: pointer;
+    color: var(--accent-strong);
+}
+
+.doh-proposal-list ul {
+    margin: 0.35rem 0 0.5rem;
+    max-height: 16rem;
+    overflow-y: auto;
+}

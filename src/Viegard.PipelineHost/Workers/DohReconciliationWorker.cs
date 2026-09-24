@@ -26,6 +26,7 @@ public sealed class DohReconciliationWorker(
     IDohBlocklistSettingsStore settingsStore,
     IDohDesiredAddressStore desiredStore,
     IDohProbeResultStore probeResultStore,
+    IDohReconciliationProposalStore proposalStore,
     IMikroTikRouterStore routerStore,
     IRouterCredentialProtector credentialProtector,
     IOptions<ActionWorkerOptions> options,
@@ -130,7 +131,33 @@ public sealed class DohReconciliationWorker(
         }
 
         var cycle = new DohReconciliationCycleResult(now, settings.AddressListName, dryRun, false, results);
-        if (!cycle.Changed)
+
+        var proposal = new DohReconciliationProposal
+        {
+            GeneratedAt = now,
+            DryRun = dryRun,
+            AddressListName = settings.AddressListName,
+            DesiredCount = desired.Count,
+            Routers = results.Select(result => new DohRouterProposal
+            {
+                RouterName = result.RouterName,
+                Skipped = result.Skipped,
+                Detail = result.Detail,
+                ToAdd = result.Added,
+                ToRemove = result.Removed,
+                CommentUpdate = result.CommentUpdated,
+            }).ToList(),
+        };
+        try
+        {
+            await proposalStore.SaveAsync(proposal, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "DoH reconciliation could not persist the latest proposal snapshot.");
+        }
+
+        if (!cycle.HasChanges)
         {
             logger.LogDebug(
                 "DoH reconciliation cycle completed with no router changes. DesiredCount={DesiredCount}; RouterCount={RouterCount}; AddressListName={AddressListName}; DryRun={DryRun}.",
@@ -141,14 +168,19 @@ public sealed class DohReconciliationWorker(
             return cycle;
         }
 
+        var pendingCount = cycle.ProposedAdded + cycle.ProposedRemoved + cycle.ProposedCommentUpdated;
         await auditLedger.AppendAsync(new AuditRecord
         {
             Id = ViegardId.New(),
             Timestamp = now,
             Stage = PipelineStage.Action,
-            Summary = $"DoH reconciliation changed {cycle.TotalAdded + cycle.TotalRemoved + cycle.TotalCommentUpdated} router address-list entries.",
+            SourceId = "doh-reconciliation",
+            Summary = dryRun
+                ? $"DoH reconciliation proposal: {pendingCount} router address-list changes pending (propose-only)."
+                : $"DoH reconciliation changed {cycle.TotalAdded + cycle.TotalRemoved + cycle.TotalCommentUpdated} router address-list entries.",
             DetailJson = JsonSerializer.Serialize(new
             {
+                DryRun = dryRun,
                 settings.AddressListName,
                 Routers = cycle.Routers.Select(result => new
                 {
@@ -161,6 +193,17 @@ public sealed class DohReconciliationWorker(
                 }).ToList(),
             }, Json),
         }, cancellationToken).ConfigureAwait(false);
+
+        if (dryRun)
+        {
+            logger.LogInformation(
+                "DoH reconciliation proposal recorded. PendingAdd={Add}; PendingRemove={Remove}; PendingCommentUpdate={CommentUpdate}; AddressListName={AddressListName}.",
+                cycle.ProposedAdded,
+                cycle.ProposedRemoved,
+                cycle.ProposedCommentUpdated,
+                settings.AddressListName);
+            return cycle;
+        }
 
         logger.LogInformation(
             "DoH reconciliation changed router address-list entries. Added={Added}; Removed={Removed}; CommentUpdated={CommentUpdated}; AddressListName={AddressListName}.",
@@ -405,6 +448,16 @@ public sealed record DohReconciliationCycleResult(
     IReadOnlyList<DohReconciliationRouterResult> Routers)
 {
     public bool Changed => TotalAdded > 0 || TotalRemoved > 0 || TotalCommentUpdated > 0;
+
+    /// <summary>True when the cycle proposed or applied any router change (dry-run included).</summary>
+    public bool HasChanges => ProposedAdded > 0 || ProposedRemoved > 0 || ProposedCommentUpdated > 0;
+
+    /// <summary>Additions proposed (dry-run) or applied, counted regardless of mode.</summary>
+    public int ProposedAdded => Routers.Sum(router => router.Added.Count);
+
+    public int ProposedRemoved => Routers.Sum(router => router.Removed.Count);
+
+    public int ProposedCommentUpdated => Routers.Sum(router => router.CommentUpdated.Count);
 
     public int TotalAdded => DryRun ? 0 : Routers.Sum(router => router.Added.Count);
 

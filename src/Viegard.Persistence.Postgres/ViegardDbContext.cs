@@ -57,6 +57,12 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
 
     public DbSet<JetPackDesiredAddressRow> JetPackDesiredAddresses => Set<JetPackDesiredAddressRow>();
 
+    public DbSet<DohBlocklistSettingsRow> DohBlocklistSettings => Set<DohBlocklistSettingsRow>();
+
+    public DbSet<DohDesiredAddressRow> DohDesiredAddresses => Set<DohDesiredAddressRow>();
+
+    public DbSet<DohProbeResultRow> DohProbeResults => Set<DohProbeResultRow>();
+
     public DbSet<LocalModelAdvisorSettingsRow> LocalModelAdvisorSettings => Set<LocalModelAdvisorSettingsRow>();
 
     public DbSet<LocalModelAdvisorCategoryBandRow> LocalModelAdvisorCategoryBands => Set<LocalModelAdvisorCategoryBandRow>();
@@ -328,6 +334,40 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.Address).HasColumnType("text");
             entity.Property(e => e.FirstSeenAt).HasColumnType("timestamp with time zone");
             entity.Property(e => e.LastSeenAt).HasColumnType("timestamp with time zone");
+        });
+
+        modelBuilder.Entity<DohBlocklistSettingsRow>(entity =>
+        {
+            entity.ToTable("doh_blocklist_settings", table =>
+                table.HasCheckConstraint("CK_doh_blocklist_settings_fixed_id", "id = 1"));
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.PrimaryFeedUrl).HasMaxLength(Viegard.Application.Doh.DohBlocklistSettings.MaxFeedUrlLength);
+            entity.Property(e => e.SecondaryFeedUrl).HasMaxLength(Viegard.Application.Doh.DohBlocklistSettings.MaxFeedUrlLength);
+            entity.Property(e => e.AddressListName).HasMaxLength(Viegard.Application.Doh.DohBlocklistSettings.MaxAddressListNameLength);
+            entity.Property(e => e.ProbeCanaryFqdn).HasMaxLength(Viegard.Application.Doh.DohBlocklistSettings.MaxCanaryFqdnLength);
+            entity.Property(e => e.ProbeExpectedToken).HasMaxLength(Viegard.Application.Doh.DohBlocklistSettings.MaxCanaryTokenLength);
+            entity.Property(e => e.ProbeEndpointPath).HasMaxLength(Viegard.Application.Doh.DohBlocklistSettings.MaxEndpointPathLength);
+            entity.Property(e => e.UpdatedBy).HasMaxLength(Viegard.Application.Doh.DohBlocklistSettings.MaxUpdatedByLength);
+        });
+
+        modelBuilder.Entity<DohDesiredAddressRow>(entity =>
+        {
+            entity.ToTable("doh_desired_addresses");
+            entity.HasKey(e => e.Address);
+            entity.Property(e => e.Address).HasColumnType("text");
+            entity.Property(e => e.FirstSeenAt).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.LastSeenAt).HasColumnType("timestamp with time zone");
+        });
+
+        modelBuilder.Entity<DohProbeResultRow>(entity =>
+        {
+            entity.ToTable("doh_probe_results");
+            entity.HasKey(e => e.Address);
+            entity.Property(e => e.Address).HasColumnType("text");
+            entity.Property(e => e.FirstSeenAt).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.LastProbedAt).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.LastConfirmedAt).HasColumnType("timestamp with time zone");
         });
 
         modelBuilder.Entity<LocalModelAdvisorSettingsRow>(entity =>

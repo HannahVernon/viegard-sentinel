@@ -127,6 +127,11 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<JetPackFeedOptions>, JetPackFeedOptionsValidator>();
 builder.Services
+    .AddOptions<Viegard.Application.Doh.DohBlocklistOptions>()
+    .Bind(builder.Configuration.GetSection(Viegard.Application.Doh.DohBlocklistOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<Viegard.Application.Doh.DohBlocklistOptions>, Viegard.Application.Doh.DohBlocklistOptionsValidator>();
+builder.Services
     .AddOptions<LocalModelAdvisorOptions>()
     .Bind(builder.Configuration.GetSection(LocalModelAdvisorOptions.SectionName))
     .ValidateOnStart();
@@ -157,6 +162,7 @@ builder.Services.AddSingleton<RouterConnectivityTester>();
 builder.Services.AddSingleton<DecisionTargetResolver>();
 builder.Services.AddSingleton<ClassifierSettingsSource>();
 builder.Services.AddSingleton<Viegard.Application.Burst.BurstDetectionSettingsSource>();
+builder.Services.AddSingleton<Viegard.Application.Doh.DohBlocklistSettingsSource>();
 builder.Services.AddSingleton<Viegard.Application.Coalescing.IncidentCoalescingSettingsSource>();
 builder.Services.AddSingleton<SessionSecuritySettingsSource>();
 builder.Services.AddSingleton<IPendingStepUpActionStore, InMemoryPendingStepUpActionStore>();
@@ -292,6 +298,9 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IPolicyThresholdSettingsStore, InMemoryPolicyThresholdSettingsStore>();
         builder.Services.AddSingleton<IClassifierSettingsStore, InMemoryClassifierSettingsStore>();
         builder.Services.AddSingleton<Viegard.Application.Burst.IBurstDetectionSettingsStore, InMemoryBurstDetectionSettingsStore>();
+        builder.Services.AddSingleton<Viegard.Application.Doh.IDohBlocklistSettingsStore, InMemoryDohBlocklistSettingsStore>();
+        builder.Services.AddSingleton<Viegard.Application.Doh.IDohDesiredAddressStore, InMemoryDohDesiredAddressStore>();
+        builder.Services.AddSingleton<Viegard.Application.Doh.IDohProbeResultStore, InMemoryDohProbeResultStore>();
         builder.Services.AddSingleton<Viegard.Application.Coalescing.IIncidentCoalescingSettingsStore, InMemoryIncidentCoalescingSettingsStore>();
         builder.Services.AddSingleton<ISessionSecuritySettingsStore, InMemorySessionSecuritySettingsStore>();
         builder.Services.AddSingleton<IPolicyPostureSettingsStore, InMemoryPolicyPostureSettingsStore>();

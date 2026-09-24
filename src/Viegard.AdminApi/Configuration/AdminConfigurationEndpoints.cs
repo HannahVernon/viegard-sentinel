@@ -7,6 +7,7 @@ using Viegard.AdminApi.Auth;
 using Viegard.Application.Auth;
 using Viegard.Application.Configuration;
 using Viegard.Application.Burst;
+using Viegard.Application.Doh;
 using Viegard.Application.Classifiers;
 using Viegard.Application.Coalescing;
 using Viegard.Application.Policy;
@@ -30,6 +31,7 @@ public static class AdminConfigurationEndpoints
     private const string BurstDetectionSettingsConfigurationPath = "/configuration#burst-detection";
     private const string IncidentCoalescingSettingsConfigurationPath = "/configuration#incident-coalescing";
     private const string SessionSecuritySettingsConfigurationPath = "/configuration#session-security";
+    private const string DohBlocklistSettingsConfigurationPath = "/configuration#doh-blocklist";
     private const string PostureConfigurationPath = "/configuration#posture";
     internal const string EnforceConfirmationWord = "ENFORCE";
     private const string IngestionConfigurationPath = "/configuration#ingestion";
@@ -115,6 +117,9 @@ public static class AdminConfigurationEndpoints
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/session-security", SaveSessionSecuritySettingsAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
+        app.MapPost("/configuration/doh", SaveDohBlocklistSettingsAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
         app.MapPost("/configuration/posture", SavePolicyPostureAsync)
@@ -1484,6 +1489,64 @@ public static class AdminConfigurationEndpoints
         return Redirect(BurstDetectionSettingsConfigurationPath, status: "Burst-detection settings saved.");
     }
 
+    internal static async Task<IResult> SaveDohBlocklistSettingsAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        IDohBlocklistSettingsStore dohSettings,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var user = await GetCurrentUserAsync(context, users).ConfigureAwait(false);
+        if (user is null)
+        {
+            return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(DohBlocklistSettingsConfigurationPath, error: "Step-up verification is required before editing DoH blocklist settings.");
+        }
+
+        if (!int.TryParse(form["rowVersion"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedRowVersion)
+            || expectedRowVersion < 0)
+        {
+            return Redirect(DohBlocklistSettingsConfigurationPath, error: "DoH blocklist settings version was not valid.  Reload the page and try again.");
+        }
+
+        var before = await dohSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        if (!TryReadDohBlocklistSettings(form, before, out var candidate, out var error))
+        {
+            return Redirect(DohBlocklistSettingsConfigurationPath, error: error);
+        }
+
+        var result = await dohSettings.UpdateAsync(
+            candidate,
+            expectedRowVersion,
+            user.Username,
+            DateTimeOffset.UtcNow,
+            context.RequestAborted).ConfigureAwait(false);
+        if (!result.Succeeded)
+        {
+            return Redirect(DohBlocklistSettingsConfigurationPath, error: "DoH blocklist settings were changed by another session.  Review the current values and save again.");
+        }
+
+        await configAuditor.RecordDohBlocklistSettingsWriteAsync(
+            user.Username,
+            before,
+            result.Settings,
+            context.RequestAborted).ConfigureAwait(false);
+        return Redirect(DohBlocklistSettingsConfigurationPath, status: "DoH blocklist settings saved.");
+    }
+
     internal static async Task<IResult> SaveIncidentCoalescingSettingsAsync(
         HttpContext context,
         IAntiforgery antiforgery,
@@ -2361,6 +2424,93 @@ public static class AdminConfigurationEndpoints
         };
 
         if (!BurstDetectionSettingsValidator.TryValidate(settings, out error))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryReadDohBlocklistSettings(
+        IFormCollection form,
+        DohBlocklistSettings? current,
+        out DohBlocklistSettings settings,
+        out string error)
+    {
+        settings = current ?? new DohBlocklistSettings
+        {
+            Id = DohBlocklistSettings.FixedId,
+            RowVersion = 0,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = "admin",
+        };
+        error = string.Empty;
+
+        if (!int.TryParse(
+                form["fetchIntervalSeconds"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var fetchIntervalSeconds))
+        {
+            error = DohBlocklistSettingsValidator.FetchIntervalError;
+            return false;
+        }
+
+        if (!int.TryParse(
+                form["probeIntervalSeconds"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var probeIntervalSeconds))
+        {
+            error = DohBlocklistSettingsValidator.ProbeIntervalError;
+            return false;
+        }
+
+        if (!int.TryParse(
+                form["probeTimeoutSeconds"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var probeTimeoutSeconds))
+        {
+            error = DohBlocklistSettingsValidator.ProbeTimeoutError;
+            return false;
+        }
+
+        if (!int.TryParse(
+                form["probeConcurrency"].ToString(),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var probeConcurrency))
+        {
+            error = DohBlocklistSettingsValidator.ProbeConcurrencyError;
+            return false;
+        }
+
+        var primaryFeedUrl = form["primaryFeedUrl"].ToString().Trim();
+        var secondaryFeedUrl = form["secondaryFeedUrl"].ToString().Trim();
+        var addressListName = form["addressListName"].ToString().Trim();
+        var probeCanaryFqdn = form["probeCanaryFqdn"].ToString().Trim();
+        var probeExpectedToken = form["probeExpectedToken"].ToString().Trim();
+        var probeEndpointPath = form["probeEndpointPath"].ToString().Trim();
+
+        settings = settings with
+        {
+            Enabled = ReadCheckbox(form, "enabled"),
+            PrimaryFeedUrl = primaryFeedUrl,
+            SecondaryFeedUrl = secondaryFeedUrl,
+            AddressListName = addressListName,
+            FetchIntervalSeconds = fetchIntervalSeconds,
+            ProbeEnabled = ReadCheckbox(form, "probeEnabled"),
+            ProbeCanaryFqdn = probeCanaryFqdn,
+            ProbeExpectedToken = probeExpectedToken,
+            ProbeEndpointPath = probeEndpointPath,
+            ProbeTimeoutSeconds = probeTimeoutSeconds,
+            ProbeConcurrency = probeConcurrency,
+            ProbeIntervalSeconds = probeIntervalSeconds,
+            ApplyToRouters = ReadCheckbox(form, "applyToRouters"),
+        };
+
+        if (!DohBlocklistSettingsValidator.TryValidate(settings, out error))
         {
             return false;
         }

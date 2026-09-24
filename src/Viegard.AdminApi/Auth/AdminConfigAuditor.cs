@@ -415,6 +415,36 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
         }
     }
 
+    public async ValueTask RecordDohBlocklistSettingsWriteAsync(
+        string username,
+        Viegard.Application.Doh.DohBlocklistSettings? before,
+        Viegard.Application.Doh.DohBlocklistSettings? after,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = DateTimeOffset.UtcNow,
+                Stage = PipelineStage.Admin,
+                Summary = $"Admin config write by {username}: changed DoH blocklist settings.",
+                SourceId = "admin:config",
+                DetailJson = JsonSerializer.Serialize(new
+                {
+                    Kind = "DohBlocklistSettingsChanged",
+                    Username = username,
+                    Before = before,
+                    After = after,
+                }, JsonOptions),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Failed to append admin configuration audit record.");
+        }
+    }
+
     public async ValueTask RecordSessionSecuritySettingsWriteAsync(
         string username,
         Viegard.Application.Auth.SessionSecuritySettings? before,

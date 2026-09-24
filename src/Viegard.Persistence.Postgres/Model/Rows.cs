@@ -430,6 +430,71 @@ public sealed class JetPackDesiredAddressRow
     public DateTimeOffset LastSeenAt { get; set; }
 }
 
+public sealed class DohBlocklistSettingsRow
+{
+    public int Id { get; set; }
+
+    public bool Enabled { get; set; }
+
+    public string PrimaryFeedUrl { get; set; } = string.Empty;
+
+    public string SecondaryFeedUrl { get; set; } = string.Empty;
+
+    public string AddressListName { get; set; } = string.Empty;
+
+    public int FetchIntervalSeconds { get; set; }
+
+    public bool ProbeEnabled { get; set; }
+
+    public string ProbeCanaryFqdn { get; set; } = string.Empty;
+
+    public string ProbeExpectedToken { get; set; } = string.Empty;
+
+    public string ProbeEndpointPath { get; set; } = string.Empty;
+
+    public int ProbeTimeoutSeconds { get; set; }
+
+    public int ProbeConcurrency { get; set; }
+
+    public int ProbeIntervalSeconds { get; set; }
+
+    public bool ApplyToRouters { get; set; }
+
+    public int RowVersion { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public string UpdatedBy { get; set; } = string.Empty;
+}
+
+public sealed class DohDesiredAddressRow
+{
+    public string Address { get; set; } = string.Empty;
+
+    public DateTimeOffset FirstSeenAt { get; set; }
+
+    public DateTimeOffset LastSeenAt { get; set; }
+}
+
+public sealed class DohProbeResultRow
+{
+    public string Address { get; set; } = string.Empty;
+
+    public int Status { get; set; }
+
+    public int? HttpStatus { get; set; }
+
+    public bool TokenMatched { get; set; }
+
+    public int ConsecutiveFailures { get; set; }
+
+    public DateTimeOffset FirstSeenAt { get; set; }
+
+    public DateTimeOffset LastProbedAt { get; set; }
+
+    public DateTimeOffset? LastConfirmedAt { get; set; }
+}
+
 public sealed class LocalModelAdvisorSettingsRow
 {
     public int Id { get; set; }

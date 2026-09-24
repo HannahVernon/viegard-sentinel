@@ -51,6 +51,11 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<JetPackFeedOptions>, JetPackFeedOptionsValidator>();
 builder.Services
+    .AddOptions<Viegard.Application.Doh.DohBlocklistOptions>()
+    .Bind(builder.Configuration.GetSection(Viegard.Application.Doh.DohBlocklistOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<Viegard.Application.Doh.DohBlocklistOptions>, Viegard.Application.Doh.DohBlocklistOptionsValidator>();
+builder.Services
     .AddOptions<LocalModelAdvisorOptions>()
     .Bind(builder.Configuration.GetSection(LocalModelAdvisorOptions.SectionName))
     .ValidateOnStart();
@@ -164,6 +169,9 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<IRetentionSettingsStore, InMemoryRetentionSettingsStore>();
         builder.Services.AddSingleton<IJetPackFeedSettingsStore, InMemoryJetPackFeedSettingsStore>();
         builder.Services.AddSingleton<IJetPackDesiredAddressStore, InMemoryJetPackDesiredAddressStore>();
+        builder.Services.AddSingleton<Viegard.Application.Doh.IDohBlocklistSettingsStore, InMemoryDohBlocklistSettingsStore>();
+        builder.Services.AddSingleton<Viegard.Application.Doh.IDohDesiredAddressStore, InMemoryDohDesiredAddressStore>();
+        builder.Services.AddSingleton<Viegard.Application.Doh.IDohProbeResultStore, InMemoryDohProbeResultStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorSettingsStore, InMemoryLocalModelAdvisorSettingsStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorCategoryBandStore, InMemoryLocalModelAdvisorCategoryBandStore>();
         builder.Services.AddSingleton<ILocalModelAdvisorInjectionPatternStore, InMemoryLocalModelAdvisorInjectionPatternStore>();
@@ -205,6 +213,8 @@ builder.Services.AddSingleton<IClassifierSettingsDiagnostics, LoggingClassifierS
 builder.Services.AddSingleton<ClassifierSettingsSource>();
 builder.Services.AddSingleton<IBurstDetectionSettingsDiagnostics, LoggingBurstDetectionSettingsDiagnostics>();
 builder.Services.AddSingleton<BurstDetectionSettingsSource>();
+builder.Services.AddSingleton<Viegard.Application.Doh.IDohBlocklistSettingsDiagnostics, LoggingDohBlocklistSettingsDiagnostics>();
+builder.Services.AddSingleton<Viegard.Application.Doh.DohBlocklistSettingsSource>();
 builder.Services.AddSingleton<Viegard.Application.Coalescing.IIncidentCoalescingSettingsDiagnostics, LoggingIncidentCoalescingSettingsDiagnostics>();
 builder.Services.AddSingleton<Viegard.Application.Coalescing.IncidentCoalescingSettingsSource>();
 builder.Services.AddSingleton<IBurstSignal, AuthFailureBurstSignal>();
@@ -396,6 +406,14 @@ if (configuredRoles.Contains(RoleNames.Actions, StringComparer.OrdinalIgnoreCase
     builder.Services.AddHostedService<BanReconciliationWorker>();
     builder.Services.AddHostedService<JetPackFeedFetchWorker>();
     builder.Services.AddHostedService<JetPackReconciliationWorker>();
+    builder.Services.AddSingleton(new DohProbeHttpClient(new HttpClient(new HttpClientHandler
+    {
+        ServerCertificateCustomValidationCallback = static (_, _, _, _) => true,
+    })));
+    builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, DohBlocklistSettingsRefreshWorker>());
+    builder.Services.AddHostedService<DohFeedFetchWorker>();
+    builder.Services.AddHostedService<DohProbeWorker>();
+    builder.Services.AddHostedService<DohReconciliationWorker>();
 }
 
 // The posture refresh loop feeds every posture consumer (policy engine,

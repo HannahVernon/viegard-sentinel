@@ -215,19 +215,19 @@ public static class AdminConfigurationEndpoints
                 context,
                 enqueueForCorrelation: true,
                 cancellationToken: context.RequestAborted).ConfigureAwait(false);
-            return Redirect(JetPackConfigurationPath, error: "Step-up verification is required before editing JetPack allowlist settings.");
+            return Redirect(WithForm(JetPackConfigurationPath, "jetpack"), error: "Step-up verification is required before editing JetPack allowlist settings.");
         }
 
         if (!int.TryParse(form["version"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedVersion)
             || expectedVersion < 0)
         {
-            return Redirect(JetPackConfigurationPath, error: "JetPack settings version was not valid.  Reload the page and try again.");
+            return Redirect(WithForm(JetPackConfigurationPath, "jetpack"), error: "JetPack settings version was not valid.  Reload the page and try again.");
         }
 
         var before = await jetPackSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
         if (!TryReadJetPackSettings(form, out var candidate, out var error))
         {
-            return Redirect(JetPackConfigurationPath, error: error);
+            return Redirect(WithForm(JetPackConfigurationPath, "jetpack"), error: error);
         }
 
         var result = await jetPackSettings.UpsertAsync(
@@ -238,7 +238,7 @@ public static class AdminConfigurationEndpoints
             context.RequestAborted).ConfigureAwait(false);
         if (!result.Succeeded)
         {
-            return Redirect(JetPackConfigurationPath, error: "JetPack settings were changed by another session.  Review the current values and save again.");
+            return Redirect(WithForm(JetPackConfigurationPath, "jetpack"), error: "JetPack settings were changed by another session.  Review the current values and save again.");
         }
 
         await configAuditor.RecordJetPackFeedSettingsWriteAsync(
@@ -731,7 +731,7 @@ public static class AdminConfigurationEndpoints
 
         if (!SatelliteRoleName.TryNormalize(form["name"].ToString(), out var normalized, out var error))
         {
-            return Redirect(SatellitesConfigurationPath, error: error);
+            return Redirect(WithForm(SatellitesConfigurationPath, "add-satellite"), error: error);
         }
 
         try
@@ -849,7 +849,7 @@ public static class AdminConfigurationEndpoints
 
         if (!TryReadRouterForm(form, null, gate.User!.Username, DateTimeOffset.UtcNow, requirePassword: true, out var router, out var password, out var error))
         {
-            return Redirect(RoutersConfigurationPath, error: error);
+            return Redirect(WithForm(RoutersConfigurationPath, "add-router"), error: error);
         }
 
         string passwordCiphertext;
@@ -859,13 +859,13 @@ public static class AdminConfigurationEndpoints
         }
         catch (RouterCredentialProtectionException ex)
         {
-            return Redirect(RoutersConfigurationPath, error: ex.Message);
+            return Redirect(WithForm(RoutersConfigurationPath, "add-router"), error: ex.Message);
         }
 
         var result = await routers.CreateAsync(router, passwordCiphertext, context.RequestAborted).ConfigureAwait(false);
         if (!result.Succeeded)
         {
-            return Redirect(RoutersConfigurationPath, error: RouterSaveError(result.Status));
+            return Redirect(WithForm(RoutersConfigurationPath, "add-router"), error: RouterSaveError(result.Status));
         }
 
         await configAuditor.RecordRouterWriteAsync(
@@ -1516,19 +1516,19 @@ public static class AdminConfigurationEndpoints
                 context,
                 enqueueForCorrelation: true,
                 cancellationToken: context.RequestAborted).ConfigureAwait(false);
-            return Redirect(DohBlocklistSettingsConfigurationPath, error: "Step-up verification is required before editing DoH blocklist settings.");
+            return Redirect(WithForm(DohBlocklistSettingsConfigurationPath, "doh"), error: "Step-up verification is required before editing DoH blocklist settings.");
         }
 
         if (!int.TryParse(form["rowVersion"].ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var expectedRowVersion)
             || expectedRowVersion < 0)
         {
-            return Redirect(DohBlocklistSettingsConfigurationPath, error: "DoH blocklist settings version was not valid.  Reload the page and try again.");
+            return Redirect(WithForm(DohBlocklistSettingsConfigurationPath, "doh"), error: "DoH blocklist settings version was not valid.  Reload the page and try again.");
         }
 
         var before = await dohSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
         if (!TryReadDohBlocklistSettings(form, before, out var candidate, out var error))
         {
-            return Redirect(DohBlocklistSettingsConfigurationPath, error: error);
+            return Redirect(WithForm(DohBlocklistSettingsConfigurationPath, "doh"), error: error);
         }
 
         var result = await dohSettings.UpdateAsync(
@@ -1539,7 +1539,7 @@ public static class AdminConfigurationEndpoints
             context.RequestAborted).ConfigureAwait(false);
         if (!result.Succeeded)
         {
-            return Redirect(DohBlocklistSettingsConfigurationPath, error: "DoH blocklist settings were changed by another session.  Review the current values and save again.");
+            return Redirect(WithForm(DohBlocklistSettingsConfigurationPath, "doh"), error: "DoH blocklist settings were changed by another session.  Review the current values and save again.");
         }
 
         await configAuditor.RecordDohBlocklistSettingsWriteAsync(
@@ -1568,12 +1568,12 @@ public static class AdminConfigurationEndpoints
         var settings = await dohSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);
         if (settings is null || !settings.Enabled)
         {
-            return Redirect(DohBlocklistSettingsConfigurationPath, error: "Enable the DoH blocklist before requesting a probe.");
+            return Redirect(WithForm(DohBlocklistSettingsConfigurationPath, "doh"), error: "Enable the DoH blocklist before requesting a probe.");
         }
 
         if (!settings.ProbeEnabled)
         {
-            return Redirect(DohBlocklistSettingsConfigurationPath, error: "Canary probing is disabled, so there is nothing to run.  Enable probing first.");
+            return Redirect(WithForm(DohBlocklistSettingsConfigurationPath, "doh"), error: "Canary probing is disabled, so there is nothing to run.  Enable probing first.");
         }
 
         await probeTrigger.RequestAsync(context.RequestAborted).ConfigureAwait(false);
@@ -2764,6 +2764,14 @@ public static class AdminConfigurationEndpoints
 
     private static IResult Redirect(string path, string? status = null, string? error = null) =>
         Results.Redirect(path).WithFlash(status: status, error: error);
+
+    private static string WithForm(string path, string form)
+    {
+        var hashIndex = path.IndexOf('#', StringComparison.Ordinal);
+        return hashIndex < 0
+            ? $"{path}?form={form}"
+            : $"{path[..hashIndex]}?form={form}{path[hashIndex..]}";
+    }
 
     private static string HostUpgradeRejectionMessage(HostUpgradeCommandRejectedException exception) =>
         exception.Reason switch

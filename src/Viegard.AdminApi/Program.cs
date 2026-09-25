@@ -302,6 +302,7 @@ switch (persistenceProvider)
         builder.Services.AddSingleton<Viegard.Application.Doh.IDohDesiredAddressStore, InMemoryDohDesiredAddressStore>();
         builder.Services.AddSingleton<Viegard.Application.Doh.IDohProbeResultStore, InMemoryDohProbeResultStore>();
         builder.Services.AddSingleton<Viegard.Application.Doh.IDohReconciliationProposalStore, InMemoryDohReconciliationProposalStore>();
+        builder.Services.AddSingleton<Viegard.Application.Doh.IDohProbeSummaryStore, InMemoryDohProbeSummaryStore>();
         builder.Services.AddSingleton<Viegard.Application.Doh.IDohProbeTrigger, InMemoryDohProbeTrigger>();
         builder.Services.AddSingleton<Viegard.Application.Coalescing.IIncidentCoalescingSettingsStore, InMemoryIncidentCoalescingSettingsStore>();
         builder.Services.AddSingleton<ISessionSecuritySettingsStore, InMemorySessionSecuritySettingsStore>();

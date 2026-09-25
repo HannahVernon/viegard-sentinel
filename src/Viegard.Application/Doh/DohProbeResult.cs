@@ -50,6 +50,9 @@ public interface IDohProbeResultStore
 {
     ValueTask<IReadOnlyList<DohProbeResult>> ListAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Counts probe results grouped by status and HTTP status without loading every row.</summary>
+    ValueTask<IReadOnlyList<DohProbeStatusCount>> CountByStatusAsync(CancellationToken cancellationToken = default);
+
     ValueTask SaveAsync(DohProbeResult result, CancellationToken cancellationToken = default);
 
     /// <summary>Deletes probe results for addresses no longer present in the desired set.</summary>

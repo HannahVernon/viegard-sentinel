@@ -30,6 +30,7 @@
 @inject IOptions<LocalModelAdvisorOptions> LocalModelAdvisorOptions
 @inject Viegard.Application.Doh.IDohBlocklistSettingsStore DohBlocklistSettingsStore
 @inject Viegard.Application.Doh.IDohReconciliationProposalStore DohReconciliationProposalStore
+@inject Viegard.Application.Doh.IDohProbeSummaryStore DohProbeSummaryStore
 @inject IOptions<Viegard.Application.Doh.DohBlocklistOptions> DohBlocklistOptions
 @inject UserDisplay Display
 @inject SatelliteRoleCredentialCookie SatelliteCredentialCookie
@@ -1614,6 +1615,53 @@
             </tbody>
         </table>
 
+        <h3>Probe outcomes</h3>
+        @if (_dohProbeSummary is null)
+        {
+            <p class="small">No probe cycle has completed yet.  Once the DoH probe worker finishes a cycle, the count of addresses in each test category appears here.</p>
+        }
+        else
+        {
+            var _probeCur = _dohProbeSummary.Current;
+            var _probePrior = _dohProbeSummary.Prior;
+            <p class="small">
+                Latest probe cycle completed @Display.Format(_probeCur.GeneratedAt).
+                @if (_probePrior is null)
+                {
+                    <text>No prior cycle is recorded yet, so the delta column is blank.</text>
+                }
+                else
+                {
+                    <text>The delta column compares this cycle with the previous one (completed @Display.Format(_probePrior.GeneratedAt)).</text>
+                }
+            </p>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Category</th>
+                        <th scope="col">Now</th>
+                        <th scope="col">Prior run</th>
+                        <th scope="col">Delta</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @DohProbeRow("Total probed", _probeCur.Total, _probePrior?.Total)
+                    @DohProbeRow("Confirmed", _probeCur.Confirmed, _probePrior?.Confirmed)
+                    @DohProbeRow("Responded non-compliant", _probeCur.RespondedNonCompliant, _probePrior?.RespondedNonCompliant)
+                    @DohProbeRow("Refused", _probeCur.Refused, _probePrior?.Refused)
+                    @foreach (var refused in _probeCur.RefusedByHttpStatus)
+                    {
+                        var label = refused.HttpStatus is int http
+                            ? $"HTTP {http.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+                            : "No HTTP response";
+                        @DohProbeSubRow(label, refused.Count, PriorRefusedCount(_probePrior, refused.HttpStatus))
+                    }
+                    @DohProbeRow("Timeout", _probeCur.Timeout, _probePrior?.Timeout)
+                    @DohProbeRow("Unprobed", _probeCur.Unprobed, _probePrior?.Unprobed)
+                </tbody>
+            </table>
+        }
+
         <h3>Latest reconciliation proposal</h3>
         @if (_dohProposal is null)
         {
@@ -2062,6 +2110,7 @@
     private SessionSecuritySettings? _sessionSecuritySettings;
     private Viegard.Application.Doh.DohBlocklistSettings? _dohSettings;
     private Viegard.Application.Doh.DohReconciliationProposal? _dohProposal;
+    private Viegard.Application.Doh.DohProbeSummarySnapshot? _dohProbeSummary;
     private PolicyPostureSettings? _postureSettings;
     private IReadOnlyDictionary<RetentionTarget, long> _lastCycleCounts = RetentionSettings.EmptyCounts();
     private IReadOnlyDictionary<string, IngestionFilter> _mdaemonFilters = new Dictionary<string, IngestionFilter>(StringComparer.Ordinal);
@@ -2235,6 +2284,38 @@
             }
         </text>;
 
+    private static string InvariantInt(int value) =>
+        value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string SignedDelta(int current, int prior)
+    {
+        var delta = current - prior;
+        return delta > 0
+            ? $"+{InvariantInt(delta)}"
+            : InvariantInt(delta);
+    }
+
+    private static int? PriorRefusedCount(
+        Viegard.Application.Doh.DohProbeOutcomeSummary? prior,
+        int? httpStatus) =>
+        prior?.RefusedByHttpStatus.FirstOrDefault(r => r.HttpStatus == httpStatus)?.Count;
+
+    private RenderFragment DohProbeRow(string label, int current, int? prior) =>
+        @<tr>
+            <th scope="row">@label</th>
+            <td>@InvariantInt(current)</td>
+            <td>@(prior is int p ? InvariantInt(p) : "-")</td>
+            <td>@(prior is int pv ? SignedDelta(current, pv) : "-")</td>
+        </tr>;
+
+    private RenderFragment DohProbeSubRow(string label, int current, int? prior) =>
+        @<tr class="doh-probe-subrow">
+            <th scope="row">@label</th>
+            <td>@InvariantInt(current)</td>
+            <td>@(prior is int p ? InvariantInt(p) : "-")</td>
+            <td>@(prior is int pv ? SignedDelta(current, pv) : "-")</td>
+        </tr>;
+
     private string DohBlocklistSettingsState => _dohSettings is null
         ? "Not seeded"
         : "Database-owned";
@@ -2280,6 +2361,7 @@
         _sessionSecuritySettings = await SessionSecuritySettingsStore.GetAsync().ConfigureAwait(false);
         _dohSettings = await DohBlocklistSettingsStore.GetAsync().ConfigureAwait(false);
         _dohProposal = await DohReconciliationProposalStore.GetAsync().ConfigureAwait(false);
+        _dohProbeSummary = await DohProbeSummaryStore.GetAsync().ConfigureAwait(false);
         _postureSettings = await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false);
         _lastCycleCounts = _settings?.LastCycleCounts() ?? RetentionSettings.EmptyCounts();
         _mdaemonFilters = (await IngestionFilters

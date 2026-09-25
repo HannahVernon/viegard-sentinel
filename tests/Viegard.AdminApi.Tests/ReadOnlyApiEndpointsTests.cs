@@ -650,6 +650,52 @@ public sealed class ReadOnlyApiEndpointsTests
         Assert.False(json.GetProperty("seeded").GetBoolean());
     }
 
+    [Fact]
+    public async Task GetDohProbeSummary_returns_null_sections_when_no_cycle_has_run()
+    {
+        var store = new InMemoryDohProbeSummaryStore();
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetDohProbeSummaryAsync(context, store),
+            context);
+
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("current").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("prior").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("deltas").ValueKind);
+    }
+
+    [Fact]
+    public async Task GetDohProbeSummary_reports_current_prior_and_deltas()
+    {
+        var store = new InMemoryDohProbeSummaryStore();
+        await store.SaveCurrentAsync(Viegard.Application.Doh.DohProbeOutcomeSummary.FromCounts(
+            new[] { new Viegard.Application.Doh.DohProbeStatusCount(Viegard.Application.Doh.DohProbeStatus.Confirmed, null, 2) },
+            new DateTimeOffset(2026, 9, 24, 11, 0, 0, TimeSpan.Zero)));
+        await store.SaveCurrentAsync(Viegard.Application.Doh.DohProbeOutcomeSummary.FromCounts(
+            new[]
+            {
+                new Viegard.Application.Doh.DohProbeStatusCount(Viegard.Application.Doh.DohProbeStatus.Confirmed, null, 5),
+                new Viegard.Application.Doh.DohProbeStatusCount(Viegard.Application.Doh.DohProbeStatus.Refused, 403, 1),
+            },
+            new DateTimeOffset(2026, 9, 24, 12, 0, 0, TimeSpan.Zero)));
+        var context = Context(string.Empty);
+
+        var json = await ExecuteAsync(
+            await ReadOnlyApiEndpoints.GetDohProbeSummaryAsync(context, store),
+            context);
+
+        Assert.Equal(6, json.GetProperty("current").GetProperty("total").GetInt32());
+        Assert.Equal(5, json.GetProperty("current").GetProperty("confirmed").GetInt32());
+        Assert.Equal(2, json.GetProperty("prior").GetProperty("total").GetInt32());
+        Assert.Equal(4, json.GetProperty("deltas").GetProperty("total").GetInt32());
+        Assert.Equal(3, json.GetProperty("deltas").GetProperty("confirmed").GetInt32());
+        Assert.Equal(1, json.GetProperty("deltas").GetProperty("refused").GetInt32());
+        var refused = json.GetProperty("current").GetProperty("refusedByHttpStatus");
+        Assert.Equal(1, refused.GetArrayLength());
+        Assert.Equal(403, refused[0].GetProperty("httpStatus").GetInt32());
+    }
+
     private static DefaultHttpContext Context(string queryString)
     {
         var services = new ServiceCollection().AddLogging().BuildServiceProvider();

@@ -16,6 +16,20 @@ public sealed class PostgresDohProbeResultStore(IDbContextFactory<ViegardDbConte
         return rows.Select(row => row.ToDomain()).ToList();
     }
 
+    public async ValueTask<IReadOnlyList<DohProbeStatusCount>> CountByStatusAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var grouped = await db.DohProbeResults
+            .AsNoTracking()
+            .GroupBy(row => new { row.Status, row.HttpStatus })
+            .Select(group => new { group.Key.Status, group.Key.HttpStatus, Count = group.Count() })
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+        return grouped
+            .Select(item => new DohProbeStatusCount((DohProbeStatus)item.Status, item.HttpStatus, item.Count))
+            .ToList();
+    }
+
     public async ValueTask SaveAsync(DohProbeResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);

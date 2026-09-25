@@ -18,6 +18,18 @@ public sealed class InMemoryDohProbeResultStore : IDohProbeResultStore
         }
     }
 
+    public ValueTask<IReadOnlyList<DohProbeStatusCount>> CountByStatusAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            var counts = _results.Values
+                .GroupBy(result => new { result.Status, result.HttpStatus })
+                .Select(group => new DohProbeStatusCount(group.Key.Status, group.Key.HttpStatus, group.Count()))
+                .ToList();
+            return ValueTask.FromResult<IReadOnlyList<DohProbeStatusCount>>(counts);
+        }
+    }
+
     public ValueTask SaveAsync(DohProbeResult result, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(result);

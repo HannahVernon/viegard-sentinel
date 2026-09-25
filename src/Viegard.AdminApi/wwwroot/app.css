@@ -418,9 +418,9 @@ a:hover {
     display: block;
 }
 
-.page-index-sub {
-    margin-left: 0.55rem;
-    padding-left: 0.6rem;
+.page-index .page-index-sub {
+    margin-left: 0.6rem;
+    padding-left: 0.7rem;
     border-left: 1px solid var(--panel-border);
 }
 

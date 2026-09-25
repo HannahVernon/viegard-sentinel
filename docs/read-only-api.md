@@ -42,6 +42,9 @@ Path | Returns
 `GET /api/v1/burst/settings` | Rate-based burst-detection controls (global and auth-failure signal enables, threshold, window seconds, cooldown seconds, action-eligible flag), with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
 `GET /api/v1/coalescing/settings` | Incident-coalescing controls (enabled, settle window seconds, max coalesce window seconds), with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
 `GET /api/v1/session-security/settings` | Session-security controls (step-up validity seconds, resume-stash TTL seconds), with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
+`GET /api/v1/doh/settings` | DoH server-blocklist controls (master switch, primary/secondary feed URLs, address-list name, fetch interval, probe enable/FQDN/token-set/path/timeout/concurrency/interval, apply-to-routers), with `version`, `updatedAt`, `updatedBy`, and a `seeded` flag; falls back to code options until the row is seeded
+`GET /api/v1/doh/proposals` | Latest DoH reconciliation proposal snapshot (per-router add/remove/comment-update address lists), or nulls when no cycle has run
+`GET /api/v1/doh/probes/summary` | DoH probe-outcome counts for the two most recent cycles (`current`, `prior`, and per-category `deltas`), or nulls when no cycle has run
 `GET /status/queues` | Queue and instance health (display-formatted)
 `GET /status/upgrades` | Recent host upgrade commands (display-formatted)
 `GET /status/bans` | Bans (display-formatted for the live UI)
@@ -139,3 +142,15 @@ row on startup) the values, version, and last-writer reflect the
 verification stays fresh (each verified action renews the window);
 `resumeStashTtlSeconds` is how long a step-up-gated action captured on a failed
 gate waits to be replayed after the operator completes verification.
+
+`GET /api/v1/doh/probes/summary` returns `current`, `prior`, and `deltas`.  Each
+of `current` and `prior` is `{ generatedAt, total, unprobed, confirmed,
+respondedNonCompliant, refused, timeout, refusedByHttpStatus }`, where
+`refusedByHttpStatus` is an array of `{ httpStatus, count }` ordered by count
+descending (`httpStatus` is `null` for a transport-level refusal with no HTTP
+response).  `total` counts probed addresses only; feed CIDR ranges are never
+probed and carry no probe record.  `deltas` is `{ total, unprobed, confirmed,
+respondedNonCompliant, refused, timeout }`, each the current cycle minus the
+prior cycle.  `prior` and `deltas` are `null` until a second cycle completes, and
+all three are `null` until the first cycle runs.  "Prior" is the previous
+completed probe cycle; an on-demand probe-now cycle counts as a run.

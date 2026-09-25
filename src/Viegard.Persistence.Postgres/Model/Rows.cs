@@ -504,6 +504,15 @@ public sealed class DohReconciliationProposalRow
     public string DetailJson { get; set; } = string.Empty;
 }
 
+public sealed class DohProbeSummaryRow
+{
+    public int Id { get; set; }
+
+    public DateTimeOffset GeneratedAt { get; set; }
+
+    public string DetailJson { get; set; } = string.Empty;
+}
+
 public sealed class LocalModelAdvisorSettingsRow
 {
     public int Id { get; set; }

@@ -1586,6 +1586,12 @@ td code {
     margin: 0.25rem 0;
 }
 
+.doh-probe-subrow th[scope="row"] {
+    padding-left: 1.75rem;
+    font-weight: 400;
+    color: var(--text-muted, inherit);
+}
+
 .doh-proposal-list summary {
     cursor: pointer;
     color: var(--accent-strong);

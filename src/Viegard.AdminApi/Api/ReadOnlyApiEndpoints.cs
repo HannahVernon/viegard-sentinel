@@ -48,6 +48,7 @@ public static class ReadOnlyApiEndpoints
         api.MapGet("/session-security/settings", GetSessionSecuritySettingsAsync);
         api.MapGet("/doh/settings", GetDohBlocklistSettingsAsync);
         api.MapGet("/doh/proposals", GetDohReconciliationProposalsAsync);
+        api.MapGet("/doh/probes/summary", GetDohProbeSummaryAsync);
         api.MapGet("/policy/thresholds", GetPolicyThresholdsAsync);
         api.MapGet("/advisor/summary", GetAdvisorSummaryAsync);
         api.MapGet("/advisor/consults", ListAdvisorConsultsAsync);
@@ -433,6 +434,55 @@ public static class ReadOnlyApiEndpoints
             }),
         }, Json);
     }
+
+    internal static async Task<IResult> GetDohProbeSummaryAsync(
+        HttpContext context,
+        Viegard.Application.Doh.IDohProbeSummaryStore summaryStore)
+    {
+        var snapshot = await summaryStore.GetAsync(context.RequestAborted).ConfigureAwait(false);
+        if (snapshot is null)
+        {
+            return Results.Json(new
+            {
+                current = (object?)null,
+                prior = (object?)null,
+                deltas = (object?)null,
+            }, Json);
+        }
+
+        var current = snapshot.Current;
+        var prior = snapshot.Prior;
+        return Results.Json(new
+        {
+            current = ShapeDohProbeSummary(current),
+            prior = prior is null ? null : ShapeDohProbeSummary(prior),
+            deltas = prior is null ? null : new
+            {
+                total = current.Total - prior.Total,
+                unprobed = current.Unprobed - prior.Unprobed,
+                confirmed = current.Confirmed - prior.Confirmed,
+                respondedNonCompliant = current.RespondedNonCompliant - prior.RespondedNonCompliant,
+                refused = current.Refused - prior.Refused,
+                timeout = current.Timeout - prior.Timeout,
+            },
+        }, Json);
+    }
+
+    private static object ShapeDohProbeSummary(Viegard.Application.Doh.DohProbeOutcomeSummary summary) => new
+    {
+        generatedAt = summary.GeneratedAt,
+        total = summary.Total,
+        unprobed = summary.Unprobed,
+        confirmed = summary.Confirmed,
+        respondedNonCompliant = summary.RespondedNonCompliant,
+        refused = summary.Refused,
+        timeout = summary.Timeout,
+        refusedByHttpStatus = summary.RefusedByHttpStatus.Select(item => new
+        {
+            httpStatus = item.HttpStatus,
+            count = item.Count,
+        }),
+    };
 
     internal static async Task<IResult> GetPolicyThresholdsAsync(
         HttpContext context,

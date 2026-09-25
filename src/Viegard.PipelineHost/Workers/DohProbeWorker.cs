@@ -23,6 +23,7 @@ public sealed class DohProbeWorker(
     IDohBlocklistSettingsStore settingsStore,
     IDohDesiredAddressStore desiredAddresses,
     IDohProbeResultStore probeResults,
+    IDohProbeSummaryStore probeSummaries,
     DohProbeHttpClient probeClient,
     IDohProbeTrigger probeTrigger,
     IOptions<DohBlocklistOptions> options,
@@ -123,6 +124,10 @@ public sealed class DohProbeWorker(
         });
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        var counts = await probeResults.CountByStatusAsync(cancellationToken).ConfigureAwait(false);
+        var summary = DohProbeOutcomeSummary.FromCounts(counts, timeProvider.GetUtcNow());
+        await probeSummaries.SaveCurrentAsync(summary, cancellationToken).ConfigureAwait(false);
 
         logger.LogInformation(
             "DoH probe cycle complete. Probed={Probed}; Confirmed={Confirmed}; Unconfirmed={Unconfirmed}; Skipped={Skipped}.",

@@ -388,6 +388,7 @@ internal static class Mapping
         TimeZoneId = preferences.TimeZoneId,
         PageSize = preferences.PageSize,
         StatusRefreshSeconds = preferences.StatusRefreshSeconds,
+        DecisionsView = preferences.DecisionsView,
         UpdatedAt = Utc(preferences.UpdatedAt),
     };
 
@@ -397,6 +398,7 @@ internal static class Mapping
         TimeZoneId = row.TimeZoneId,
         PageSize = row.PageSize,
         StatusRefreshSeconds = row.StatusRefreshSeconds,
+        DecisionsView = row.DecisionsView,
         UpdatedAt = row.UpdatedAt,
     };
 

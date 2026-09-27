@@ -325,6 +325,12 @@ namespace Viegard.Persistence.Postgres.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("user_id");
 
+                    b.Property<string>("DecisionsView")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("decisions_view");
+
                     b.Property<int>("PageSize")
                         .HasColumnType("integer")
                         .HasColumnName("page_size");

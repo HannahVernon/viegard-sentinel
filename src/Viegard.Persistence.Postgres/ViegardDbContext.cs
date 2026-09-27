@@ -636,6 +636,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
         {
             entity.ToTable("admin_user_preferences");
             entity.HasKey(e => e.UserId);
+            entity.Property(e => e.DecisionsView).HasMaxLength(Viegard.Domain.Admin.AdminUserPreferences.MaxDecisionsViewLength);
             entity.HasOne<AdminUserRow>().WithOne().HasForeignKey<AdminUserPreferencesRow>(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

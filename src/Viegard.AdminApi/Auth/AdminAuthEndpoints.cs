@@ -402,6 +402,11 @@ public static class AdminAuthEndpoints
             return Redirect("/account", error: error);
         }
 
+        // The account form does not edit the remembered /decisions view, so carry
+        // the existing value forward instead of resetting it to empty.
+        var existing = await users.GetPreferencesAsync(user.Id, context.RequestAborted).ConfigureAwait(false);
+        preferences = preferences with { DecisionsView = existing.DecisionsView };
+
         // Preferences only affect display formatting, not authentication or
         // authorization, so they intentionally do not require step-up.
         await users.SavePreferencesAsync(preferences, context.RequestAborted).ConfigureAwait(false);

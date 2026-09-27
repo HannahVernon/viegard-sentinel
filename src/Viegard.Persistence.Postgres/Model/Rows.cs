@@ -981,6 +981,8 @@ public sealed class AdminUserPreferencesRow
 
     public int StatusRefreshSeconds { get; set; } = 30;
 
+    public string DecisionsView { get; set; } = string.Empty;
+
     public DateTimeOffset UpdatedAt { get; set; }
 }
 

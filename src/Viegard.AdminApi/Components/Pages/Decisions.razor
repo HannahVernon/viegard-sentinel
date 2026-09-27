@@ -12,6 +12,7 @@
 @inject IPolicyPostureSettingsStore PolicyPostureSettingsStore
 @inject IHttpContextAccessor HttpContextAccessor
 @inject UserDisplay Display
+@inject NavigationManager Navigation
 
 <PageTitle>Viegard decisions</PageTitle>
 
@@ -59,7 +60,7 @@
         <span class="filter-hint">Syntax: term "a phrase" OR other -exclude</span>
         @if (HasFilters)
         {
-            <a class="filter-clear" href="/decisions">Clear</a>
+            <a class="filter-clear" href="/decisions?clear=1">Clear</a>
         }
     </form>
 
@@ -370,6 +371,39 @@
     protected override async Task OnInitializedAsync()
     {
         await Display.InitializeAsync().ConfigureAwait(false);
+
+        // Sticky view: remember the operator's filter and sort choices and
+        // restore them on a bare visit, so returning to /decisions reopens the
+        // same view.  "Clear" resets the remembered view to empty.
+        var stickyContext = HttpContextAccessor.HttpContext;
+        AdminUserPreferences? stickyPreferences = null;
+        var storedDecisionsView = string.Empty;
+        if (stickyContext is not null
+            && Guid.TryParse(stickyContext.User.FindFirstValue(ClaimTypes.NameIdentifier), out var stickyUserId))
+        {
+            stickyPreferences = await Users.GetPreferencesAsync(stickyUserId).ConfigureAwait(false);
+            storedDecisionsView = stickyPreferences.DecisionsView;
+
+            if (stickyContext.Request.Query.ContainsKey("clear"))
+            {
+                if (storedDecisionsView.Length > 0)
+                {
+                    await Users.SavePreferencesAsync(
+                        stickyPreferences with { DecisionsView = string.Empty, UpdatedAt = DateTimeOffset.UtcNow })
+                        .ConfigureAwait(false);
+                }
+
+                Navigation.NavigateTo("/decisions");
+                return;
+            }
+
+            if (storedDecisionsView.Length > 0 && !HasAnyDecisionsViewParam(stickyContext.Request))
+            {
+                Navigation.NavigateTo($"/decisions?{storedDecisionsView}");
+                return;
+            }
+        }
+
         _dryRunPosture = (await PolicyPostureSettingsStore.GetAsync().ConfigureAwait(false))?.DryRun
             ?? PolicyOptions.Value.Posture.DryRun;
         _take = Take is null ? Display.DefaultPageSize : KeysetPagination.ClampPageSize(Take);
@@ -401,6 +435,22 @@
         _filters = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["minSeverity"] = minSeverityText, ["maxSeverity"] = maxSeverityText, ["unreviewed"] = unreviewedText, ["sort"] = _sortKey, ["dir"] = direction };
         _sortHeaderParams = new Dictionary<string, string?> { ["q"] = _filterText, ["outcome"] = _outcome?.ToString(), ["minSeverity"] = minSeverityText, ["maxSeverity"] = maxSeverityText, ["unreviewed"] = unreviewedText, ["take"] = take };
         _filterHiddenParams = new Dictionary<string, string?> { ["take"] = take, ["sort"] = _sortKey, ["dir"] = direction };
+
+        // Persist the current filter and sort as the remembered view.  An empty
+        // view is only stored through the explicit "Clear" action above, so an
+        // ordinary render never wipes a saved view.
+        if (stickyPreferences is not null)
+        {
+            var currentDecisionsView = BuildDecisionsViewQuery(
+                _filterText, _outcome, minSeverityText, maxSeverityText, _unreviewedOnly, _sortKey, direction);
+            if (currentDecisionsView.Length > 0 && currentDecisionsView != storedDecisionsView)
+            {
+                await Users.SavePreferencesAsync(
+                    stickyPreferences with { DecisionsView = currentDecisionsView, UpdatedAt = DateTimeOffset.UtcNow })
+                    .ConfigureAwait(false);
+            }
+        }
+
         var filter = new DecisionListFilter(_filterText, _outcome, _minSeverity, _maxSeverity, _unreviewedOnly);
         try
         {
@@ -469,6 +519,58 @@
         _reviewReturnAnchor.TryGetValue(decisionId, out var anchor)
             ? $"{_stepUpReturnTo}#decision-{anchor:N}"
             : _stepUpReturnTo;
+
+    private static readonly string[] DecisionsViewParamKeys =
+    {
+        "q", "outcome", "minSeverity", "maxSeverity", "unreviewed", "sort", "dir", "take", "cursor", "prev", "page",
+    };
+
+    // A bare visit (the nav link) carries none of these keys, so it triggers a
+    // restore; any filter, sort, or pagination navigation carries at least one.
+    private static bool HasAnyDecisionsViewParam(HttpRequest request)
+    {
+        foreach (var key in DecisionsViewParamKeys)
+        {
+            if (request.Query.ContainsKey(key))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Canonical query string for the remembered view: filters and sort only, in
+    // a fixed key order so it compares equal to a restored view (no redundant
+    // writes).  Page position and page size are intentionally excluded.
+    private static string BuildDecisionsViewQuery(
+        string? filterText,
+        DecisionOutcome? outcome,
+        string? minSeverity,
+        string? maxSeverity,
+        bool unreviewedOnly,
+        string? sortKey,
+        string? direction)
+    {
+        var parts = new List<string>(7);
+
+        void Add(string key, string? value)
+        {
+            if (!string.IsNullOrEmpty(value))
+            {
+                parts.Add($"{key}={Uri.EscapeDataString(value)}");
+            }
+        }
+
+        Add("q", filterText);
+        Add("outcome", outcome?.ToString());
+        Add("minSeverity", minSeverity);
+        Add("maxSeverity", maxSeverity);
+        Add("unreviewed", unreviewedOnly ? "1" : null);
+        Add("sort", sortKey);
+        Add("dir", direction);
+        return string.Join("&", parts);
+    }
 
     private static string ClassificationSummary(Classification? classification) => classification is null
         ? "not found"

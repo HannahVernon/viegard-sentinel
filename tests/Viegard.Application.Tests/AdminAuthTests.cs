@@ -145,6 +145,39 @@ public sealed class AdminAuthTests
     }
 
     [Fact]
+    public async Task In_memory_preferences_persist_and_clamp_decisions_view()
+    {
+        var store = new InMemoryAdminUserStore();
+        var userId = ViegardId.New();
+
+        var missing = await store.GetPreferencesAsync(userId);
+        Assert.Equal(string.Empty, missing.DecisionsView);
+
+        await store.SavePreferencesAsync(new AdminUserPreferences
+        {
+            UserId = userId,
+            DecisionsView = "outcome=RequireApproval&unreviewed=1&sort=severity&dir=desc",
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+
+        var saved = await store.GetPreferencesAsync(userId);
+        Assert.Equal("outcome=RequireApproval&unreviewed=1&sort=severity&dir=desc", saved.DecisionsView);
+        // Fields the caller left unset fall back to their defaults, not blanks.
+        Assert.Equal("UTC", saved.TimeZoneId);
+        Assert.Equal(AdminUserPreferences.DefaultPageSize, saved.PageSize);
+
+        await store.SavePreferencesAsync(new AdminUserPreferences
+        {
+            UserId = userId,
+            DecisionsView = new string('q', AdminUserPreferences.MaxDecisionsViewLength + 50),
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+
+        var clamped = await store.GetPreferencesAsync(userId);
+        Assert.Equal(AdminUserPreferences.MaxDecisionsViewLength, clamped.DecisionsView.Length);
+    }
+
+    [Fact]
     public void Preferences_validation_accepts_utc_and_rejects_unknown_time_zone()
     {
         var userId = ViegardId.New();

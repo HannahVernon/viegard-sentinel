@@ -1863,6 +1863,7 @@ public sealed class PostgresAdminUserStore(IDbContextFactory<ViegardDbContext> f
                 preferences.StatusRefreshSeconds,
                 AdminUserPreferences.MinStatusRefreshSeconds,
                 AdminUserPreferences.MaxStatusRefreshSeconds),
+            DecisionsView = ClampDecisionsView(preferences.DecisionsView),
             UpdatedAt = preferences.UpdatedAt.ToUniversalTime(),
         };
 
@@ -1881,6 +1882,13 @@ public sealed class PostgresAdminUserStore(IDbContextFactory<ViegardDbContext> f
 
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    private static string ClampDecisionsView(string? view) =>
+        string.IsNullOrEmpty(view)
+            ? string.Empty
+            : view.Length <= AdminUserPreferences.MaxDecisionsViewLength
+                ? view
+                : view[..AdminUserPreferences.MaxDecisionsViewLength];
 
     private static string NormalizeUsername(string username) =>
         username.Trim().ToLowerInvariant();

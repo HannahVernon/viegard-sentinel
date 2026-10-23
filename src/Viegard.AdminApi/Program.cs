@@ -158,6 +158,7 @@ builder.Services.AddSingleton<AdminConfigAuditor>();
 builder.Services.AddSingleton<SatelliteRoleCredentialCookie>();
 builder.Services.AddScoped<AdminCookieAuthenticationEvents>();
 builder.Services.AddSingleton<IRouterCredentialProtector, AesGcmRouterCredentialProtector>();
+builder.Services.AddSingleton<ISecondFactorSecretProtector, AesGcmSecondFactorSecretProtector>();
 builder.Services.AddSingleton<RouterCertificateFetcher>();
 builder.Services.AddSingleton<RouterConnectivityTester>();
 builder.Services.AddSingleton<DecisionTargetResolver>();

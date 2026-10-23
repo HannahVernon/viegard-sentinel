@@ -141,6 +141,7 @@ public static class AdminAuthEndpoints
         RecoveryCodesCookie recoveryCodesCookie,
         TotpSetupCookie setupCookie,
         TotpService totp,
+        ISecondFactorSecretProtector secretProtector,
         RecoveryCodeService recoveryCodes,
         IOptions<AdminAuthOptions> options,
         AdminAuthAuditor auditor)
@@ -199,7 +200,7 @@ public static class AdminAuthEndpoints
                 await users.UpsertTotpSecretAsync(new AdminTotpSecret
                 {
                     UserId = user.Id,
-                    SecretBase32 = setupSecret,
+                    SecretBase32 = secretProtector.Protect(user.Id, setupSecret),
                     LastAcceptedStep = acceptedStep,
                     EnrolledAt = enrolledAt,
                 }, context.RequestAborted).ConfigureAwait(false);
@@ -229,10 +230,7 @@ public static class AdminAuthEndpoints
         }
         else
         {
-            var secret = await users.GetTotpSecretAsync(user.Id, context.RequestAborted).ConfigureAwait(false);
-            valid = secret is not null
-                && totp.VerifyCode(secret.SecretBase32, code, secret.LastAcceptedStep, out var acceptedStep)
-                && await users.TrySetTotpLastAcceptedStepAsync(user.Id, acceptedStep, context.RequestAborted).ConfigureAwait(false);
+            valid = await VerifyStoredTotpAsync(users, secretProtector, totp, user.Id, code, context.RequestAborted).ConfigureAwait(false);
         }
 
         if (!valid)
@@ -422,6 +420,7 @@ public static class AdminAuthEndpoints
         RecoveryCodeService recoveryCodes,
         RecoveryCodesCookie recoveryCodesCookie,
         TotpSetupCookie setupCookie,
+        ISecondFactorSecretProtector secretProtector,
         AdminAuthAuditor auditor)
     {
         var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
@@ -459,7 +458,7 @@ public static class AdminAuthEndpoints
         await users.UpsertTotpSecretAsync(new AdminTotpSecret
         {
             UserId = user.Id,
-            SecretBase32 = secret,
+            SecretBase32 = secretProtector.Protect(user.Id, secret),
             LastAcceptedStep = acceptedStep,
             EnrolledAt = now,
         }, context.RequestAborted).ConfigureAwait(false);
@@ -843,12 +842,57 @@ public static class AdminAuthEndpoints
         return Redirect("/account", status: "Security key removed.");
     }
 
+    /// <summary>
+    /// Verifies a TOTP code against the stored secret.  A secret that cannot be authenticated counts
+    /// as a failed verification.  A legacy plaintext secret is re-saved in protected form after a successful check.
+    /// </summary>
+    private static async Task<bool> VerifyStoredTotpAsync(
+        IAdminUserStore users,
+        ISecondFactorSecretProtector secretProtector,
+        TotpService totp,
+        Guid userId,
+        string code,
+        CancellationToken cancellationToken)
+    {
+        var secret = await users.GetTotpSecretAsync(userId, cancellationToken).ConfigureAwait(false);
+        if (secret is null)
+        {
+            return false;
+        }
+
+        string base32;
+        try
+        {
+            base32 = secretProtector.Unprotect(userId, secret.SecretBase32);
+        }
+        catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or FormatException)
+        {
+            return false;
+        }
+
+        if (!totp.VerifyCode(base32, code, secret.LastAcceptedStep, out var acceptedStep)
+            || !await users.TrySetTotpLastAcceptedStepAsync(userId, acceptedStep, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        if (!secretProtector.IsProtected(secret.SecretBase32))
+        {
+            await users.UpsertTotpSecretAsync(
+                secret with { SecretBase32 = secretProtector.Protect(userId, base32), LastAcceptedStep = acceptedStep },
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        return true;
+    }
+
     private static async Task<IResult> StepUpAsync(
         HttpContext context,
         IAntiforgery antiforgery,
         IAdminUserStore users,
         IAdminSessionStore sessions,
         TotpService totp,
+        ISecondFactorSecretProtector secretProtector,
         AdminAuthAuditor auditor)
     {
         var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
@@ -858,12 +902,9 @@ public static class AdminAuthEndpoints
             return Results.Redirect("/login");
         }
 
-        var secret = await users.GetTotpSecretAsync(user.Id, context.RequestAborted).ConfigureAwait(false);
         var code = form["code"].ToString();
         var returnTo = SafeReturnPath(form["returnTo"].ToString());
-        var valid = secret is not null
-            && totp.VerifyCode(secret.SecretBase32, code, secret.LastAcceptedStep, out var acceptedStep)
-            && await users.TrySetTotpLastAcceptedStepAsync(user.Id, acceptedStep, context.RequestAborted).ConfigureAwait(false);
+        var valid = await VerifyStoredTotpAsync(users, secretProtector, totp, user.Id, code, context.RequestAborted).ConfigureAwait(false);
         if (!valid)
         {
             await auditor.RecordAsync(

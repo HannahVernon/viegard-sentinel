@@ -33,10 +33,13 @@ sudo ./viegard-deploy.sh upgrade --branch main
 # allowlist, retention with the reference periods, syslog listener):
 sudo ./viegard-deploy.sh configure --domain admin.example.com \
     --allowed-sources 192.0.2.0/24 --enable-retention \
-    --enable-syslog --syslog-sources 192.0.2.10
+    --enable-syslog --syslog-sources 192.0.2.10 \
+    --protected-cidrs 198.51.100.7,203.0.113.0/28
 ```
 
 The `configure` command writes `deploy/docker-compose.generated.yml` and points `COMPOSE_FILE` in `deploy/.env` at `docker-compose.generated.yml:docker-compose.yml`.  Compose applies the files left to right with later files winning per setting, so the generated file provides defaults and **your `docker-compose.yml` always has the final word**: re-declare any variable there to override the generated value.  Re-running `configure` regenerates the whole generated file from the options given, so pass the complete set you want each run.  Generated array entries (allowlists, the maintenance role) use high indices (`__9`, `__50`+) so they never collide with the `__0..N` entries your own file declares.  One caution: published port lists are appended across files, so if your `docker-compose.yml` already publishes an admin HTTPS port, keep TLS configuration there and do not pass `--domain` to `configure`.
+
+**Protect your own public addresses.**  The built-in `Policy:ProtectedCidrs` list covers private, loopback, link-local, and CGNAT space only.  Your own public addresses (office, VPN egress, ISP block, the SWAG host's public address) are not in it, so a forged or mistaken log line naming one could lead to a ban.  `--protected-cidrs <cidr,...>` writes them as `Viegard__Policy__ProtectedCidrs__50` and up, which append to the built-in list.  When `--enable-syslog` is used without it, an interactive `install` or `configure` prompts for the list and a run with `--yes` or without a terminal prints a warning.  Entries are validated (a `/0` prefix is refused).  The same list also guards DoH and JetPack feed content (D-0080) and the DoH probe (D-0082).
 
 ### Pipeline roles are declared explicitly
 
@@ -371,6 +374,10 @@ Persist across reboots:
 sudo apt install iptables-persistent
 sudo netfilter-persistent save        # after any rule change
 ```
+
+**Bind address.**  The listener binds `Viegard__Sources__Syslog__ListenAddress`, which defaults to `0.0.0.0` (all interfaces inside the container); the host-level exposure is decided by the published port.  To reduce the surface, publish the port on one host address (for example `192.0.2.20:5514:5514/udp`) or set `ListenAddress` to a specific interface address.
+
+**Dedicated VLAN.**  Place the syslog sender and the Viegard host on a dedicated management or logging VLAN, and allow UDP 5514 only between them.  UDP source addresses are not authenticated, so network-layer isolation is the control that prevents a hostile host from injecting log lines.  Viegard also bounds the damage: the allowlist, the datagram size cap (`MaxDatagramBytes`, default 8192), the per-source rate cap (`MaxDatagramsPerSourcePerSecond`, default 500), and canonical IP parsing of every nginx log line (malformed addresses are dropped and counted, D-0083).  A shared-token option was considered and not added (D-0083).
 
 Notes:
 

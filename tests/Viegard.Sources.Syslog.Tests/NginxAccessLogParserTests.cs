@@ -94,6 +94,40 @@ public sealed class NginxAccessLogParserTests
         Assert.Null(NginxAccessLogParser.Parse(line));
     }
 
+    [Theory]
+    [InlineData("999.1.1.1")]
+    [InlineData("127.1")]
+    [InlineData("2130706433")]
+    [InlineData("1.2.3.4.5")]
+    [InlineData("fe80::1%eth0")]
+    [InlineData("evil;DROP")]
+    [InlineData("203.0.113.7,10.0.0.1")]
+    public void Malformed_remote_address_drops_line_and_counts(string ip)
+    {
+        var line = ip + " - - [19/Aug/2026:11:45:01 -0500] \"GET / HTTP/1.1\" 200 612 \"-\" \"curl/8.0\"";
+        var before = NginxAccessLogParser.MalformedAddressDropped;
+
+        var result = NginxAccessLogParser.Parse(line, out var malformed);
+
+        Assert.Null(result);
+        Assert.True(malformed);
+        Assert.Equal(before + 1, NginxAccessLogParser.MalformedAddressDropped);
+    }
+
+    [Theory]
+    [InlineData("::ffff:203.0.113.7", "203.0.113.7")]
+    [InlineData("2001:0DB8:0:0:0:0:0:7", "2001:db8::7")]
+    [InlineData("203.0.113.7", "203.0.113.7")]
+    public void Remote_address_is_canonicalised(string ip, string expected)
+    {
+        var line = ip + " - - [19/Aug/2026:11:45:01 -0500] \"GET / HTTP/1.1\" 200 612 \"-\" \"curl/8.0\"";
+
+        var result = NginxAccessLogParser.Parse(line);
+
+        Assert.NotNull(result);
+        Assert.Equal(expected, result.RemoteAddress);
+    }
+
     [Fact]
     public void Ipv6_remote_addresses_parse()
     {

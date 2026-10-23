@@ -60,7 +60,13 @@ public sealed class SyslogEventNormalizer(SyslogSourceOptions options) : IEventN
 
         var isNginxAccess = envelope.Tag is not null
             && options.NginxAccessTags.Contains(envelope.Tag, StringComparer.OrdinalIgnoreCase);
-        var httpEvent = isNginxAccess ? NginxAccessLogParser.Parse(envelope.Message) : null;
+        var malformedAddress = false;
+        var httpEvent = isNginxAccess ? NginxAccessLogParser.Parse(envelope.Message, out malformedAddress) : null;
+
+        if (malformedAddress)
+        {
+            return NormalizationResult.Failure("Nginx access-log line dropped: remote address is not a valid IP address.");
+        }
 
         if (httpEvent is not null)
         {

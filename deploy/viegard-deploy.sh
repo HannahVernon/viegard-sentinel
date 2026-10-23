@@ -55,7 +55,15 @@
 #                     declaring it in your own docker-compose.yml.
 #   --enable-syslog --syslog-sources <cidr[,cidr...]>
 #                     Enables the UDP syslog listener, publishes 5514/udp,
-#                     and sets its fail-closed source allowlist.
+#                     and sets its fail-closed source allowlist.  Also
+#                     firewall 5514/udp at the host level and keep syslog
+#                     senders on a dedicated VLAN (docs/deployment.md).
+#   --protected-cidrs <cidr[,cidr...]>
+#                     Your own public IPs/ranges (office, VPN, ISP, SWAG
+#                     host), appended to the built-in Policy ProtectedCidrs
+#                     so automation never bans them.  When syslog is enabled
+#                     and this is omitted, an interactive run prompts for
+#                     them; with --yes it only prints a warning.
 #
 # install-agent options:
 #   --agent-deploy-dir <path>
@@ -88,6 +96,7 @@ ALLOWED_SOURCES=""
 ENABLE_RETENTION=0
 ENABLE_SYSLOG=0
 SYSLOG_SOURCES=""
+PROTECTED_CIDRS=""
 ASSUME_YES=0
 FORCE=0
 AGENT_DEPLOY_DIR=""
@@ -185,6 +194,7 @@ while [ $# -gt 0 ]; do
         --enable-retention) ENABLE_RETENTION=1; shift ;;
         --enable-syslog)    ENABLE_SYSLOG=1; shift ;;
         --syslog-sources)   SYSLOG_SOURCES="$2"; shift 2 ;;
+        --protected-cidrs)  PROTECTED_CIDRS="$2"; shift 2 ;;
         --agent-deploy-dir) AGENT_DEPLOY_DIR="$2"; shift 2 ;;
         --agent-target)     AGENT_TARGET="$2"; shift 2 ;;
         --agent-schema)     AGENT_SCHEMA="$2"; shift 2 ;;
@@ -421,6 +431,8 @@ cmd_install() {
     issue_certificate
     if any_configure_flags; then
         [ "$ENABLE_SYSLOG" -eq 1 ] && [ -z "$SYSLOG_SOURCES" ] && die "--enable-syslog requires --syslog-sources (the allowlist is fail-closed)."
+        prompt_protected_cidrs
+        validate_protected_cidrs
         generate_compose_fragment
     fi
     start_stack
@@ -433,7 +445,61 @@ cmd_install() {
 # -------------------------------------------------------------- configure --
 
 any_configure_flags() {
-    [ -n "$DOMAIN" ] || [ -n "$ALLOWED_SOURCES" ] || [ "$ENABLE_RETENTION" -eq 1 ] || [ "$ENABLE_SYSLOG" -eq 1 ]
+    [ -n "$DOMAIN" ] || [ -n "$ALLOWED_SOURCES" ] || [ "$ENABLE_RETENTION" -eq 1 ] || [ "$ENABLE_SYSLOG" -eq 1 ] || [ -n "$PROTECTED_CIDRS" ]
+}
+
+# Accepts a literal IPv4/IPv6 address or CIDR; rejects a /0 prefix and anything else.
+valid_protected_entry() {
+    local entry="$1" addr prefix octet
+    addr="${entry%%/*}"
+    prefix=""
+    [ "$entry" != "$addr" ] && prefix="${entry#*/}"
+    if [ "$entry" != "$addr" ] && [ -z "$prefix" ]; then
+        return 1
+    fi
+    if [ -n "$prefix" ]; then
+        [[ "$prefix" =~ ^[0-9]{1,3}$ ]] || return 1
+        [ "$((10#$prefix))" -ge 1 ] || return 1
+    fi
+    if [[ "$addr" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+        [ -z "$prefix" ] || [ "$((10#$prefix))" -le 32 ] || return 1
+        local IFS=.
+        for octet in $addr; do [ "$((10#$octet))" -le 255 ] || return 1; done
+        return 0
+    fi
+    if [[ "$addr" == *:* && "$addr" =~ ^[0-9A-Fa-f:]+$ ]]; then
+        [ -z "$prefix" ] || [ "$((10#$prefix))" -le 128 ] || return 1
+        return 0
+    fi
+    return 1
+}
+
+validate_protected_cidrs() {
+    local item cleaned=""
+    local IFS=','
+    for item in $PROTECTED_CIDRS; do
+        item="$(printf '%s' "$item" | tr -d '[:space:]')"
+        [ -n "$item" ] || continue
+        valid_protected_entry "$item" || die "Protected CIDR '$item' is not a valid IP address or CIDR (a /0 prefix is refused)."
+        cleaned="${cleaned:+$cleaned,}$item"
+    done
+    PROTECTED_CIDRS="$cleaned"
+}
+
+# First-run prompt: the built-in protected list covers private and loopback
+# space only.  The operator's own public addresses must be added so a forged
+# or mistaken log line can never lead to banning the operator.
+prompt_protected_cidrs() {
+    [ "$ENABLE_SYSLOG" -eq 1 ] || return 0
+    [ -z "$PROTECTED_CIDRS" ] || return 0
+    if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then
+        warn "No --protected-cidrs given: your own public IPs/ranges are NOT protected from automated bans.  Re-run configure with --protected-cidrs <cidr,...>."
+        return 0
+    fi
+    printf 'Enter your own public IPs or CIDR ranges (office, VPN, ISP, SWAG host), comma separated,\n' >&2
+    printf 'to protect them from automated bans (blank to skip): ' >&2
+    read -r PROTECTED_CIDRS
+    [ -n "$PROTECTED_CIDRS" ] || warn "No protected CIDRs entered; your own public addresses can be banned if they appear in logs."
 }
 
 emit_csv_env() {
@@ -488,7 +554,7 @@ TLSMOUNT
         fi
     fi
 
-    if [ "$ENABLE_RETENTION" -eq 1 ] || [ "$ENABLE_SYSLOG" -eq 1 ]; then
+    if [ "$ENABLE_RETENTION" -eq 1 ] || [ "$ENABLE_SYSLOG" -eq 1 ] || [ -n "$PROTECTED_CIDRS" ]; then
         printf '  viegard-pipeline:\n' >> "$tmp"
         printf '    environment:\n' >> "$tmp"
         if [ "$ENABLE_RETENTION" -eq 1 ]; then
@@ -507,6 +573,8 @@ TLSMOUNT
       Viegard__Retention__ExpiredAdminSessionsDays: "30"
 RETENTION
         fi
+        # Entries append to the built-in Policy ProtectedCidrs (index 50+ avoids collisions).
+        [ -n "$PROTECTED_CIDRS" ] && emit_csv_env "$tmp" "Viegard__Policy__ProtectedCidrs" 50 "$PROTECTED_CIDRS"
         if [ "$ENABLE_SYSLOG" -eq 1 ]; then
             printf '      Viegard__Sources__Syslog__Enabled: "true"\n' >> "$tmp"
             [ -n "$SYSLOG_SOURCES" ] && emit_csv_env "$tmp" "Viegard__Sources__Syslog__AllowedSources" 50 "$SYSLOG_SOURCES"
@@ -546,11 +614,13 @@ cmd_configure() {
     require_root
     local d; d="$(compose_dir)"
     [ -f "$d/docker-compose.yml" ] || die "$d/docker-compose.yml not found; run install first."
-    any_configure_flags || die "configure needs at least one option (--domain, --allowed-sources, --enable-retention, --enable-syslog); pass the complete set you want each run."
+    any_configure_flags || die "configure needs at least one option (--domain, --allowed-sources, --enable-retention, --enable-syslog, --protected-cidrs); pass the complete set you want each run."
     [ "$ENABLE_SYSLOG" -eq 1 ] && [ -z "$SYSLOG_SOURCES" ] && die "--enable-syslog requires --syslog-sources (the allowlist is fail-closed)."
     if [ -n "$DOMAIN" ] && [ ! -f "$d/certs/admin.crt" ]; then
         warn "No certificate at $d/certs/admin.crt yet; direct TLS will not start until one exists (run install --domain --email, or place PEMs manually)."
     fi
+    prompt_protected_cidrs
+    validate_protected_cidrs
     generate_compose_fragment
     log "Apply with: cd $d && docker compose up -d"
 }

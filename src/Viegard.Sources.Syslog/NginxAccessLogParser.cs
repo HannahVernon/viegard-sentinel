@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
 using System.Text.RegularExpressions;
 using Viegard.Domain.Events;
 
@@ -12,13 +14,30 @@ namespace Viegard.Sources.Syslog;
 /// </summary>
 public static partial class NginxAccessLogParser
 {
-    public static HttpRequestEvent? Parse(string line)
+    public static HttpRequestEvent? Parse(string line) => Parse(line, out _);
+
+    /// <summary>
+    /// Parses <paramref name="line"/>.  When the line matches the log format but its
+    /// remote address is not a valid IP address, returns null with
+    /// <paramref name="malformedAddress"/> set and counts the drop; the offending
+    /// text is never logged or stored because it is attacker-controlled.
+    /// </summary>
+    public static HttpRequestEvent? Parse(string line, out bool malformedAddress)
     {
         ArgumentNullException.ThrowIfNull(line);
+        malformedAddress = false;
 
         var match = CombinedPattern().Match(line.Trim());
         if (!match.Success)
         {
+            return null;
+        }
+
+        if (!TryCanonicalizeAddress(match.Groups["ip"].Value, out var remoteAddress))
+        {
+            malformedAddress = true;
+            Interlocked.Increment(ref _malformedAddressDropped);
+            SyslogMetrics.MalformedAddress.Add(1);
             return null;
         }
 
@@ -47,7 +66,7 @@ public static partial class NginxAccessLogParser
 
         return new HttpRequestEvent
         {
-            RemoteAddress = match.Groups["ip"].Value,
+            RemoteAddress = remoteAddress,
             RemoteUser = Dash(match.Groups["user"].Value),
             RequestedAt = requestedAt,
             Method = method,
@@ -63,6 +82,40 @@ public static partial class NginxAccessLogParser
                 ? rt
                 : null,
         };
+    }
+
+    private static long _malformedAddressDropped;
+
+    /// <summary>Count of well-formed log lines dropped because the remote address was not a valid IP address.</summary>
+    public static long MalformedAddressDropped => Interlocked.Read(ref _malformedAddressDropped);
+
+    /// <summary>
+    /// Accepts only a literal IPv4 (four dotted decimal parts) or IPv6 address without a
+    /// zone id, and returns the canonical text form (IPv4-mapped IPv6 becomes IPv4).
+    /// </summary>
+    public static bool TryCanonicalizeAddress(string? value, out string canonical)
+    {
+        canonical = string.Empty;
+        if (string.IsNullOrEmpty(value)
+            || value.Length > 45
+            || value.Contains('%', StringComparison.Ordinal)
+            || !IPAddress.TryParse(value, out var ip))
+        {
+            return false;
+        }
+
+        if (ip.AddressFamily == AddressFamily.InterNetwork && value.Count(c => c == '.') != 3)
+        {
+            return false;
+        }
+
+        if (ip.IsIPv4MappedToIPv6)
+        {
+            ip = ip.MapToIPv4();
+        }
+
+        canonical = ip.ToString();
+        return true;
     }
 
     private static string? Dash(string value) => value is "-" or "" ? null : value;

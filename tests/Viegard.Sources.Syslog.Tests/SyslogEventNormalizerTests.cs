@@ -52,6 +52,18 @@ public sealed class SyslogEventNormalizerTests
     }
 
     [Fact]
+    public void Nginx_line_with_malformed_address_fails_without_echoing_content()
+    {
+        var raw = "<190>Aug 19 11:45:01 swag nginx_access: 999.9.9.9<script> - - [19/Aug/2026:11:45:01 -0500] " +
+                  "\"GET / HTTP/1.1\" 200 1 \"-\" \"x\"";
+
+        var result = _normalizer.Normalize(Observation(), Payload(raw));
+
+        Assert.False(result.Succeeded);
+        Assert.DoesNotContain("999", result.FailureReason ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Unknown_tag_produces_generic_syslog_event()
     {
         var raw = "<38>Aug 19 11:45:01 router sshd[99]: Failed password for admin from 203.0.113.9";

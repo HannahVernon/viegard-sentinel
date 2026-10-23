@@ -8,6 +8,13 @@ public sealed class SyslogSourceOptions
     /// <summary>The listener is off unless explicitly enabled.</summary>
     public bool Enabled { get; set; }
 
+    /// <summary>
+    /// Interface the listener binds.  The default "0.0.0.0" binds every interface
+    /// (inside a container, that is the container network; the host exposure is set
+    /// by the published port).  Set a specific address, or publish the port on one
+    /// host address, to narrow the surface.  Pair it with a host firewall rule and a
+    /// dedicated VLAN: the source-IP allowlist trusts a spoofable UDP source address.
+    /// </summary>
     public string ListenAddress { get; set; } = "0.0.0.0";
 
     /// <summary>Non-privileged default; map from host port 514 in deployment if senders require it.</summary>

@@ -609,3 +609,11 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Alternatives considered:** a shared token or structured-data tag in each datagram (not added: nginx's syslog output cannot add one without changing the tag the parser matches, and the token would travel in clear over UDP); falling back to a generic syslog event when the address is malformed (rejected: the generic event would still carry the hostile text).
 - **Consequences:** A forged `remote_addr` can no longer inject a non-IP entity into incidents, bans, or router commands.  Operators who skip the prompt are warned that their own public addresses are not protected.  Network-layer isolation remains the control against forged UDP sources.
 - **Approval:** Implementation detail chosen while remediating pen-test findings at the project owner's request.
+
+## D-0084: No per-syslog-source cap on ban candidates (documented, not implemented)
+
+- **Date:** 2026-10-23
+- **Decision:** The policy path does not add a cap on how many ban candidates one syslog source may generate per window.  `DefaultPolicyEngine` works on incidents keyed by target IP and does not see which syslog peer delivered the evidence, so a per-source cap would need the peer to be carried through normalization, correlation, and decisions, which is a cross-cutting schema change rather than a clean local one.  The existing controls bound the effect of a flooding or forged source: the syslog allowlist and per-source datagram rate cap (D-0023), canonical address validation (D-0083), the protected-range list, `MaxAutoActionsPerHour` and `MaxAutoActionsPerDay`, the circuit breaker, and manual approval mode.
+- **Alternatives considered:** counting candidates per peer inside `SyslogDatagramHandler` (rejected: it cannot know which datagrams become ban candidates); carrying the peer in `NormalizedEvent` metadata and capping in the policy engine (deferred: needs a schema change and its own decision).
+- **Consequences:** A single allowlisted source that sends many distinct forged addresses is limited only by the global hourly and daily action caps and by operator approval.  Revisit if per-source attribution is added to events.
+- **Approval:** Implementation detail chosen while remediating pen-test findings at the project owner's request; deferral awaits owner confirmation.

@@ -927,8 +927,7 @@ public static class AdminAuthEndpoints
             || candidate[0] != '/'
             || candidate.StartsWith("//", StringComparison.Ordinal)
             || candidate.StartsWith("/\\", StringComparison.Ordinal)
-            || candidate.Contains('\r', StringComparison.Ordinal)
-            || candidate.Contains('\n', StringComparison.Ordinal))
+            || candidate.Any(char.IsControl))
         {
             return fallback;
         }

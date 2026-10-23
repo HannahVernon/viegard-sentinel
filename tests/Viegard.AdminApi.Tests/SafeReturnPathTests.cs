@@ -18,6 +18,10 @@ public sealed class SafeReturnPathTests
     [InlineData("javascript:alert(1)", "/account")]
     [InlineData("signatures", "/account")]
     [InlineData("/x\r\nSet-Cookie: a=b", "/account")]
+    [InlineData("/\t/evil.example", "/account")]
+    [InlineData("/ok\u0000", "/account")]
+    [InlineData("/ok\u007f", "/account")]
+    [InlineData("/ok\u0085", "/account")]
     public void Return_paths_are_constrained_to_local_relative_paths(string? candidate, string expected) =>
         Assert.Equal(expected, AdminAuthEndpoints.SafeReturnPath(candidate));
 }

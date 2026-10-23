@@ -54,7 +54,7 @@ public sealed record JetPackFeedSettings
 
 public static class JetPackFeedSettingsValidator
 {
-    public const string FeedUrlError = "JetPack feed URL must be an absolute http or https URL.";
+    public const string FeedUrlError = "JetPack feed URL must be an absolute https URL.";
     public const string FetchIntervalError = "JetPack fetch interval must be greater than zero and no more than 7 days.";
     public const string AddressListNameError = "JetPack address-list name is required, must not exceed 128 characters, and must not contain control characters.";
 
@@ -110,7 +110,7 @@ public static class JetPackFeedSettingsValidator
         var candidate = value.Trim();
         if (candidate.Length > JetPackFeedSettings.MaxFeedUrlLength
             || !Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            || uri.Scheme != Uri.UriSchemeHttps)
         {
             error = FeedUrlError;
             return false;

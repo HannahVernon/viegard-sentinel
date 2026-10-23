@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Viegard.Application.Configuration;
+using Viegard.Application.Feeds;
 using Viegard.Persistence.InMemory;
 using Viegard.PipelineHost.Workers;
 
@@ -83,6 +84,7 @@ public sealed class JetPackFeedFetchWorkerTests
             desired,
             new HttpClient(new StubHandler(body, statusCode), disposeHandler: true),
             Options.Create(new JetPackFeedOptions()),
+            Options.Create(new FeedGuardOptions()),
             now,
             NullLogger<JetPackFeedFetchWorker>.Instance);
 

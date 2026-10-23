@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Viegard.Application.Doh;
+using Viegard.Application.Feeds;
 
 namespace Viegard.PipelineHost.Workers;
 
@@ -12,8 +13,9 @@ namespace Viegard.PipelineHost.Workers;
 public sealed class DohFeedFetchWorker(
     IDohBlocklistSettingsStore settingsStore,
     IDohDesiredAddressStore desiredAddresses,
-    HttpClient httpClient,
+    [FromKeyedServices(FeedHttpClient.ServiceKey)] HttpClient httpClient,
     IOptions<DohBlocklistOptions> options,
+    IOptions<FeedGuardOptions> guardOptions,
     TimeProvider timeProvider,
     ILogger<DohFeedFetchWorker> logger) : BackgroundService
 {
@@ -106,25 +108,8 @@ public sealed class DohFeedFetchWorker(
         string feedUrl,
         CancellationToken cancellationToken)
     {
-        try
-        {
-            using var response = await httpClient.GetAsync(feedUrl, cancellationToken).ConfigureAwait(false);
-            var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                return ([], $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}".Trim());
-            }
-
-            return (DohFeedParser.ParseText(payload), null);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return ([], "DoH feed request timed out.");
-        }
-        catch (HttpRequestException ex)
-        {
-            return ([], ex.Message);
-        }
+        var download = await FeedDownloader.DownloadAsync(httpClient, feedUrl, guardOptions.Value, cancellationToken).ConfigureAwait(false);
+        return download.Succeeded ? (DohFeedParser.ParseText(download.Payload!), null) : ([], download.Failure);
     }
 
     private async Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken)

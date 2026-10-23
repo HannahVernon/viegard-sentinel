@@ -412,6 +412,10 @@ if (configuredRoles.Contains(RoleNames.Actions, StringComparer.OrdinalIgnoreCase
     builder.Services.AddSingleton<IActionProvider, MikroTikBanActionProvider>();
     builder.Services.AddHostedService<ActionWorker>();
     builder.Services.AddHostedService<BanReconciliationWorker>();
+    builder.Services.AddKeyedSingleton(
+        Viegard.Application.Feeds.FeedHttpClient.ServiceKey,
+        (sp, _) => Viegard.Application.Feeds.FeedHttpClient.Create(
+            sp.GetRequiredService<IOptions<Viegard.Application.Feeds.FeedGuardOptions>>().Value));
     builder.Services.AddHostedService<JetPackFeedFetchWorker>();
     builder.Services.AddHostedService<JetPackReconciliationWorker>();
     builder.Services.AddSingleton(new DohProbeHttpClient(new HttpClient(new HttpClientHandler

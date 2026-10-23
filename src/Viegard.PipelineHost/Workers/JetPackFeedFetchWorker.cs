@@ -1,14 +1,16 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Viegard.Application.Configuration;
+using Viegard.Application.Feeds;
 
 namespace Viegard.PipelineHost.Workers;
 
 public sealed class JetPackFeedFetchWorker(
     IJetPackFeedSettingsStore settingsStore,
     IJetPackDesiredAddressStore desiredAddresses,
-    HttpClient httpClient,
+    [FromKeyedServices(FeedHttpClient.ServiceKey)] HttpClient httpClient,
     IOptions<JetPackFeedOptions> options,
+    IOptions<FeedGuardOptions> guardOptions,
     TimeProvider timeProvider,
     ILogger<JetPackFeedFetchWorker> logger) : BackgroundService
 {
@@ -54,16 +56,13 @@ public sealed class JetPackFeedFetchWorker(
 
         try
         {
-            using var response = await httpClient.GetAsync(settings.FeedUrl, cancellationToken).ConfigureAwait(false);
-            var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            var download = await FeedDownloader.DownloadAsync(httpClient, settings.FeedUrl, guardOptions.Value, cancellationToken).ConfigureAwait(false);
+            if (!download.Succeeded)
             {
-                return JetPackFeedFetchCycleResult.Failed(
-                    settings.FetchInterval,
-                    $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}".Trim());
+                return JetPackFeedFetchCycleResult.Failed(settings.FetchInterval, download.Failure!);
             }
 
-            if (!TryParseAddresses(payload, out var parsedAddresses, out var detail))
+            if (!TryParseAddresses(download.Payload!, out var parsedAddresses, out var detail))
             {
                 logger.LogWarning("JetPack feed payload could not be parsed: {Detail}", detail);
                 return JetPackFeedFetchCycleResult.Failed(settings.FetchInterval, detail);

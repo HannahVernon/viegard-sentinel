@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Viegard.Application.Doh;
+using Viegard.Application.Feeds;
 using Viegard.Persistence.InMemory;
 using Viegard.PipelineHost.Workers;
 
@@ -67,6 +68,7 @@ public sealed class DohFeedFetchWorkerTests
             desired,
             new HttpClient(new StubFeedHandler(body, statusCode), disposeHandler: true),
             Options.Create(new DohBlocklistOptions()),
+            Options.Create(new FeedGuardOptions()),
             now,
             NullLogger<DohFeedFetchWorker>.Instance);
 

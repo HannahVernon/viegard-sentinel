@@ -18,6 +18,12 @@ public sealed record DohBlocklistSettings
     public const int MaxCanaryTokenLength = 256;
     public const int MaxEndpointPathLength = 256;
 
+    /// <summary>
+    /// Default primary feed.  This is a mutable third-party raw URL on a master
+    /// branch: whoever controls that repository controls the list.  Reconciliation
+    /// guards (D-0080) limit the damage; an operator may point the setting at a
+    /// reviewed, commit-pinned URL instead.
+    /// </summary>
     public const string DefaultPrimaryFeedUrl =
         "https://raw.githubusercontent.com/dibdot/DoH-IP-blocklists/master/doh-ipv4.txt";
     public const string DefaultAddressListName = "dns_over_https_servers";
@@ -165,8 +171,8 @@ public sealed record DohBlocklistValues(
 
 public static class DohBlocklistSettingsValidator
 {
-    public const string PrimaryFeedUrlError = "DoH primary feed URL must be an absolute http or https URL.";
-    public const string SecondaryFeedUrlError = "DoH secondary feed URL must be empty or an absolute http or https URL.";
+    public const string PrimaryFeedUrlError = "DoH primary feed URL must be an absolute https URL.";
+    public const string SecondaryFeedUrlError = "DoH secondary feed URL must be empty or an absolute https URL.";
     public const string AddressListNameError = "DoH address-list name is required, must not exceed 128 characters, and must not contain control characters.";
     public const string FetchIntervalError = "DoH fetch interval seconds must be at least 60 and no more than 604800 (7 days).";
     public const string ProbeIntervalError = "DoH probe interval seconds must be at least 60 and no more than 604800 (7 days).";
@@ -277,7 +283,7 @@ public static class DohBlocklistSettingsValidator
         var candidate = value.Trim();
         if (candidate.Length > DohBlocklistSettings.MaxFeedUrlLength
             || !Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            || uri.Scheme != Uri.UriSchemeHttps)
         {
             error = required ? PrimaryFeedUrlError : SecondaryFeedUrlError;
             return false;

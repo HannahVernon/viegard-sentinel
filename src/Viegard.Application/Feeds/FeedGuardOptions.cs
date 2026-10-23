@@ -18,6 +18,9 @@ public sealed class FeedGuardOptions
     public const int DefaultJetPackMaxEntries = 5000;
     public const double DefaultMaxChangeRatio = 0.5;
     public const int DefaultMaxChangeRatioMinExistingEntries = 20;
+    public const int DefaultFetchMaxResponseBytes = 2 * 1024 * 1024;
+    public const int DefaultFetchTimeoutSeconds = 30;
+    public const int DefaultFetchMaxRedirects = 3;
 
     /// <summary>Broadest IPv4 CIDR accepted from a feed.  A /16 allows at most 65536 addresses per entry.</summary>
     public int MinIPv4PrefixLength { get; set; } = DefaultMinIPv4PrefixLength;
@@ -42,6 +45,15 @@ public sealed class FeedGuardOptions
     /// least this many entries, so first population and small lists are not blocked.
     /// </summary>
     public int MaxChangeRatioMinExistingEntries { get; set; } = DefaultMaxChangeRatioMinExistingEntries;
+
+    /// <summary>Hard cap on a feed response body, in bytes.</summary>
+    public int FetchMaxResponseBytes { get; set; } = DefaultFetchMaxResponseBytes;
+
+    /// <summary>Overall timeout for one feed download, in seconds.</summary>
+    public int FetchTimeoutSeconds { get; set; } = DefaultFetchTimeoutSeconds;
+
+    /// <summary>Redirects followed per download.  Every hop must be https.</summary>
+    public int FetchMaxRedirects { get; set; } = DefaultFetchMaxRedirects;
 }
 
 public sealed class FeedGuardOptionsValidator : IValidateOptions<FeedGuardOptions>
@@ -79,6 +91,21 @@ public sealed class FeedGuardOptionsValidator : IValidateOptions<FeedGuardOption
         if (options.MaxChangeRatioMinExistingEntries < 0)
         {
             failures.Add("FeedGuards MaxChangeRatioMinExistingEntries must not be negative.");
+        }
+
+        if (options.FetchMaxResponseBytes <= 0)
+        {
+            failures.Add("FeedGuards FetchMaxResponseBytes must be positive.");
+        }
+
+        if (options.FetchTimeoutSeconds <= 0)
+        {
+            failures.Add("FeedGuards FetchTimeoutSeconds must be positive.");
+        }
+
+        if (options.FetchMaxRedirects < 0)
+        {
+            failures.Add("FeedGuards FetchMaxRedirects must not be negative.");
         }
 
         return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;

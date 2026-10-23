@@ -191,6 +191,10 @@ sudo ./viegard-deploy.sh upgrade --force
 - If you keep your own `docker-compose.yml` copied from an older example, add the `${...IMAGE:-...}` references and the `build.args` entries from the current example; otherwise the pins have no effect.
 - This script was written without Docker access.  It has been syntax-checked but not run against a registry; run it once and read the `.env` block before relying on it.
 
+### Build context
+
+The image build copies the whole repository into the builder (`COPY . .`) except what `.dockerignore` excludes.  It excludes `.git`, `docs/`, `tests/`, `tools/`, `bin/` and `obj/`, every `.env` file, `deploy/docker-compose.generated.yml`, and the runtime directories under `deploy/` (`secrets/`, `data/`, `backups/`, `certs/`), so operator settings and secrets cannot end up in builder layers.  `.build-commit` is deliberately kept, because the Dockerfiles stamp the build revision from it.  If you add a root-level file that the build needs, check that it is not matched by `.dockerignore`.
+
 ## 1. Prepare secrets and directories
 
 Each secret is one file in `deploy/secrets/`; the file name is the secret name (D-0006).  These directories are gitignored and must never be committed.

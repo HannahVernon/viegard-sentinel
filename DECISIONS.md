@@ -601,3 +601,10 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Alternatives considered:** Committing digests in the repository (rejected: digests could not be resolved without registry access during this change, and invented values would break builds); a separate compose override file (rejected: `.env` is already read by compose and already managed by the script); Renovate-style automation (rejected: out of scope for a self-hosted deployment).
 - **Consequences:** Operators can fix base images to reviewed content and update them deliberately.  Pins are stale until re-run.  The command was syntax-checked only and has not been run against a registry.  Custom compose files copied from older examples need the new variables.
 - **Approval:** Requested by the project owner following a penetration-test review.
+## D-0093: Tighten the Docker build context exclusions
+
+- **Date:** 2026-10-23
+- **Decision:** `.dockerignore` additionally excludes `deploy/docker-compose.generated.yml`, every `.env`, `.env.*` and `*.env` file, `tests/`, and `tools/`, on top of the existing exclusions for `.git`, `docs/`, `deploy/secrets/`, `deploy/data/`, `deploy/backups/`, `deploy/certs/`, `bin/` and `obj/`.  `.build-commit` stays in the context because the Dockerfiles read it.
+- **Alternatives considered:** Allowlist-style `.dockerignore` that excludes everything except `src/`, `Directory.Build.props` and `nuget.config` (rejected: any new root file the build needs would fail the build with no obvious cause).
+- **Consequences:** Operator settings and secrets-adjacent files cannot enter builder layers through `COPY . .`.  Checked by reading the Dockerfiles: they copy only `Directory.Build.props`, `nuget.config`, and `src/` projects, and no `src/` project references `tests/` or `tools/` (the test assemblies appear only as `InternalsVisibleTo` names).  The image build itself was not run because Docker is not available for this change.
+- **Approval:** Requested by the project owner following a penetration-test review.

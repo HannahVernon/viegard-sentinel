@@ -15,5 +15,17 @@ deploy/data/
 deploy/backups/
 deploy/certs/
 deploy/docker-compose.yml
+deploy/docker-compose.generated.yml
+# Compose reads .env (COMPOSE_FILE, image pins) on the host; it may sit next
+# to secrets-adjacent settings and must not enter the build context.
+**/.env
+**/.env.*
+**/*.env
+# Test projects and developer tooling are not part of the published output:
+# the Dockerfiles restore and publish only the src/ projects.
+tests/
+tools/
 .deployed-commit
 *.md
+# .build-commit (written by viegard-deploy.sh) must stay in the context: the
+# Dockerfiles read it to stamp the build revision.

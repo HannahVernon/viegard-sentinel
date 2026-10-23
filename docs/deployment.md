@@ -195,6 +195,20 @@ sudo ./viegard-deploy.sh upgrade --force
 
 The image build copies the whole repository into the builder (`COPY . .`) except what `.dockerignore` excludes.  It excludes `.git`, `docs/`, `tests/`, `tools/`, `bin/` and `obj/`, every `.env` file, `deploy/docker-compose.generated.yml`, and the runtime directories under `deploy/` (`secrets/`, `data/`, `backups/`, `certs/`), so operator settings and secrets cannot end up in builder layers.  `.build-commit` is deliberately kept, because the Dockerfiles stamp the build revision from it.  If you add a root-level file that the build needs, check that it is not matched by `.dockerignore`.
 
+## Updating safely
+
+Run through this list before each production upgrade.  It assumes the options described in "Signed updates" and "Pinning base images" are set up.
+
+1. Confirm the latest database dump is recent and has been restored at least once (see "Prove the backup with a restore drill").
+2. Run `sudo ./viegard-deploy.sh status` and record the clone and deployed commits, so you can roll back to them.
+3. Decide the target.  Prefer a signed release tag and `--pin <tag>`; otherwise the signed tip of the tracked branch.
+4. Make sure verification is on: `REQUIRE_SIGNED=1` in `/etc/viegard/update.conf` (or `--require-signed`).  Treat an `UNVERIFIED UPDATE` warning as a stop sign on production.
+5. Read what changed (`git -C /opt/viegard-sentinel log --oneline <deployed>..<target>`), including `DECISIONS.md` and any migration notes.
+6. If base images should change, run `pin-images`, review the `.env` block, and note the new digests.
+7. Run `sudo ./viegard-deploy.sh upgrade --require-signed [--pin <ref>]`.  A verification failure leaves the running stack untouched; do not retry with the flag removed.
+8. Check `status`: containers healthy, admin liveness OK, deployed commit equals the target.
+9. Check that `AllowedSources` still lists only the addresses you intend (see "Source address seen through a Docker published port"); a recreated Docker network can change the gateway address.
+10. To roll back, run `upgrade --require-signed --pin <previous-commit-or-tag>`.  A migration that already ran may need a database restore, so keep the dump from step 1 until you are satisfied.
 ## 1. Prepare secrets and directories
 
 Each secret is one file in `deploy/secrets/`; the file name is the secret name (D-0006).  These directories are gitignored and must never be committed.
@@ -452,6 +466,54 @@ Prefer a self-hosted VPN such as WireGuard for routine access.  Opening `Allowed
 
 `Viegard__Admin__AllowedSources__*` accepts bare IP addresses or CIDR ranges and uses the same semantics as syslog CIDR matching.  Empty list means loopback only.  Requests outside loopback and the configured ranges receive HTTP 403 with no body details and a warning log entry with sanitized values.
 
+#### Source address seen through a Docker published port
+
+**Status: UNVERIFIED.**  The points below come from reading the code and Docker's documented behaviour.  They were not tested, because this change was prepared without a Docker host.  Please confirm them on your host (see "Check what the container sees").
+
+What the code does (read directly):
+
+- `AdminAllowedSourceGate` (`src/Viegard.Application/Auth/AdminAllowedSourceGate.cs`) allows a request when `HttpContext.Connection.RemoteIpAddress` is a loopback address, or when it falls inside `AllowedSources`.  It runs on every request, including `/healthz`.
+- Forwarded headers are processed only in `proxy` exposure mode, and only from `Viegard__Admin__Proxy__TrustedNetworks__*`.  In `loopback` and `direct` mode `X-Forwarded-For` is ignored, so the gate sees the TCP peer address.
+- The example compose file publishes `127.0.0.1:8080:8080`, and `viegard-deploy.sh` (`admin_alive`) probes the address from `docker compose port viegard-admin 8080`, mapping `0.0.0.0` to `127.0.0.1`.
+
+What this means with Docker's default settings (`userland-proxy` enabled; not verified here):
+
+- A connection to `127.0.0.1:8080` on the host is forwarded into the container by Docker.  The container may see the source as the bridge network's gateway address (for example `172.18.0.1`), not `127.0.0.1`.  If so, the gate does not treat it as loopback.
+- With an empty `AllowedSources`, host-local access (including the `admin_alive` probe and `viegard-deploy.sh status`) would then receive HTTP 403.  If you see that, the container is not seeing loopback.
+- Operators often respond by allowing a broad range such as `172.16.0.0/12`.  Do not do that.  The range covers every Docker network on the host, so any container, and any local process that connects through the published port, would pass the gate.  Because the proxy replaces the real source, an `AllowedSources` entry for the gateway also admits every host-local process that can reach `127.0.0.1:8080`.  Combine it with the login, MFA, and your host access controls, and treat host-local users as trusted.
+
+What to configure:
+
+1. Find the gateway of the compose network, then allow only that single address:
+
+   ```bash
+   docker network inspect viegard_default --format '{{(index .IPAM.Config 0).Gateway}}'
+   ```
+
+   ```yaml
+   Viegard__Admin__AllowedSources__0: "172.18.0.1/32"
+   ```
+
+   Replace the network name with the one `docker compose ps` and `docker network ls` show for your project.  The gateway can change if the network is recreated, so re-check it after `docker compose down` and after Docker upgrades, or pin the subnet in the compose file with an `ipam` block.
+2. Add your real management addresses or VPN subnet as separate entries.  Remote clients reach the container from their own addresses only when the port is published beyond loopback (`direct` mode) or when a proxy sets `X-Forwarded-For` (`proxy` mode).
+3. Never use `172.16.0.0/12`, `172.17.0.0/16`, or `0.0.0.0/0` for this purpose.
+
+Options to consider if you want the gate to see real client addresses (not implemented; each needs testing on your host first):
+
+- Set `"userland-proxy": false` in `/etc/docker/daemon.json`.  Docker then uses iptables NAT for published ports, which normally keeps the original source address for remote clients.  Host-local connections to a loopback-published port behave differently between Docker versions, so test `curl http://127.0.0.1:8080/healthz` after the change.
+- Put a trusted reverse proxy in front, use `proxy` exposure mode, and list only the proxy's address in `Viegard__Admin__Proxy__TrustedNetworks__*`.  The gate then evaluates the `X-Forwarded-For` client address.
+- Use host networking (`network_mode: host`) for the admin service.  This removes the proxy hop, but it also removes the network isolation from the database container, so it needs a separate review and is not recommended as a default.
+
+##### Check what the container sees
+
+After any change, make a request from the host and read the warning the gate writes for rejected sources:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/healthz
+docker compose logs --tail 20 viegard-admin | grep 'non-allowed source'
+```
+
+The log line names the address the container saw.  That address, as a `/32`, is the value to allow.
 ### Session and IP binding options
 
 Setting | Default | Meaning

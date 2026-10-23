@@ -118,7 +118,7 @@ When the project owner answers a question, remove or update the item here and re
 
 ## Known defect
 
-- (none)
+- [ ] **Verify the admin source address seen through a Docker published port** (pen-test review, 2026-10-23): on a Docker host, confirm what `RemoteIpAddress` the admin container sees for `curl http://127.0.0.1:8080/healthz` with the default userland proxy.  If it is the bridge gateway rather than loopback, decide between the documented options (gateway `/32` in `AllowedSources`, `userland-proxy` off, trusted proxy mode).  Documented as unverified in `docs/deployment.md` (AllowedSources).
 
 ## Deferred
 

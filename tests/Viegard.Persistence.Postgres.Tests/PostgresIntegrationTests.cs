@@ -3135,53 +3135,53 @@ public sealed class PostgresIntegrationTests : IAsyncLifetime
             ("roleName", roleName),
             ("schemaName", TestDatabase.Schema)));
 
-        var tableCount = await ScalarLongAsync(
-            """
-            SELECT count(*)
-            FROM information_schema.tables
-            WHERE table_schema = @schemaName
-              AND table_type = 'BASE TABLE'
-            """,
-            ("schemaName", TestDatabase.Schema));
-        Assert.True(tableCount > 0);
+        foreach (var table in SatelliteGrantPolicy.Denied)
+        {
+            foreach (var privilege in new[] { "SELECT", "INSERT", "UPDATE", "DELETE" })
+            {
+                Assert.False(
+                    await HasTablePrivilegeAsync(roleName, table, privilege),
+                    $"Satellite role must not hold {privilege} on {table}.");
+            }
+        }
 
-        var tableGrantCount = await ScalarLongAsync(
-            """
-            SELECT count(*)
-            FROM information_schema.tables AS tables
-            WHERE tables.table_schema = @schemaName
-              AND tables.table_type = 'BASE TABLE'
-              AND has_table_privilege(@roleName, format('%I.%I', tables.table_schema, tables.table_name), 'SELECT')
-              AND has_table_privilege(@roleName, format('%I.%I', tables.table_schema, tables.table_name), 'INSERT')
-              AND has_table_privilege(@roleName, format('%I.%I', tables.table_schema, tables.table_name), 'UPDATE')
-              AND has_table_privilege(@roleName, format('%I.%I', tables.table_schema, tables.table_name), 'DELETE')
-            """,
+        foreach (var grant in SatelliteGrantPolicy.Granted)
+        {
+            foreach (var privilege in grant.TablePrivileges)
+            {
+                Assert.True(await HasTablePrivilegeAsync(roleName, grant.Table, privilege), $"{privilege} on {grant.Table}");
+            }
+
+            Assert.Equal(
+                grant.TablePrivileges.Contains("DELETE"),
+                await HasTablePrivilegeAsync(roleName, grant.Table, "DELETE"));
+            Assert.Equal(
+                grant.TablePrivileges.Contains("INSERT"),
+                await HasTablePrivilegeAsync(roleName, grant.Table, "INSERT"));
+        }
+
+        Assert.False(await HasTablePrivilegeAsync(roleName, "host_upgrade_commands", "INSERT"));
+        Assert.False(await HasTablePrivilegeAsync(roleName, "host_upgrade_commands", "DELETE"));
+        Assert.True(await ScalarBoolAsync(
+            "SELECT has_column_privilege(@roleName, format('%I.%I', @schemaName::text, 'host_upgrade_commands'), 'status', 'UPDATE')",
             ("roleName", roleName),
-            ("schemaName", TestDatabase.Schema));
-        Assert.Equal(tableCount, tableGrantCount);
-
-        var sequenceCount = await ScalarLongAsync(
-            """
-            SELECT count(*)
-            FROM information_schema.sequences
-            WHERE sequence_schema = @schemaName
-            """,
-            ("schemaName", TestDatabase.Schema));
-        var sequenceGrantCount = await ScalarLongAsync(
-            """
-            SELECT count(*)
-            FROM information_schema.sequences AS sequences
-            WHERE sequences.sequence_schema = @schemaName
-              AND has_sequence_privilege(@roleName, format('%I.%I', sequences.sequence_schema, sequences.sequence_name), 'USAGE')
-              AND has_sequence_privilege(@roleName, format('%I.%I', sequences.sequence_schema, sequences.sequence_name), 'SELECT')
-            """,
+            ("schemaName", TestDatabase.Schema)));
+        Assert.False(await ScalarBoolAsync(
+            "SELECT has_column_privilege(@roleName, format('%I.%I', @schemaName::text, 'host_upgrade_commands'), 'target', 'UPDATE')",
             ("roleName", roleName),
-            ("schemaName", TestDatabase.Schema));
-        Assert.Equal(sequenceCount, sequenceGrantCount);
+            ("schemaName", TestDatabase.Schema)));
 
-        Assert.Equal(4, await DefaultPrivilegeCountAsync(roleName, objectType: "r"));
-        Assert.Equal(2, await DefaultPrivilegeCountAsync(roleName, objectType: "S"));
+        Assert.Equal(0, await DefaultPrivilegeCountAsync(roleName, objectType: "r"));
+        Assert.Equal(0, await DefaultPrivilegeCountAsync(roleName, objectType: "S"));
     }
+
+    private async Task<bool> HasTablePrivilegeAsync(string roleName, string table, string privilege) =>
+        await ScalarBoolAsync(
+            "SELECT has_table_privilege(@roleName, format('%I.%I', @schemaName::text, @tableName::text), @privilege)",
+            ("roleName", roleName),
+            ("schemaName", TestDatabase.Schema),
+            ("tableName", table),
+            ("privilege", privilege));
 
     private async Task<long> DefaultPrivilegeCountAsync(string roleName, string objectType) =>
         await ScalarLongAsync(

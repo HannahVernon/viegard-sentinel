@@ -77,6 +77,9 @@ public static class AdminConfigurationEndpoints
         app.MapPost("/configuration/satellites/rotate", RotateSatellitePasswordAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
+        app.MapPost("/configuration/satellites/regrant", ReapplySatelliteGrantsAsync)
+            .RequireAuthorization()
+            .RequireRateLimiting("auth");
         app.MapPost("/configuration/satellites/revoke", RevokeSatelliteAsync)
             .RequireAuthorization()
             .RequireRateLimiting("auth");
@@ -785,6 +788,44 @@ public static class AdminConfigurationEndpoints
                 credential.GrantSummary,
                 context.RequestAborted).ConfigureAwait(false);
             return Redirect(SatellitesConfigurationPath, status: $"Password rotated for {credential.RoleName}.  Copy the password now.");
+        }
+        catch (SatelliteRoleStoreException ex)
+        {
+            return Redirect(SatellitesConfigurationPath, error: ex.Message);
+        }
+    }
+
+    internal static async Task<IResult> ReapplySatelliteGrantsAsync(
+        HttpContext context,
+        IAntiforgery antiforgery,
+        ISatelliteRoleStore satelliteRoles,
+        IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
+        AdminConfigAuditor configAuditor)
+    {
+        var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
+        var gate = await RequireSatelliteStepUpAsync(context, users, sessions, authAuditor).ConfigureAwait(false);
+        if (gate.Failure is not null)
+        {
+            return gate.Failure;
+        }
+
+        if (!SatelliteRoleName.TryNormalize(form["name"].ToString(), out var normalized, out var error))
+        {
+            return Redirect(SatellitesConfigurationPath, error: error);
+        }
+
+        try
+        {
+            var summary = await satelliteRoles.ReapplyGrantsAsync(normalized.SatelliteName, context.RequestAborted).ConfigureAwait(false);
+            await configAuditor.RecordSatelliteRoleWriteAsync(
+                "SatelliteRoleGrantsReapplied",
+                gate.User!.Username,
+                normalized.RoleName,
+                summary,
+                context.RequestAborted).ConfigureAwait(false);
+            return Redirect(SatellitesConfigurationPath, status: $"Grants re-applied for {normalized.RoleName}.");
         }
         catch (SatelliteRoleStoreException ex)
         {

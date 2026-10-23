@@ -239,6 +239,27 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Reapply_satellite_grants_requires_step_up_and_audits_without_password()
+    {
+        var gated = await EndpointFixture.CreateAsync(freshStepUp: false);
+        gated.Context.Request.Form = SatelliteForm("mdaemon01");
+        var gatedLocation = await ExecuteRedirectAsync(await gated.InvokeReapplySatelliteGrantsAsync(), gated.Context);
+        Assert.Contains("Step-up%20verification%20is%20required", gatedLocation, StringComparison.Ordinal);
+        Assert.DoesNotContain(gated.AuditLedger.Records, record => record.DetailJson?.Contains("SatelliteRoleGrantsReapplied", StringComparison.Ordinal) == true);
+
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        fixture.Context.Request.Form = SatelliteForm("mdaemon01");
+        await fixture.InvokeCreateSatelliteAsync();
+        fixture.AuditLedger.Records.Clear();
+
+        var location = await ExecuteRedirectAsync(await fixture.InvokeReapplySatelliteGrantsAsync(), fixture.Context);
+
+        Assert.Contains("Grants%20re-applied%20for%20viegard_sat_mdaemon01", location, StringComparison.Ordinal);
+        var audit = Assert.Single(fixture.AuditLedger.Records);
+        Assert.Contains("SatelliteRoleGrantsReapplied", audit.DetailJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("password", audit.DetailJson, StringComparison.OrdinalIgnoreCase);
+    }
+    [Fact]
     public async Task Create_router_requires_step_up_before_mutating()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
@@ -1776,6 +1797,15 @@ public sealed class AdminConfigurationEndpointsTests
                 ConfigAuditor,
                 SatelliteCredentialCookie);
 
+        public Task<IResult> InvokeReapplySatelliteGrantsAsync() =>
+            AdminConfigurationEndpoints.ReapplySatelliteGrantsAsync(
+                Context,
+                Antiforgery,
+                SatelliteRoles,
+                Users,
+                Sessions,
+                AuthAuditor,
+                ConfigAuditor);
         public Task<IResult> InvokeCreateRouterAsync() =>
             AdminConfigurationEndpoints.CreateRouterAsync(
                 Context,

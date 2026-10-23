@@ -11,6 +11,12 @@ public interface ISatelliteRoleStore
 
     ValueTask<SatelliteRoleSecret> RotatePasswordAsync(string satelliteName, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Resets the role's privileges to the current least-privilege matrix.
+    /// Needed for roles created before D-0063, which keep the old broad grants.
+    /// </summary>
+    ValueTask<string> ReapplyGrantsAsync(string satelliteName, CancellationToken cancellationToken = default);
+
     ValueTask RevokeAsync(string satelliteName, CancellationToken cancellationToken = default);
 }
 

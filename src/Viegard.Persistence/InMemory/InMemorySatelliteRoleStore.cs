@@ -27,7 +27,7 @@ public sealed class InMemorySatelliteRoleStore : ISatelliteRoleStore
             normalized.RoleName,
             password,
             facts,
-            "In-memory development role with login enabled; schema DML grants are simulated."));
+            "In-memory development role with login enabled; schema grants are simulated."));
     }
 
     public ValueTask<SatelliteRoleSecret> RotatePasswordAsync(string satelliteName, CancellationToken cancellationToken = default)
@@ -45,6 +45,17 @@ public sealed class InMemorySatelliteRoleStore : ISatelliteRoleStore
             password,
             info.ConnectionFacts,
             "Password rotated; grants unchanged."));
+    }
+
+    public ValueTask<string> ReapplyGrantsAsync(string satelliteName, CancellationToken cancellationToken = default)
+    {
+        var normalized = Normalize(satelliteName);
+        if (!_roles.ContainsKey(normalized.RoleName))
+        {
+            throw new SatelliteRoleStoreException($"Satellite role {normalized.RoleName} was not found.");
+        }
+
+        return ValueTask.FromResult("In-memory development role; grants are simulated.");
     }
 
     public ValueTask RevokeAsync(string satelliteName, CancellationToken cancellationToken = default)

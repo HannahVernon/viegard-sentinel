@@ -141,6 +141,29 @@ public sealed class PostgresSatelliteRoleStore(
         }
     }
 
+    public async ValueTask<string> ReapplyGrantsAsync(string satelliteName, CancellationToken cancellationToken = default)
+    {
+        var normalized = Normalize(satelliteName);
+
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await ThrowIfRoleMissingAsync(connection, transaction, normalized.RoleName, cancellationToken).ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = SatelliteGrantPolicy.BuildGrantSql(SafeSchema(), normalized.RoleName);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not SatelliteRoleStoreException)
+        {
+            await RollBackIfPossibleAsync(transaction).ConfigureAwait(false);
+            throw MapPostgresException(ex, normalized.RoleName);
+        }
+
+        return BuildGrantSummary();
+    }
     private SatelliteConnectionFacts BuildFacts(string roleName) => new(
         "Use the VM address or DNS name reachable from the satellite",
         _options.Port,
@@ -149,13 +172,11 @@ public sealed class PostgresSatelliteRoleStore(
         _options.Schema);
 
     private string BuildGrantSummary() =>
-        $"LOGIN, connection limit 16, USAGE on schema {_options.Schema}, table SELECT/INSERT/UPDATE/DELETE, sequence USAGE/SELECT, and matching future-object default privileges for the application database user.";
+        $"LOGIN, connection limit 16, USAGE on schema {_options.Schema}, and explicit least-privilege grants on {SatelliteGrantPolicy.Granted.Count} tables (see docs/satellite-windows.md); no default privileges, so tables added by later migrations are not granted.";
 
     private string BuildCreateSql(string roleName, string password)
     {
         var schema = SafeSchema();
-        var quotedRole = QuoteIdentifier(roleName);
-        var quotedSchema = QuoteIdentifier(schema);
 
         // PostgreSQL role DDL cannot parameterize identifiers or PASSWORD
         // clauses.  The interpolated fragments below are constrained before
@@ -165,17 +186,12 @@ public sealed class PostgresSatelliteRoleStore(
         // Viegard:Database:Schema value and is rechecked here, and password
         // is generated server-side from an alphanumeric-only alphabet.  The
         // identifiers are always double-quoted and the password is
-        // single-quoted after construction.
-        return $"""
-            CREATE ROLE {quotedRole} LOGIN PASSWORD '{password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT CONNECTION LIMIT 16;
-            GRANT USAGE ON SCHEMA {quotedSchema} TO {quotedRole};
-            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {quotedSchema} TO {quotedRole};
-            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {quotedSchema} TO {quotedRole};
-            ALTER DEFAULT PRIVILEGES FOR ROLE CURRENT_USER IN SCHEMA {quotedSchema} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {quotedRole};
-            ALTER DEFAULT PRIVILEGES FOR ROLE CURRENT_USER IN SCHEMA {quotedSchema} GRANT USAGE, SELECT ON SEQUENCES TO {quotedRole};
-            """;
+        // single-quoted after construction.  The grants come from the
+        // explicit matrix in SatelliteGrantPolicy (D-0063).
+        return $"CREATE ROLE {QuoteIdentifier(roleName)} LOGIN PASSWORD '{password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT CONNECTION LIMIT 16;"
+            + Environment.NewLine
+            + SatelliteGrantPolicy.BuildGrantSql(schema, roleName);
     }
-
     private string SafeSchema()
     {
         if (!DatabaseOptionsValidator.IsSafeSchemaName(_options.Schema))

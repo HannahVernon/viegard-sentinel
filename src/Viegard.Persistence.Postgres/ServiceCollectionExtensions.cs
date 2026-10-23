@@ -60,6 +60,7 @@ public static class ServiceCollectionExtensions
                 // LIMIT (satellite roles are connection-limited).
                 MaxPoolSize = options.MaxPoolSize,
             };
+            ApplyTls(builder, options);
 
             return new NpgsqlDataSourceBuilder(builder.ConnectionString).Build();
         });
@@ -141,6 +142,15 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>Applies the TLS settings (D-0062) to a connection string builder.</summary>
+    public static void ApplyTls(NpgsqlConnectionStringBuilder builder, DatabaseOptions options)
+    {
+        builder.SslMode = options.EffectiveSslMode;
+        if (!string.IsNullOrWhiteSpace(options.RootCertificate))
+        {
+            builder.RootCertificate = options.RootCertificate;
+        }
+    }
     /// <summary>Creates the configured schema if needed and applies pending migrations when AutoMigrate is enabled.  Call once at host startup.</summary>
     public static async Task MigrateViegardDatabaseAsync(this IServiceProvider services, CancellationToken cancellationToken = default)
     {

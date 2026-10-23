@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
+using System.Net;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace Viegard.Persistence.Postgres;
 
@@ -36,6 +38,42 @@ public sealed class DatabaseOptions
     /// connection-limited.
     /// </summary>
     public int MaxPoolSize { get; set; } = 100;
+
+    /// <summary>
+    /// TLS mode (D-0062).  When unset, <see cref="EffectiveSslMode"/> applies:
+    /// <c>Prefer</c> for loopback hosts and the compose service name
+    /// <c>viegard-db</c> (private compose network), otherwise
+    /// <c>VerifyFull</c> so a remote host fails closed.  Remote hosts may
+    /// not use Disable, Allow, or Prefer.
+    /// </summary>
+    public SslMode? SslMode { get; set; }
+
+    /// <summary>
+    /// Optional path to a PEM root CA certificate used to validate the server
+    /// certificate (VerifyCA and VerifyFull only).  A path, never the
+    /// certificate content.
+    /// </summary>
+    public string? RootCertificate { get; set; }
+
+    /// <summary>The compose service name that is private to the compose network.</summary>
+    public const string ComposeServiceHost = "viegard-db";
+
+    public SslMode EffectiveSslMode =>
+        SslMode ?? (IsPrivateHost(Host) ? Npgsql.SslMode.Prefer : Npgsql.SslMode.VerifyFull);
+
+    /// <summary>True for loopback addresses and the compose service name, where traffic does not leave the host or compose network.</summary>
+    public static bool IsPrivateHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            return false;
+        }
+
+        var trimmed = host.Trim().Trim('[', ']');
+        return string.Equals(trimmed, "localhost", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, ComposeServiceHost, StringComparison.OrdinalIgnoreCase)
+            || (IPAddress.TryParse(trimmed, out var address) && IPAddress.IsLoopback(address));
+    }
 }
 
 public sealed partial class DatabaseOptionsValidator : IValidateOptions<DatabaseOptions>
@@ -74,6 +112,31 @@ public sealed partial class DatabaseOptionsValidator : IValidateOptions<Database
         if (options.MaxPoolSize is < 1 or > 1024)
         {
             failures.Add("Database: MaxPoolSize must be within 1-1024.");
+        }
+
+        if (options.SslMode is { } sslMode)
+        {
+            if (!Enum.IsDefined(sslMode))
+            {
+                failures.Add("Database: SslMode must be one of Disable, Allow, Prefer, Require, VerifyCA, VerifyFull.");
+            }
+            else if (!DatabaseOptions.IsPrivateHost(options.Host)
+                && sslMode is SslMode.Disable or SslMode.Allow or SslMode.Prefer)
+            {
+                failures.Add("Database: SslMode Disable, Allow, and Prefer are only permitted for loopback hosts and the compose service name; use Require, VerifyCA, or VerifyFull for a remote host.");
+            }
+        }
+
+        if (options.RootCertificate is not null)
+        {
+            if (string.IsNullOrWhiteSpace(options.RootCertificate) || options.RootCertificate.Any(char.IsControl))
+            {
+                failures.Add("Database: RootCertificate must be a file path without control characters.");
+            }
+            else if (options.EffectiveSslMode is not (SslMode.VerifyCA or SslMode.VerifyFull))
+            {
+                failures.Add("Database: RootCertificate requires SslMode VerifyCA or VerifyFull.");
+            }
         }
 
         return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;

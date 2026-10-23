@@ -255,7 +255,7 @@
 
     <section id="satellites" class="indexed">
         <h2>Satellites</h2>
-        <p class="small">Manage PostgreSQL roles for Windows satellite pipeline instances.  Use one role per satellite host.</p>
+        <p class="small">Manage PostgreSQL roles for Windows satellite pipeline instances.  Use one role per satellite host.  Each role gets explicit least-privilege table grants (no admin, credential, router, or policy tables); roles created by an older release keep broad grants until you use Re-apply grants, which should be done before upgrading the satellite.</p>
 
         @if (_satelliteCredential is not null)
         {
@@ -304,6 +304,11 @@
                                         <AntiforgeryToken />
                                         <input type="hidden" name="name" value="@role.SatelliteName" />
                                         <button type="submit">Rotate password</button>
+                                    </form>
+                                    <form method="post" action="/configuration/satellites/regrant">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="name" value="@role.SatelliteName" />
+                                        <button type="submit">Re-apply grants</button>
                                     </form>
                                     <form method="get" action="/configuration#satellites">
                                         <input type="hidden" name="confirmRevoke" value="@role.SatelliteName" />

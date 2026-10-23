@@ -1566,6 +1566,8 @@ public static class AdminConfigurationEndpoints
         IDohBlocklistSettingsStore dohSettings,
         IDohProbeTrigger probeTrigger,
         IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
         AdminConfigAuditor configAuditor)
     {
         await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
@@ -1573,6 +1575,17 @@ public static class AdminConfigurationEndpoints
         if (user is null)
         {
             return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect(DohBlocklistSettingsConfigurationPath, error: "Step-up verification is required before requesting a DoH probe.");
         }
 
         var settings = await dohSettings.GetAsync(context.RequestAborted).ConfigureAwait(false);

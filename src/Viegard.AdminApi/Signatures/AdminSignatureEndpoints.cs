@@ -91,6 +91,8 @@ public static class AdminSignatureEndpoints
         IAntiforgery antiforgery,
         IEventStore events,
         IAdminUserStore users,
+        IAdminSessionStore sessions,
+        AdminAuthAuditor authAuditor,
         IOptions<DetectionOptions> detectionOptions)
     {
         var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
@@ -99,6 +101,17 @@ public static class AdminSignatureEndpoints
         if (user is null)
         {
             return Results.Redirect("/login");
+        }
+
+        if (!await AdminStepUpGate.HasRecentStepUpAsync(context, sessions).ConfigureAwait(false))
+        {
+            await authAuditor.RecordAsync(
+                AdminAuthEventKind.StepUpFailed,
+                user.Username,
+                context,
+                enqueueForCorrelation: true,
+                cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            return Redirect("/signatures", error: "Step-up verification is required before previewing signatures.");
         }
 
         if (!TryReadSignature(input, user.Username, out var signature, out var error))

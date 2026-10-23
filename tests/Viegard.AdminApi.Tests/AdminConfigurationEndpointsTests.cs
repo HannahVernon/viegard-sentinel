@@ -1149,6 +1149,28 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Request_doh_probe_requires_step_up_before_signalling()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        await fixture.DohSettings.UpdateAsync(
+            new DohBlocklistSettings { Enabled = true, ProbeEnabled = true },
+            expectedRowVersion: 0,
+            "hannah",
+            DateTimeOffset.UtcNow);
+        fixture.Context.Request.Form = EmptyForm();
+
+        var result = await fixture.InvokeRequestDohProbeAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.False(await fixture.DohProbeTrigger.WaitForRequestAsync(TimeSpan.Zero));
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
+        Assert.DoesNotContain(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("requested an immediate DoH probe cycle", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Request_doh_probe_is_rejected_when_the_blocklist_is_disabled()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
@@ -1842,6 +1864,8 @@ public sealed class AdminConfigurationEndpointsTests
                 DohSettings,
                 DohProbeTrigger,
                 Users,
+                Sessions,
+                AuthAuditor,
                 ConfigAuditor);
 
         public Task<IResult> InvokeSavePolicyThresholdsAsync() =>

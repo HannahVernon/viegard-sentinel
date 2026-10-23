@@ -3,15 +3,19 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using Viegard.AdminApi.Auth;
 using Viegard.AdminApi.Signatures;
+using Viegard.Application.Audit;
 using Viegard.Application.Auth;
 using Viegard.Application.Detection;
+using Viegard.Application.Queues;
 using Viegard.Application.Stores;
 using Viegard.Domain;
 using Viegard.Domain.Admin;
+using Viegard.Domain.Audit;
 using Viegard.Domain.Configuration;
 using Viegard.Domain.Events;
 using Viegard.Persistence.InMemory;
@@ -21,7 +25,7 @@ namespace Viegard.AdminApi.Tests;
 public sealed class AdminSignatureEndpointTests
 {
     [Fact]
-    public async Task Preview_does_not_require_step_up_and_does_not_write_audit()
+    public async Task Preview_with_fresh_step_up_does_not_write_audit()
     {
         var fixture = await EndpointFixture.CreateAsync();
         await fixture.Events.AddAsync(HttpEvent("/track?ref=%2Fpage%2F"));
@@ -34,6 +38,8 @@ public sealed class AdminSignatureEndpointTests
             fixture.Antiforgery,
             fixture.Events,
             fixture.Users,
+            fixture.Sessions,
+            fixture.AuthAuditor,
             Options.Create(new DetectionOptions()));
         var location = await ExecuteRedirectAsync(result, fixture.Context);
         var query = ParseQuery(location);
@@ -49,6 +55,29 @@ public sealed class AdminSignatureEndpointTests
     }
 
     [Fact]
+    public async Task Preview_requires_step_up_before_scanning()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
+        await fixture.Events.AddAsync(HttpEvent("/track?ref=%2Fpage%2F"));
+        fixture.Context.Request.Form = ValidForm(pattern: "ref=");
+
+        var result = await AdminSignatureEndpoints.PreviewAsync(
+            fixture.Context,
+            fixture.Antiforgery,
+            fixture.Events,
+            fixture.Users,
+            fixture.Sessions,
+            fixture.AuthAuditor,
+            Options.Create(new DetectionOptions()));
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("Step-up%20verification%20is%20required", location, StringComparison.Ordinal);
+        Assert.DoesNotContain("preview=", location, StringComparison.Ordinal);
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.Summary.Contains("StepUpFailed", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Preview_surfaces_candidate_validation_errors_and_preserves_form_values()
     {
         var fixture = await EndpointFixture.CreateAsync();
@@ -59,6 +88,8 @@ public sealed class AdminSignatureEndpointTests
             fixture.Antiforgery,
             fixture.Events,
             fixture.Users,
+            fixture.Sessions,
+            fixture.AuthAuditor,
             Options.Create(new DetectionOptions()));
         var location = await ExecuteRedirectAsync(result, fixture.Context);
         var query = ParseQuery(location);
@@ -90,6 +121,8 @@ public sealed class AdminSignatureEndpointTests
             fixture.Antiforgery,
             fixture.Events,
             fixture.Users,
+            fixture.Sessions,
+            fixture.AuthAuditor,
             Options.Create(new DetectionOptions()));
         var location = await ExecuteRedirectAsync(result, fixture.Context);
         var query = ParseQuery(location);
@@ -259,10 +292,12 @@ public sealed class AdminSignatureEndpointTests
         DefaultHttpContext Context,
         InMemoryEventStore Events,
         InMemoryAdminUserStore Users,
+        InMemoryAdminSessionStore Sessions,
+        AdminAuthAuditor AuthAuditor,
         RecordingAuditLedger AuditLedger,
         NoopAntiforgery Antiforgery)
     {
-        public static async Task<EndpointFixture> CreateAsync()
+        public static async Task<EndpointFixture> CreateAsync(bool freshStepUp = true)
         {
             var now = DateTimeOffset.UtcNow;
             var user = new AdminUser
@@ -279,6 +314,29 @@ public sealed class AdminSignatureEndpointTests
             };
             var users = new InMemoryAdminUserStore();
             await users.CreateAsync(user);
+            var session = new AdminSession
+            {
+                Id = ViegardId.New(),
+                UserId = user.Id,
+                CreatedAt = now,
+                LastSeenAt = now,
+                AbsoluteExpiresAt = now.AddDays(1),
+                IdleExpiresAt = now.AddHours(1),
+                Ip = "127.0.0.1",
+                IpBindingMode = AdminIpBindingModes.Strict,
+                UserAgent = "test",
+                RevokedAt = null,
+                StepUpAt = freshStepUp ? now : null,
+            };
+            var sessions = new InMemoryAdminSessionStore();
+            await sessions.CreateAsync(session);
+            var ledger = new RecordingAuditLedger();
+            var authAuditor = new AdminAuthAuditor(
+                ledger,
+                new InMemoryRawObservationStore(),
+                new InMemoryEventStore(),
+                new ChannelWorkQueue<Guid>("events"),
+                NullLogger<AdminAuthAuditor>.Instance);
             var context = new DefaultHttpContext
             {
                 RequestServices = new ServiceCollection()
@@ -291,6 +349,7 @@ public sealed class AdminSignatureEndpointTests
                 User = new ClaimsPrincipal(new ClaimsIdentity(
                 [
                     new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(AdminCookieNames.SessionIdClaim, session.Id.ToString()),
                 ], "test")),
             };
             context.Request.Method = HttpMethods.Post;
@@ -299,14 +358,38 @@ public sealed class AdminSignatureEndpointTests
                 context,
                 new InMemoryEventStore(),
                 users,
-                new RecordingAuditLedger(),
+                sessions,
+                authAuditor,
+                ledger,
                 new NoopAntiforgery());
         }
     }
 
-    private sealed class RecordingAuditLedger
+    private sealed class RecordingAuditLedger : IAuditLedger
     {
-        public List<object> Records { get; } = [];
+        public List<AuditRecord> Records { get; } = [];
+
+        public ValueTask AppendAsync(AuditRecord record, CancellationToken cancellationToken = default)
+        {
+            Records.Add(record);
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<KeysetPage<AuditRecord>> ListPageAsync(
+            Guid? beforeId,
+            int pageSize,
+            AuditListFilter? filter = null,
+            ListSort<AuditSortColumn>? sort = null,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new KeysetPage<AuditRecord>(Records, null, Records.Count, 0));
+
+        public ValueTask<Guid?> GetPageCursorAsync(
+            int pageNumber,
+            int pageSize,
+            AuditListFilter? filter = null,
+            ListSort<AuditSortColumn>? sort = null,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<Guid?>(null);
     }
 
     private sealed class NoopAntiforgery : IAntiforgery

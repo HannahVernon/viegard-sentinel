@@ -593,3 +593,11 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Alternatives considered:** storing the pending secret in the session store (rejected: no session exists before the first full login); reusing `FailedLoginCount` (rejected: the correct-password step resets it, which is the weakness being fixed); locking only by source IP (rejected: the IP rate limit alone was the previous, insufficient limit).
 - **Consequences:** A client can no longer choose its own TOTP secret.  An attacker with the password gets five TOTP guesses before backoff starts, and the backoff persists across further correct-password logins.  Adds a non-null `second_factor_failed_count` column (default 0) to `admin_users` through migration `AddSecondFactorFailedCount`; it must be applied before the new build serves logins.  A user who opens two enrolment tabs shares one pending secret until it expires.
 - **Approval:** Requested by the project owner as a pen-test remediation item.
+
+## D-0072: Step-up required for DoH probe requests and signature previews
+
+- **Date:** 2026-10-23
+- **Decision:** `POST /configuration/doh/probe-now` and `POST /signatures/preview` now use the same `AdminStepUpGate` check as the other state-changing and data-reading admin endpoints.  Without a fresh step-up the request is captured for resume, a `StepUpFailed` auth event is recorded, and the operator is redirected back with a step-up message; no probe is signalled and no event scan runs.
+- **Alternatives considered:** leaving the preview ungated because it writes nothing (rejected: it reads up to the bounded recent-event scan and exposes matching event ids to any authenticated session); a per-IP rate limit only (rejected: it does not bind the action to a recent second factor).
+- **Consequences:** An authenticated session without recent step-up can no longer trigger an immediate probe cycle or scan recent events.  Operators see one extra step-up prompt, then the action resumes through the existing resume flow.  No schema change.
+- **Approval:** Requested by the project owner as a pen-test remediation item.

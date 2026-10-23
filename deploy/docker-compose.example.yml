@@ -20,7 +20,7 @@
 
 services:
   viegard-db:
-    image: postgres:17
+    image: ${POSTGRES_IMAGE:-postgres:17}
     container_name: viegard-db
     restart: unless-stopped
     environment:
@@ -43,7 +43,7 @@ services:
   # Nightly logical backups (D-0024): custom-format pg_dump written to the
   # VM disk; 14 days retained.  Runs once per ~24h in a simple loop.
   viegard-db-backup:
-    image: postgres:17
+    image: ${POSTGRES_IMAGE:-postgres:17}
     container_name: viegard-db-backup
     restart: unless-stopped
     depends_on:
@@ -71,6 +71,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.pipeline
+      args:
+        DOTNET_SDK_IMAGE: ${DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk:10.0}
+        DOTNET_RUNTIME_IMAGE: ${DOTNET_RUNTIME_IMAGE:-mcr.microsoft.com/dotnet/runtime:10.0}
     container_name: viegard-pipeline
     restart: unless-stopped
     depends_on:
@@ -121,6 +124,9 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.admin
+      args:
+        DOTNET_SDK_IMAGE: ${DOTNET_SDK_IMAGE:-mcr.microsoft.com/dotnet/sdk:10.0}
+        DOTNET_ASPNET_IMAGE: ${DOTNET_ASPNET_IMAGE:-mcr.microsoft.com/dotnet/aspnet:10.0}
     container_name: viegard-admin
     restart: unless-stopped
     depends_on:

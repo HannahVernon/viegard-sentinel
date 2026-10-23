@@ -174,6 +174,23 @@ sudo ./viegard-deploy.sh upgrade --pin 0123456789abcdef0123456789abcdef01234567
 
 The Windows satellite script has the same switches; see [satellite-windows.md](satellite-windows.md).
 
+## Pinning base images
+
+The Dockerfiles and `docker-compose.example.yml` use the moving tags `postgres:17` and `mcr.microsoft.com/dotnet/{sdk,aspnet,runtime}:10.0` by default, so a plain build works.  A moving tag can point at different content on each build.  To fix them to the content you reviewed, run this on the deployment host, which needs registry access:
+
+```bash
+sudo ./viegard-deploy.sh pin-images
+cd /opt/viegard-sentinel/deploy && docker compose config | grep -E 'image:|DOTNET_.*_IMAGE'
+sudo ./viegard-deploy.sh upgrade --force
+```
+
+- `pin-images` asks the registry for each tag's digest with `docker buildx imagetools inspect`, and falls back to `docker pull` followed by `docker image inspect` (RepoDigests) when buildx is not available.  It never guesses a digest; if any lookup fails, it writes nothing.
+- The result is a managed block in `deploy/.env` (`POSTGRES_IMAGE`, `DOTNET_SDK_IMAGE`, `DOTNET_ASPNET_IMAGE`, `DOTNET_RUNTIME_IMAGE`, each as `name:tag@sha256:...`).  Compose reads `.env` automatically, and `docker-compose.yml` passes the values to the Dockerfiles as build arguments (`ARG` before `FROM`).  Re-running the command replaces only that block.
+- A digest records what the registry served at that moment.  It does not show that the image is trustworthy; compare it with the publisher's release notes.
+- Pins do not update themselves.  Re-run `pin-images` on a schedule you choose (for example monthly, and when a base-image security advisory is published), review the result, and rebuild.
+- If you keep your own `docker-compose.yml` copied from an older example, add the `${...IMAGE:-...}` references and the `build.args` entries from the current example; otherwise the pins have no effect.
+- This script was written without Docker access.  It has been syntax-checked but not run against a registry; run it once and read the `.env` block before relying on it.
+
 ## 1. Prepare secrets and directories
 
 Each secret is one file in `deploy/secrets/`; the file name is the secret name (D-0006).  These directories are gitignored and must never be committed.

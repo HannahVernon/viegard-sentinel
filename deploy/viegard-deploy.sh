@@ -16,6 +16,10 @@
 #              the clone HEAD (use --force to rebuild regardless).  Use
 #              --require-signed so nothing is built unless the target is
 #              signed by a key in the allowed-signers file (D-0090).
+#   pin-images Resolve postgres and .NET base image tags to immutable digests
+#              with docker (needs registry access; run by the operator, never
+#              automatically) and record them in a managed block of deploy/.env
+#              that docker-compose.yml reads (D-0092).  Review before upgrade.
 #   install-agent
 #              Install the privileged host-side agent that polls fixed-verb
 #              upgrade requests from PostgreSQL through the db container.
@@ -868,6 +872,59 @@ cmd_install_agent() {
     fi
 }
 
+# ------------------------------------------------------------- pin-images --
+
+PIN_BEGIN='# BEGIN viegard pin-images (managed; rerun "viegard-deploy.sh pin-images")'
+PIN_END='# END viegard pin-images'
+
+# Prints the sha256 digest of an image reference as published by its registry.
+resolve_image_digest() {
+    local ref="$1" digest=""
+    digest="$(docker buildx imagetools inspect "$ref" 2>/dev/null | awk '/^Digest:/ {print $2; exit}')"
+    if [ -z "$digest" ]; then
+        docker pull --quiet "$ref" >/dev/null 2>&1 || return 1
+        digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$ref" 2>/dev/null | head -n 1)"
+        digest="${digest#*@}"
+    fi
+    case "$digest" in
+        sha256:????????????????????????????????????????????????????????????????) printf '%s\n' "$digest" ;;
+        *) return 1 ;;
+    esac
+}
+
+cmd_pin_images() {
+    require_root
+    command -v docker >/dev/null 2>&1 || die "docker is required to resolve image digests."
+    local d envfile tmp block name ref digest
+    d="$(compose_dir)"
+    [ -f "$d/docker-compose.yml" ] || die "$d/docker-compose.yml not found; run install first."
+    envfile="$d/.env"
+    block="$PIN_BEGIN"$'\n'
+    for pair in \
+        "POSTGRES_IMAGE=postgres:17" \
+        "DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0" \
+        "DOTNET_ASPNET_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0" \
+        "DOTNET_RUNTIME_IMAGE=mcr.microsoft.com/dotnet/runtime:10.0"; do
+        name="${pair%%=*}"; ref="${pair#*=}"
+        digest="$(resolve_image_digest "$ref")" || die "Could not resolve a digest for $ref; nothing was written."
+        log "$ref -> $digest"
+        block+="$name=$ref@$digest"$'\n'
+    done
+    block+="$PIN_END"$'\n'
+
+    tmp="$(mktemp "$d/.env.XXXXXX")"
+    if [ -f "$envfile" ]; then
+        awk -v b="$PIN_BEGIN" -v e="$PIN_END" '$0==b {skip=1} !skip {print} $0==e {skip=0}' "$envfile" > "$tmp"
+        chmod --reference="$envfile" "$tmp"
+    else
+        chmod 600 "$tmp"
+    fi
+    printf '%s' "$block" >> "$tmp"
+    mv "$tmp" "$envfile"
+    log "Wrote pinned base images to $envfile."
+    log "Review them, then apply with: cd $d && docker compose up -d --build"
+    warn "A digest records what the registry served just now; it does not prove the image is trustworthy.  Compare against the publisher's notes before relying on it."
+}
 # ----------------------------------------------------------------- status --
 
 cmd_status() {
@@ -905,6 +962,7 @@ case "$COMMAND" in
     install)       cmd_install ;;
     configure)     cmd_configure ;;
     upgrade)       cmd_upgrade ;;
+    pin-images)    cmd_pin_images ;;
     install-agent) cmd_install_agent ;;
     status)        cmd_status ;;
     -h|--help|help) usage 0 ;;

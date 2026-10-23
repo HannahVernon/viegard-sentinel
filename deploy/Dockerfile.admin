@@ -1,6 +1,13 @@
 # syntax=docker/dockerfile:1
+# Base images default to the moving tags so a plain build works.  Run
+# `viegard-deploy.sh pin-images` on the host to resolve them to immutable
+# digests; docker-compose.example.yml passes the pinned values as build args
+# (D-0092).
+ARG DOTNET_SDK_IMAGE=mcr.microsoft.com/dotnet/sdk:10.0
+ARG DOTNET_ASPNET_IMAGE=mcr.microsoft.com/dotnet/aspnet:10.0
+
 # Build stage
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM ${DOTNET_SDK_IMAGE} AS build
 WORKDIR /source
 COPY Directory.Build.props nuget.config ./
 COPY src/Viegard.Domain/Viegard.Domain.csproj src/Viegard.Domain/
@@ -27,7 +34,7 @@ RUN --mount=type=cache,target=/root/.nuget/packages,sharing=locked \
         --configuration Release --no-restore --output /app ${sha:+-p:SourceRevisionId=$sha}
 
 # Runtime stage
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+FROM ${DOTNET_ASPNET_IMAGE} AS runtime
 WORKDIR /app
 
 # Npgsql probes GSSAPI during connection negotiation; .NET images ship

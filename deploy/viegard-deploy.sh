@@ -11,9 +11,11 @@
 #              is applied AFTER it, so any setting you declare in your own
 #              file wins.  Re-running configure regenerates the whole file:
 #              pass the complete set of options you want each time.
-#   upgrade    Pull the configured branch and rebuild/restart when the
-#              deployed commit marker differs from the clone HEAD (use
-#              --force to rebuild regardless).
+#   upgrade    Fast-forward to the configured branch tip (or to --pin) and
+#              rebuild/restart when the deployed commit marker differs from
+#              the clone HEAD (use --force to rebuild regardless).  Use
+#              --require-signed so nothing is built unless the target is
+#              signed by a key in the allowed-signers file (D-0090).
 #   install-agent
 #              Install the privileged host-side agent that polls fixed-verb
 #              upgrade requests from PostgreSQL through the db container.
@@ -24,6 +26,24 @@
 #   --branch <name>   Git branch to track        (default dev; main is the
 #                     future release branch and currently lags dev)
 #   --yes             Skip confirmation prompts
+#
+# Update trust options (install and upgrade; D-0090):
+#   --require-signed  Verify the target commit (or annotated tag) with
+#                     git verify-commit / verify-tag against an SSH
+#                     allowed-signers file BEFORE any build.  Fails closed:
+#                     a missing file, a missing tool, or a bad or unknown
+#                     signature aborts without changing the working tree.
+#   --allowed-signers <file>
+#                     Allowed-signers file (default /etc/viegard/allowed_signers;
+#                     must be root-owned and not group- or world-writable).
+#   --pin <sha-or-tag>
+#                     Deploy exactly this commit or tag instead of the branch
+#                     tip.  The clone is left on a detached HEAD.
+#   Without --require-signed the update is UNVERIFIED and the script says so.
+#   Defaults may also be set in /etc/viegard/update.conf (KEY=value lines:
+#   REQUIRE_SIGNED=1, ALLOWED_SIGNERS=<file>, PIN=<ref>); flags override it.
+#   The host agent runs this script, so that file is how the agent is
+#   made to verify signatures.
 #
 # install options:
 #   --repo-url <url>  Clone source (default the public Forgejo repository)
@@ -94,6 +114,10 @@ AGENT_DEPLOY_DIR=""
 AGENT_TARGET=vm
 AGENT_SCHEMA=viegard
 AGENT_POLL_SECONDS=30
+UPDATE_CONF=/etc/viegard/update.conf
+REQUIRE_SIGNED=0
+ALLOWED_SIGNERS=/etc/viegard/allowed_signers
+PIN=""
 COMMAND="${1:-}"
 [ $# -gt 0 ] && shift
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -173,6 +197,115 @@ write_build_commit_file() {
     log "Recorded build commit $(short_commit "$head") for the container image build."
 }
 
+# ------------------------------------------------------ update trust (D-0090)
+
+# A trust anchor (policy file, allowed-signers file) that a non-root user can
+# edit defeats the check, so refuse files not owned by root or writable by
+# group or others.
+require_trusted_file() {
+    local file="$1" owner mode
+    owner="$(stat -c '%u' "$file")"
+    mode="$(stat -c '%a' "$file")"
+    [ "$owner" = "0" ] || die "$file must be owned by root (found uid $owner)."
+    [ $(( ${mode: -2:1} & 2 )) -eq 0 ] && [ $(( ${mode: -1} & 2 )) -eq 0 ] \
+        || die "$file must not be writable by group or others (mode $mode)."
+}
+
+load_update_conf() {
+    [ -f "$UPDATE_CONF" ] || return 0
+    require_trusted_file "$UPDATE_CONF"
+    local line key value
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        case "$line" in ''|'#'*) continue ;; esac
+        key="${line%%=*}"
+        value="${line#*=}"
+        [ "$key" != "$line" ] || die "Invalid line in $UPDATE_CONF: $line"
+        case "$key" in
+            REQUIRE_SIGNED)
+                case "$value" in
+                    1|yes|true)  REQUIRE_SIGNED=1 ;;
+                    0|no|false)  REQUIRE_SIGNED=0 ;;
+                    *) die "REQUIRE_SIGNED in $UPDATE_CONF must be 1 or 0." ;;
+                esac ;;
+            ALLOWED_SIGNERS) ALLOWED_SIGNERS="$value" ;;
+            PIN)             PIN="$value" ;;
+            *)               warn "Ignoring unknown key '$key' in $UPDATE_CONF." ;;
+        esac
+    done < "$UPDATE_CONF"
+}
+
+validate_pin() {
+    [ -n "$PIN" ] || return 0
+    case "$PIN" in
+        -*|*[!A-Za-z0-9._/+-]*) die "--pin must be a commit SHA or tag name (letters, digits, . _ / + - only; no leading dash)." ;;
+    esac
+}
+
+resolve_update_target() {
+    TARGET_TAG=""
+    if [ -n "$PIN" ]; then
+        if git -C "$DIR" rev-parse --verify --quiet "refs/tags/$PIN" >/dev/null; then
+            TARGET_TAG="$PIN"
+            TARGET_COMMIT="$(git -C "$DIR" rev-parse --verify --quiet "refs/tags/$PIN^{commit}")" \
+                || die "Tag '$PIN' does not point at a commit."
+        else
+            TARGET_COMMIT="$(git -C "$DIR" rev-parse --verify --quiet "$PIN^{commit}")" \
+                || die "--pin '$PIN' is not a known commit or tag in the clone (is it fetched from origin?)."
+        fi
+    else
+        TARGET_COMMIT="$(git -C "$DIR" rev-parse --verify --quiet "refs/remotes/origin/$BRANCH^{commit}")" \
+            || die "origin/$BRANCH was not found after fetch."
+    fi
+}
+
+verify_update_target() {
+    if [ "$REQUIRE_SIGNED" -ne 1 ]; then
+        warn "UNVERIFIED UPDATE: signature verification was not requested, so this build trusts whatever the remote served.  Use --require-signed (see docs/deployment.md, Signed updates)."
+        return 0
+    fi
+
+    command -v ssh-keygen >/dev/null 2>&1 \
+        || die "--require-signed needs ssh-keygen (package openssh-client) and git 2.34 or later; refusing to build."
+    [ -f "$ALLOWED_SIGNERS" ] \
+        || die "--require-signed needs the allowed-signers file $ALLOWED_SIGNERS; refusing to build."
+    require_trusted_file "$ALLOWED_SIGNERS"
+
+    local verb="verify-commit" object="$TARGET_COMMIT"
+    if [ -n "$TARGET_TAG" ] && [ "$(git -C "$DIR" cat-file -t "refs/tags/$TARGET_TAG")" = "tag" ]; then
+        verb="verify-tag"
+        object="refs/tags/$TARGET_TAG"
+    fi
+
+    # -c on the command line outranks any gpg.* value in the clone's own config.
+    if git -C "$DIR" -c gpg.format=ssh -c gpg.ssh.program=ssh-keygen \
+            -c "gpg.ssh.allowedSignersFile=$ALLOWED_SIGNERS" "$verb" "$object"; then
+        log "Signature verified ($verb) for $(short_commit "$TARGET_COMMIT")."
+    else
+        die "Signature verification FAILED for $(short_commit "$TARGET_COMMIT") ($verb); refusing to build.  The working tree was not changed."
+    fi
+}
+
+# Move the clone to the verified target.  Nothing is checked out until
+# verification has passed, so an unsigned or tampered commit is never present
+# in the working tree at build time.
+advance_to_verified_target() {
+    validate_pin
+    resolve_update_target
+    verify_update_target
+    if [ -n "$PIN" ]; then
+        log "Pinned to $(short_commit "$TARGET_COMMIT")${TARGET_TAG:+ (tag $TARGET_TAG)}; the clone will be on a detached HEAD."
+        git -C "$DIR" switch --detach "$TARGET_COMMIT"
+    else
+        git -C "$DIR" merge --ff-only "$TARGET_COMMIT"
+    fi
+    if [ "$REQUIRE_SIGNED" -eq 1 ] && [ "$(git -C "$DIR" rev-parse HEAD)" != "$TARGET_COMMIT" ]; then
+        die "HEAD is not at the verified commit $(short_commit "$TARGET_COMMIT") (local commits ahead of origin/$BRANCH?); refusing to build."
+    fi
+}
+
+load_update_conf
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --dir)              DIR="$2"; shift 2 ;;
@@ -191,6 +324,9 @@ while [ $# -gt 0 ]; do
         --agent-poll-seconds) AGENT_POLL_SECONDS="$2"; shift 2 ;;
         --yes)              ASSUME_YES=1; shift ;;
         --force)            FORCE=1; shift ;;
+        --require-signed)   REQUIRE_SIGNED=1; shift ;;
+        --allowed-signers)  ALLOWED_SIGNERS="$2"; shift 2 ;;
+        --pin)              PIN="$2"; shift 2 ;;
         -h|--help)          usage 0 ;;
         *)                  die "Unknown option: $1 (try --help)" ;;
     esac
@@ -239,12 +375,13 @@ install_prerequisites() {
 clone_or_update_repo() {
     if [ -d "$DIR/.git" ]; then
         log "Repository already present at $DIR; fetching and switching to '$BRANCH'."
-        git -C "$DIR" fetch origin
+        git -C "$DIR" fetch origin --tags
         git -C "$DIR" switch "$BRANCH"
-        git -C "$DIR" pull --ff-only origin "$BRANCH"
+        advance_to_verified_target
     else
         log "Cloning $REPO_URL (branch $BRANCH) into $DIR..."
         git clone --branch "$BRANCH" "$REPO_URL" "$DIR"
+        advance_to_verified_target
     fi
 }
 
@@ -563,15 +700,15 @@ cmd_upgrade() {
     local d current before after deployed marker_matches; d="$(compose_dir)"
 
     current="$(git -C "$DIR" branch --show-current)"
-    if [ "$current" != "$BRANCH" ]; then
+    if [ -z "$PIN" ] && [ "$current" != "$BRANCH" ]; then
         log "Switching from branch '$current' to '$BRANCH'..."
         git -C "$DIR" fetch origin
         git -C "$DIR" switch "$BRANCH"
     fi
 
     before="$(git -C "$DIR" rev-parse HEAD)"
-    git -C "$DIR" fetch origin
-    git -C "$DIR" pull --ff-only origin "$BRANCH"
+    git -C "$DIR" fetch origin --tags
+    advance_to_verified_target
     after="$(git -C "$DIR" rev-parse HEAD)"
     ensure_router_credentials_key_secret
     require_declared_roles

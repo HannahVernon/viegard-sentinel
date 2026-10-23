@@ -23,6 +23,11 @@ sudo ./viegard-deploy.sh install --domain admin.example.com --email you@example.
 # the deployed commit marker differs from clone HEAD, verifies liveness after):
 sudo ./viegard-deploy.sh upgrade
 
+# Same, but build only a commit signed by a key in the allowed-signers file,
+# or deploy one pinned tag (see "Signed updates" below):
+sudo ./viegard-deploy.sh upgrade --require-signed
+sudo ./viegard-deploy.sh upgrade --require-signed --pin v1.4.0
+
 # Track main instead of dev (main is the future release branch):
 sudo ./viegard-deploy.sh upgrade --branch main
 
@@ -80,6 +85,71 @@ Operators request a host upgrade from **Configuration** -> **Upgrades** after st
 Requests are single-flight per target: a new request is rejected while an existing command for that target is Pending or Running.  After any finished command, the store enforces a 10-minute cooldown before accepting another request for the same target.  These checks are enforced in the command store, not only in the UI.
 
 Windows satellites use the same fixed-verb command table with per-satellite targets.  The Windows service claims only its configured target, starts the registered scheduled task for elevation, and reports completion after restart from its local state file and deployed-commit marker.  Configure the satellite-side agent through the installer workflow documented in [satellite-windows.md](satellite-windows.md).
+
+## Signed updates
+
+`upgrade` fast-forwards a mutable branch (`dev` or `main`) and then builds and starts containers as root.  Anyone who can push to that branch, or who can intercept the clone transport, therefore controls code that runs as root on the Docker host.  Signed updates remove that trust: the script builds only a commit (or annotated tag) whose SSH signature matches a key you listed in an allowed-signers file (D-0090).
+
+Verification is opt-in, because it needs a signing key and a maintained file.  It is recommended for every deployment.  Without it the script still works as before and prints `UNVERIFIED UPDATE` on each run.
+
+### Set up signing
+
+1. On the release maintainer's workstation, create an SSH signing key (a separate key from the login key is good practice) and tell git to sign with it:
+
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/viegard-signing -C "release signing"
+   git config --global gpg.format ssh
+   git config --global user.signingkey ~/.ssh/viegard-signing.pub
+   git config --global commit.gpgsign true     # sign every commit, or use git commit -S
+   git config --global tag.gpgsign true        # annotated tags are signed with git tag -s
+   ```
+
+2. Publish the public key out of band, not through the repository being verified.  On the deployment host, create `/etc/viegard/allowed_signers` with one line per trusted key:
+
+   ```text
+   release@example.com ssh-ed25519 AAAAC3...public-key-body...
+   ```
+
+   The first field is a principal name, then the key type and key.  Add `namespaces="git"` before the key type to limit the key to git signatures.  See `ALLOWED SIGNERS` in `man ssh-keygen` for the full format, including `valid-before` for key rotation.
+
+3. Lock the file down.  The script refuses a file that is not owned by root or that group or others can write:
+
+   ```bash
+   sudo chown root:root /etc/viegard/allowed_signers
+   sudo chmod 644 /etc/viegard/allowed_signers
+   ```
+
+4. The host needs `git` 2.34 or later and `ssh-keygen` (package `openssh-client`).  If either is missing the script stops before building.
+
+5. Make verification the default for this host, including upgrades run by the host agent (which calls `viegard-deploy.sh upgrade --yes` with no extra flags).  Create `/etc/viegard/update.conf`, owned by root and not group- or world-writable:
+
+   ```text
+   REQUIRE_SIGNED=1
+   ALLOWED_SIGNERS=/etc/viegard/allowed_signers
+   ```
+
+   Flags override `PIN` and `ALLOWED_SIGNERS`; a flag cannot turn `REQUIRE_SIGNED` off.
+
+### Behaviour
+
+```bash
+# Verify the tip of the tracked branch, then build it:
+sudo ./viegard-deploy.sh upgrade --require-signed
+
+# Deploy exactly one release tag or commit (the clone goes to a detached HEAD):
+sudo ./viegard-deploy.sh upgrade --require-signed --pin v1.4.0
+
+sudo ./viegard-deploy.sh upgrade --pin 0123456789abcdef0123456789abcdef01234567
+```
+
+- The target commit is resolved after `git fetch`, verified with `git verify-commit` (or `git verify-tag` for an annotated tag), and only then checked out.  The working tree is not touched when verification fails.
+- Verification fails closed.  A missing or loosely protected allowed-signers file, a missing `ssh-keygen`, an unsigned commit, or a signature from an unlisted key each abort the command with a non-zero exit code before `docker compose up --build`.
+- The verifier settings are passed with `git -c`, so a `gpg.*` value in the clone's own configuration cannot redirect verification.
+- A signature on the branch tip covers its history, because each commit hash includes its parent.  Signing every commit is still advised, so that any commit you later pin is also verifiable.
+- `--pin` accepts a full or abbreviated commit SHA or a tag name.  A full SHA or an annotated, signed tag is the strongest form.  A pinned deployment stays on that commit until you pass a different `--pin` or run `upgrade` without one (which returns to the branch tip).
+- `install` honours the same flags and verifies the clone before the first build.  Create the allowed-signers file before running it.
+
+The Windows satellite script has the same switches; see [satellite-windows.md](satellite-windows.md).
 
 ## 1. Prepare secrets and directories
 

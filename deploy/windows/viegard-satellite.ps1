@@ -73,6 +73,15 @@ For register-autoupgrade, the local start time in HH:mm format.  The default is 
 
 .PARAMETER Yes
 Treat confirmation prompts as approved.  Use only for automation where the disruptive steps are intentional.
+
+.PARAMETER RequireSigned
+For install and upgrade (and baked into the scheduled task by register-autoupgrade), verify the target commit, or the annotated tag named by -Pin, with git verify-commit or git verify-tag against an SSH allowed-signers file before anything is published as SYSTEM.  Fails closed: a missing file, missing ssh-keygen, or a bad or unknown signature stops the command without changing the working tree.  Without this switch the update is unverified and the script warns, unless the default allowed-signers file exists, which turns verification on for every invocation (including the UI-driven launch, which passes no flags).
+
+.PARAMETER AllowedSignersFile
+The allowed-signers file used with -RequireSigned.  The default is C:\Program Files\Viegard Satellite\allowed_signers.  Only SYSTEM and Administrators may own or modify it.
+
+.PARAMETER Pin
+Deploy exactly this commit SHA or tag instead of the tracked branch tip.  The clone is left on a detached HEAD.
 #>
 [CmdletBinding()]
 param(
@@ -123,7 +132,13 @@ param(
 
     [string]$Time = "03:30",
 
-    [switch]$Yes
+    [switch]$Yes,
+
+    [switch]$RequireSigned,
+
+    [string]$AllowedSignersFile,
+
+    [string]$Pin
 )
 
 Set-StrictMode -Version 2.0
@@ -1218,6 +1233,233 @@ function Get-GitOutput {
     finally {
         Pop-Location
     }
+}
+
+function Test-SignedUpdatesRequired {
+    # The UI-driven upgrade fallback launches the script without flags, so the
+    # presence of the default allowed-signers file also turns verification on.
+    # Without it, an operator's intent would be lost on that launch path.
+    if ($RequireSigned.IsPresent) {
+        return $true
+    }
+
+    return (Test-Path -LiteralPath (Join-Path $script:DefaultInstallRoot "allowed_signers") -PathType Leaf)
+}
+function Test-AdministratorOnlyWritable {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    # A trust anchor that a non-administrator can rewrite defeats signature
+    # verification, so only SYSTEM, Administrators, and TrustedInstaller may
+    # own or modify the allowed-signers file.
+    $trustedSids = @(
+        "S-1-5-18",
+        "S-1-5-32-544",
+        "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+    )
+    $acl = Get-Acl -LiteralPath $Path
+    $ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    if ($trustedSids -notcontains $ownerSid) {
+        return $false
+    }
+
+    $writeRights = [System.Security.AccessControl.FileSystemRights]::WriteData -bor
+        [System.Security.AccessControl.FileSystemRights]::AppendData -bor
+        [System.Security.AccessControl.FileSystemRights]::Delete -bor
+        [System.Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [System.Security.AccessControl.FileSystemRights]::TakeOwnership
+    foreach ($rule in $acl.Access) {
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) {
+            continue
+        }
+
+        if (($rule.FileSystemRights -band $writeRights) -eq 0) {
+            continue
+        }
+
+        $ruleSid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+        if ($trustedSids -notcontains $ruleSid) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Get-UpdateTargetCommit {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot
+    )
+
+    # Returns the commit to deploy and, when -Pin names a tag, the tag name.
+    $result = [pscustomobject]@{ Commit = $null; Tag = $null }
+    if (-not [string]::IsNullOrWhiteSpace($Pin)) {
+        if ($Pin -notmatch '^[A-Za-z0-9_/+][A-Za-z0-9._/+-]*$') {
+            Stop-WithMessage "-Pin must be a commit SHA or tag name (letters, digits, . _ / + - only; no leading dash)."
+        }
+
+        Push-Location $RepositoryRoot
+        try {
+            & git rev-parse --verify --quiet ("refs/tags/" + $Pin) 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                $result.Tag = $Pin
+                $commitLines = @(& git rev-parse --verify --quiet ("refs/tags/" + $Pin + "^{commit}") 2>&1)
+            }
+            else {
+                $commitLines = @(& git rev-parse --verify --quiet ($Pin + "^{commit}") 2>&1)
+            }
+
+            if ($LASTEXITCODE -ne 0 -or $commitLines.Count -eq 0) {
+                Stop-WithMessage ("-Pin '" + $Pin + "' is not a known commit or tag in the clone (is it fetched from origin?).")
+            }
+
+            $result.Commit = [string]$commitLines[0]
+        }
+        finally {
+            Pop-Location
+        }
+
+        return $result
+    }
+
+    Push-Location $RepositoryRoot
+    try {
+        & git symbolic-ref --quiet HEAD 2>&1 | Out-Null
+        $onBranch = ($LASTEXITCODE -eq 0)
+    }
+    finally {
+        Pop-Location
+    }
+
+    if (-not $onBranch) {
+        Stop-WithMessage "The clone is on a detached HEAD (a previous -Pin).  Run -Pin again, or switch the clone back to a tracking branch (git switch dev in the clone) to follow the branch."
+    }
+
+    $upstreamOutput = @(Get-GitOutput -RepositoryRoot $RepositoryRoot -ArgumentList @("rev-parse", "@{u}"))
+    if ($upstreamOutput.Count -eq 0) {
+        Stop-WithMessage "The clone has no upstream branch.  Switch it to a tracking branch (for example git switch dev) or pass -Pin."
+    }
+
+    $result.Commit = [string]$upstreamOutput[0]
+    return $result
+}
+
+function Confirm-UpdateSignature {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot,
+
+        [Parameter(Mandatory = $true)]
+        [pscustomobject]$Target
+    )
+
+    if (-not (Test-SignedUpdatesRequired)) {
+        Write-WarnLine "UNVERIFIED UPDATE: signature verification was not requested, so this build trusts whatever the remote served.  Use -RequireSigned (see docs\satellite-windows.md, Signed updates)."
+        return
+    }
+
+    $signersFile = $AllowedSignersFile
+    if ([string]::IsNullOrWhiteSpace($signersFile)) {
+        $signersFile = Join-Path $script:DefaultInstallRoot "allowed_signers"
+    }
+
+    if (-not (Test-Path -LiteralPath $signersFile -PathType Leaf)) {
+        Stop-WithMessage ("-RequireSigned needs the allowed-signers file " + $signersFile + "; refusing to build.")
+    }
+
+    if (-not (Test-AdministratorOnlyWritable -Path $signersFile)) {
+        Stop-WithMessage ($signersFile + " must be owned by an administrator account and writable only by SYSTEM and Administrators; refusing to build.")
+    }
+
+    $sshKeygen = Get-Command -Name "ssh-keygen" -ErrorAction SilentlyContinue
+    if ($null -eq $sshKeygen) {
+        Stop-WithMessage "-RequireSigned needs ssh-keygen (the Windows OpenSSH client feature) and git 2.34 or later; refusing to build."
+    }
+
+    $verb = "verify-commit"
+    $object = $Target.Commit
+    if (-not [string]::IsNullOrWhiteSpace($Target.Tag)) {
+        $tagType = (@(Get-GitOutput -RepositoryRoot $RepositoryRoot -ArgumentList @("cat-file", "-t", ("refs/tags/" + $Target.Tag))))[0]
+        if ($tagType -eq "tag") {
+            $verb = "verify-tag"
+            $object = "refs/tags/" + $Target.Tag
+        }
+    }
+
+    # -c on the command line outranks any gpg.* value in the clone's own config.
+    $verifyArguments = @(
+        "-c", "gpg.format=ssh",
+        "-c", ("gpg.ssh.program=" + ($sshKeygen.Source -replace "\\", "/")),
+        "-c", ("gpg.ssh.allowedSignersFile=" + ($signersFile -replace "\\", "/")),
+        $verb,
+        $object
+    )
+    Push-Location $RepositoryRoot
+    try {
+        $verifyOutput = @(& git @verifyArguments 2>&1)
+        $verifyExit = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+
+    foreach ($verifyLine in $verifyOutput) {
+        [Console]::Out.WriteLine("  " + [string]$verifyLine)
+    }
+
+    if ($verifyExit -ne 0) {
+        Stop-WithMessage ("Signature verification FAILED for " + (Get-ShortCommit -Commit $Target.Commit) + " (" + $verb + "); refusing to build.  The working tree was not changed.")
+    }
+
+    Write-InfoLine ("Signature verified (" + $verb + ") for " + (Get-ShortCommit -Commit $Target.Commit) + ".")
+}
+
+function Move-ToVerifiedTarget {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepositoryRoot
+    )
+
+    # Nothing is checked out until verification passes, so an unsigned or
+    # tampered commit is never in the working tree at publish time.
+    $target = Get-UpdateTargetCommit -RepositoryRoot $RepositoryRoot
+    Confirm-UpdateSignature -RepositoryRoot $RepositoryRoot -Target $target
+
+    $headCommit = (@(Get-GitOutput -RepositoryRoot $RepositoryRoot -ArgumentList @("rev-parse", "HEAD")))[0]
+    if ($headCommit -ne $target.Commit) {
+        Push-Location $RepositoryRoot
+        try {
+            $incomingLines = @(& git log --oneline ($headCommit + ".." + $target.Commit) 2>&1)
+        }
+        finally {
+            Pop-Location
+        }
+
+        if ($LASTEXITCODE -eq 0 -and $incomingLines.Count -gt 0) {
+            Write-InfoLine "Incoming commits:"
+            foreach ($line in $incomingLines) {
+                [Console]::Out.WriteLine("  " + [string]$line)
+            }
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Pin)) {
+        Write-InfoLine ("Pinned to " + (Get-ShortCommit -Commit $target.Commit) + "; the clone will be on a detached HEAD.")
+        Get-GitOutput -RepositoryRoot $RepositoryRoot -ArgumentList @("switch", "--detach", $target.Commit) | Out-Null
+    }
+    else {
+        Get-GitOutput -RepositoryRoot $RepositoryRoot -ArgumentList @("merge", "--ff-only", $target.Commit) | Out-Null
+    }
+
+    $newHead = (@(Get-GitOutput -RepositoryRoot $RepositoryRoot -ArgumentList @("rev-parse", "HEAD")))[0]
+    if ((Test-SignedUpdatesRequired) -and $newHead -ne $target.Commit) {
+        Stop-WithMessage ("HEAD is not at the verified commit " + (Get-ShortCommit -Commit $target.Commit) + " (local commits ahead of upstream?); refusing to build.")
+    }
+
+    return $target.Commit
 }
 
 function Set-GitSafeDirectory {
@@ -2359,6 +2601,14 @@ function Invoke-Install {
     }
 
     $repositoryRoot = Initialize-ManagedRepository
+    if ((Test-SignedUpdatesRequired) -or -not [string]::IsNullOrWhiteSpace($Pin)) {
+        Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("fetch", "origin", "--tags") | Out-Null
+        Move-ToVerifiedTarget -RepositoryRoot $repositoryRoot | Out-Null
+    }
+    else {
+        Write-WarnLine "UNVERIFIED INSTALL: signature verification was not requested.  Use -RequireSigned (see docs\satellite-windows.md, Signed updates)."
+    }
+
     $installerConfig = Get-InstallConfiguration
     $serviceRecord = Get-ServiceRecord
     if ($null -ne $serviceRecord) {
@@ -2411,23 +2661,9 @@ function Invoke-Upgrade {
     }
 
     $beforeCommit = (@(Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("rev-parse", "HEAD")))[0]
-    Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("fetch", "origin") | Out-Null
+    Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("fetch", "origin", "--tags") | Out-Null
 
-    $upstreamCommit = $null
-    $upstreamOutput = @(Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("rev-parse", "@{u}"))
-    if ($upstreamOutput.Count -gt 0) {
-        $upstreamCommit = $upstreamOutput[0]
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($upstreamCommit) -and $beforeCommit -ne $upstreamCommit) {
-        Write-InfoLine "Incoming commits:"
-        $incomingLines = @(Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("log", "--oneline", ($beforeCommit + ".." + $upstreamCommit)))
-        foreach ($line in $incomingLines) {
-            [Console]::Out.WriteLine("  " + $line)
-        }
-    }
-
-    Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("pull", "--ff-only") | Out-Null
+    $targetCommit = Move-ToVerifiedTarget -RepositoryRoot $repositoryRoot
     $afterCommit = (@(Get-GitOutput -RepositoryRoot $repositoryRoot -ArgumentList @("rev-parse", "HEAD")))[0]
 
     $effectiveInstallDir = Get-EffectiveInstallDir
@@ -2619,7 +2855,7 @@ function Get-AutoUpgradeTaskArgumentList {
     )
 
     $scriptPath = Get-SatelliteScriptPath -RepositoryRoot $RepositoryRoot
-    return @(
+    $taskArguments = @(
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
@@ -2629,7 +2865,19 @@ function Get-AutoUpgradeTaskArgumentList {
         "-Client",
         (ConvertTo-ProcessArgument -Value $script:ClientProfile.Name),
         "-Yes"
-    ) -join " "
+    )
+    if ($RequireSigned.IsPresent) {
+        $taskArguments += "-RequireSigned"
+        if (-not [string]::IsNullOrWhiteSpace($AllowedSignersFile)) {
+            $taskArguments += @("-AllowedSignersFile", (ConvertTo-ProcessArgument -Value $AllowedSignersFile))
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Pin)) {
+        $taskArguments += @("-Pin", (ConvertTo-ProcessArgument -Value $Pin))
+    }
+
+    return $taskArguments -join " "
 }
 
 function Get-ServiceAccountIdentity {

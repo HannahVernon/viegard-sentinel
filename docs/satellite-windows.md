@@ -197,9 +197,30 @@ Run upgrade from any copy of the script in an elevated Windows PowerShell sessio
 .\deploy\windows\viegard-satellite.ps1 upgrade -Client MDaemon
 ```
 
-The upgrade command operates on the managed clone at `C:\Program Files\Viegard Satellite\repo`, creating it first when it does not exist (hosts installed before the managed clone existed migrate automatically on their next upgrade; the URL and branch come from the clone containing the running script, or from `-CloneUrl`).  It refuses to run with local git changes, fetches origin, reports incoming commits, and runs `git pull --ff-only`.  It then compares the current clone HEAD with `app\.deployed-commit` under the resolved install directory.  It stops the service, republishes the app, preserves `appsettings.Production.json` and `secrets\viegard-db-password`, restarts the service, and verifies that the service reaches `Running` with no new `Viegard.PipelineHost` Error-level Application events in the startup window when the marker is missing, differs from clone HEAD, or `-Force` is supplied.  Warning-level entries from the startup window are printed for context but do not fail the upgrade.  It exits without republishing only when the marker exists and matches clone HEAD.  Every successful publish writes the clone's full HEAD SHA to `app\.deployed-commit`.
+The upgrade command operates on the managed clone at `C:\Program Files\Viegard Satellite\repo`, creating it first when it does not exist (hosts installed before the managed clone existed migrate automatically on their next upgrade; the URL and branch come from the clone containing the running script, or from `-CloneUrl`).  It refuses to run with local git changes, fetches origin, reports incoming commits, and fast-forwards the clone to the tracked branch tip (or to `-Pin`) after the optional signature check described under "Signed updates".  It then compares the current clone HEAD with `app\.deployed-commit` under the resolved install directory.  It stops the service, republishes the app, preserves `appsettings.Production.json` and `secrets\viegard-db-password`, restarts the service, and verifies that the service reaches `Running` with no new `Viegard.PipelineHost` Error-level Application events in the startup window when the marker is missing, differs from clone HEAD, or `-Force` is supplied.  Warning-level entries from the startup window are printed for context but do not fail the upgrade.  It exits without republishing only when the marker exists and matches clone HEAD.  Every successful publish writes the clone's full HEAD SHA to `app\.deployed-commit`.
 
 Upgrade also performs a configuration merge after the preserved JSON is restored.  Missing `Viegard:Database:MaxPoolSize` is added with value `8`, and missing `Viegard:HostUpgradeAgent` keys are added from the current client profile, scheduled-task name, prompted upgrade target, and per-target state directory under `C:\ProgramData\Viegard\<target>`.  The installer-owned path values `SatelliteScriptPath` and `CloneRoot` are corrected to the managed clone when they point elsewhere; all other existing values are not overwritten.  Upgrade also repoints an existing auto-upgrade scheduled task at the managed clone's script, preserving its schedule.  If the binaries are already current but the merge changes settings, the script restarts the service so they take effect.  With `-Yes`, the upgrade target prompt accepts the lowercase machine-name default.
+
+## Signed updates
+
+Upgrade fast-forwards a mutable branch and then publishes and installs the result as `SYSTEM` (from the scheduled task) or as an elevated administrator.  Without verification, anyone who can push to that branch or intercept the clone transport controls code that runs with those rights.  When verification is off, upgrade prints `UNVERIFIED UPDATE` on every run.  The Linux host uses the same mechanism; see "Signed updates" in [deployment.md](deployment.md) for the signing key setup (D-0090).
+
+Requirements: Git for Windows 2.34 or later, and the Windows OpenSSH client (`ssh-keygen`; the optional "OpenSSH Client" Windows feature).
+
+1. Create the allowed-signers file at `C:\Program Files\Viegard Satellite\allowed_signers`, one line per trusted public key: `release@example.com ssh-ed25519 AAAAC3...`.  Obtain the key from the release maintainer out of band, not from the repository being verified.
+2. Keep it administrator-controlled.  The script refuses a file whose owner is not `SYSTEM`, `Administrators`, or `TrustedInstaller`, or that any other account may modify.  The default location inherits that protection from `Program Files`.
+3. Request verification:
+
+   ```powershell
+   .\deploy\windows\viegard-satellite.ps1 upgrade -Client MDaemon -RequireSigned
+   .\deploy\windows\viegard-satellite.ps1 upgrade -Client MDaemon -RequireSigned -Pin v1.4.0
+   .\deploy\windows\viegard-satellite.ps1 register-autoupgrade -Client MDaemon -RequireSigned
+   ```
+
+   Use `-AllowedSignersFile <path>` for another location.  `register-autoupgrade` writes `-RequireSigned`, `-AllowedSignersFile`, and `-Pin` into the scheduled task's command line; re-run it to change them.
+4. The UI-driven fallback launch (detached elevated PowerShell) passes no flags.  To cover it, the script also treats the existence of the default `allowed_signers` file as a request for verification, so creating that file is enough to protect every launch path.
+
+Behaviour: the script resolves the target commit after `git fetch`, verifies it with `git verify-commit` (or `git verify-tag` for an annotated tag named by `-Pin`), and only then moves the clone.  It fails closed: a missing or loosely protected file, a missing `ssh-keygen`, an unsigned commit, or an unlisted signer stops the command before anything is published, and the working tree is unchanged.  `-Pin` accepts a commit SHA or tag and leaves the clone on a detached HEAD; running `upgrade` without `-Pin` on a detached clone stops with a message asking you to switch it back to a tracking branch (`git switch dev` in the clone).  `install` honours the same switches.
 
 ## Scheduled auto-upgrade
 

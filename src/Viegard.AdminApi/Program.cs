@@ -147,6 +147,7 @@ builder.Services.AddSingleton<TotpService>();
 builder.Services.AddSingleton<RecoveryCodeService>();
 builder.Services.AddSingleton<AdminPasswordService>();
 builder.Services.AddSingleton<PendingTwoFactorCookie>();
+builder.Services.AddSingleton<TotpSetupCookie>();
 builder.Services.AddSingleton<RecoveryCodesCookie>();
 builder.Services.AddSingleton<NewAppPasswordCookie>();
 builder.Services.AddSingleton<WebAuthnStateCookie>();

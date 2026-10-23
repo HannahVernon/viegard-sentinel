@@ -4,6 +4,7 @@
 @inject IAdminUserStore Users
 @inject IAdminSessionStore Sessions
 @inject TotpService Totp
+@inject TotpSetupCookie SetupCookie
 @inject RecoveryCodesCookie RecoveryCodesCookie
 @inject NewAppPasswordCookie NewAppPasswordCookie
 @inject IAppPasswordStore AppPasswords
@@ -130,7 +131,6 @@
                 <pre class="secret-block">@_otpUri</pre>
                 <form method="post" action="/auth/totp/enroll">
                     <AntiforgeryToken />
-                    <input type="hidden" name="setupSecret" value="@_setupSecret" />
                     <label>
                         Verification code
                         <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
@@ -440,7 +440,7 @@
         _newAppPasswordToken = NewAppPasswordCookie.ReadAndClear(context);
         if (!_user.TotpEnrolled || _stepUpFresh)
         {
-            _setupSecret = Totp.GenerateSecret();
+            _setupSecret = SetupCookie.GetOrCreate(context, _user.Id, Totp.GenerateSecret);
             _otpUri = Totp.BuildOtpAuthUri(_user.Username, _setupSecret);
         }
     }

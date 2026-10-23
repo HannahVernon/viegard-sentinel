@@ -385,6 +385,10 @@ namespace Viegard.Persistence.Postgres.Migrations
                         .HasColumnType("text")
                         .HasColumnName("password_hash");
 
+                    b.Property<int>("SecondFactorFailedCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("second_factor_failed_count");
+
                     b.Property<bool>("TotpEnrolled")
                         .HasColumnType("boolean")
                         .HasColumnName("totp_enrolled");

@@ -281,7 +281,7 @@ chown 1654 secrets/viegard-admin-bootstrap-password
 chmod 400 secrets/viegard-admin-bootstrap-password
 ```
 
-When no `admin_users` rows exist, the admin service creates `Viegard__Admin__Bootstrap__Username` (default `admin`) from that secret.  The first login forces a password change, then TOTP enrollment with a manual base32 secret and otpauth URI.  Recovery codes are shown once after enrollment or regeneration.  Store them outside Viegard.
+When no `admin_users` rows exist, the admin service creates `Viegard__Admin__Bootstrap__Username` (default `admin`) from that secret.  The first login forces a password change, then TOTP enrollment with a manual base32 secret and otpauth URI (the server issues the secret and holds it in a short-lived protected cookie; a secret posted by the browser is ignored).  Repeated second-factor failures lock the account with a growing delay that a correct password does not reset; apply the AddSecondFactorFailedCount migration before deploying.  Recovery codes are shown once after enrollment or regeneration.  Store them outside Viegard.
 
 If the bootstrap secret is missing and no users exist, the host stays up but the UI remains locked.  Add the secret and restart the admin service.
 

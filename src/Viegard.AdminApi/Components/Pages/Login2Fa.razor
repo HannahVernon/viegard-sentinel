@@ -4,6 +4,7 @@
 @inject PendingTwoFactorCookie PendingCookie
 @inject IAdminUserStore Users
 @inject TotpService Totp
+@inject TotpSetupCookie SetupCookie
 
 <PageTitle>Second factor</PageTitle>
 
@@ -45,7 +46,6 @@
         <pre class="secret-block">@_otpUri</pre>
         <form method="post" action="/auth/totp">
             <AntiforgeryToken />
-            <input type="hidden" name="setupSecret" value="@_setupSecret" />
             <label>
                 Verification code
                 <input name="code" inputmode="numeric" autocomplete="one-time-code" required />
@@ -110,7 +110,7 @@
         _user = await Users.GetByIdAsync(userId, context.RequestAborted).ConfigureAwait(false);
         if (_user is not null && !_user.TotpEnrolled && !_user.MustChangePassword)
         {
-            _setupSecret = Totp.GenerateSecret();
+            _setupSecret = SetupCookie.GetOrCreate(context, _user.Id, Totp.GenerateSecret);
             _otpUri = Totp.BuildOtpAuthUri(_user.Username, _setupSecret);
         }
 

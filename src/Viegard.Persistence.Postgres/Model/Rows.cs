@@ -915,6 +915,8 @@ public sealed class AdminUserRow
 
     public int FailedLoginCount { get; set; }
 
+    public int SecondFactorFailedCount { get; set; }
+
     public DateTimeOffset? LockedUntil { get; set; }
 
     public bool MustChangePassword { get; set; }

@@ -139,6 +139,7 @@ public static class AdminAuthEndpoints
         PendingTwoFactorCookie pendingCookie,
         AdminPasswordService passwords,
         RecoveryCodesCookie recoveryCodesCookie,
+        TotpSetupCookie setupCookie,
         TotpService totp,
         RecoveryCodeService recoveryCodes,
         IOptions<AdminAuthOptions> options,
@@ -182,15 +183,15 @@ public static class AdminAuthEndpoints
         }
 
         var code = form["code"].ToString();
-        var setupSecret = form["setupSecret"].ToString();
         var recoveryCode = form["recoveryCode"].ToString();
         var valid = false;
         var usedRecoveryCode = false;
 
         if (!user.TotpEnrolled)
         {
+            // The pending secret lives only in the server-side setup cookie; a posted secret is ignored.
             long acceptedStep = 0;
-            valid = !string.IsNullOrWhiteSpace(setupSecret)
+            valid = setupCookie.TryRead(context, user.Id, out var setupSecret)
                 && TotpService.VerifyCode(setupSecret, code, null, DateTimeOffset.UtcNow, TotpService.RuntimeDigits, out acceptedStep);
             if (valid)
             {
@@ -211,6 +212,7 @@ public static class AdminAuthEndpoints
                     recoveryCodes.ToRows(user.Id, generatedCodes, enrolledAt),
                     context.RequestAborted).ConfigureAwait(false);
                 recoveryCodesCookie.Write(context, generatedCodes);
+                setupCookie.Clear(context);
                 await auditor.RecordAsync(AdminAuthEventKind.TotpEnrolled, user.Username, context, cancellationToken: context.RequestAborted)
                     .ConfigureAwait(false);
             }
@@ -235,16 +237,14 @@ public static class AdminAuthEndpoints
 
         if (!valid)
         {
-            // Second-factor failures count toward the same lockout as
-            // password failures; an attacker holding the password must not
-            // get an unmetered TOTP guessing budget.
-            var failedCount = user.FailedLoginCount + 1;
-            var lockedUntil = failedCount >= 10
-                ? DateTimeOffset.UtcNow.AddMinutes(Math.Min(60, Math.Pow(2, failedCount - 10)))
-                : (DateTimeOffset?)null;
+            // Second-factor failures use their own counter, which a correct
+            // password does not reset; an attacker holding the password must
+            // not get an unmetered TOTP guessing budget.
+            var secondFactorFailures = user.SecondFactorFailedCount + 1;
+            var lockedUntil = SecondFactorLockoutUntil(secondFactorFailures, DateTimeOffset.UtcNow);
             await users.UpdateAsync(user with
             {
-                FailedLoginCount = failedCount,
+                SecondFactorFailedCount = secondFactorFailures,
                 LockedUntil = lockedUntil,
             }, context.RequestAborted).ConfigureAwait(false);
 
@@ -421,6 +421,7 @@ public static class AdminAuthEndpoints
         IAdminUserStore users,
         RecoveryCodeService recoveryCodes,
         RecoveryCodesCookie recoveryCodesCookie,
+        TotpSetupCookie setupCookie,
         AdminAuthAuditor auditor)
     {
         var form = await ReadFormAsync(context, antiforgery).ConfigureAwait(false);
@@ -441,9 +442,9 @@ public static class AdminAuthEndpoints
             return Redirect("/account", error: "Step-up verification is required before changing TOTP enrollment.");
         }
 
-        var secret = form["setupSecret"].ToString();
         var code = form["code"].ToString();
-        if (!TotpService.VerifyCode(secret, code, null, DateTimeOffset.UtcNow, TotpService.RuntimeDigits, out var acceptedStep))
+        if (!setupCookie.TryRead(context, user.Id, out var secret)
+            || !TotpService.VerifyCode(secret, code, null, DateTimeOffset.UtcNow, TotpService.RuntimeDigits, out var acceptedStep))
         {
             await auditor.RecordAsync(
                 AdminAuthEventKind.TotpFailed,
@@ -468,6 +469,7 @@ public static class AdminAuthEndpoints
         await users.ReplaceRecoveryCodesAsync(user.Id, recoveryCodes.ToRows(user.Id, generatedCodes, now), context.RequestAborted)
             .ConfigureAwait(false);
         recoveryCodesCookie.Write(context, generatedCodes);
+        setupCookie.Clear(context);
         await auditor.RecordAsync(AdminAuthEventKind.TotpEnrolled, user.Username, context, cancellationToken: context.RequestAborted)
             .ConfigureAwait(false);
         return Redirect("/account", status: "TOTP enrollment updated.");
@@ -991,9 +993,9 @@ public static class AdminAuthEndpoints
         bool usedRecoveryCode,
         string redirectPath)
     {
-        if (user.FailedLoginCount > 0 || user.LockedUntil is not null)
+        if (user.FailedLoginCount > 0 || user.SecondFactorFailedCount > 0 || user.LockedUntil is not null)
         {
-            user = user with { FailedLoginCount = 0, LockedUntil = null };
+            user = user with { FailedLoginCount = 0, SecondFactorFailedCount = 0, LockedUntil = null };
             await users.UpdateAsync(user, context.RequestAborted).ConfigureAwait(false);
         }
 
@@ -1009,19 +1011,23 @@ public static class AdminAuthEndpoints
         return Results.Redirect(redirectPath);
     }
 
+    /// <summary>
+    /// Backoff for second-factor failures: none for the first four, then 1, 2, 4, ... minutes capped at 60.
+    /// </summary>
+    public static DateTimeOffset? SecondFactorLockoutUntil(int failureCount, DateTimeOffset now) =>
+        failureCount >= 5 ? now.AddMinutes(Math.Min(60, Math.Pow(2, failureCount - 5))) : null;
+
     private static async Task RecordWebAuthnFailureAsync(
         HttpContext context,
         IAdminUserStore users,
         AdminAuthAuditor auditor,
         AdminUser user)
     {
-        var failedCount = user.FailedLoginCount + 1;
-        var lockedUntil = failedCount >= 10
-            ? DateTimeOffset.UtcNow.AddMinutes(Math.Min(60, Math.Pow(2, failedCount - 10)))
-            : (DateTimeOffset?)null;
+        var secondFactorFailures = user.SecondFactorFailedCount + 1;
+        var lockedUntil = SecondFactorLockoutUntil(secondFactorFailures, DateTimeOffset.UtcNow);
         await users.UpdateAsync(user with
         {
-            FailedLoginCount = failedCount,
+            SecondFactorFailedCount = secondFactorFailures,
             LockedUntil = lockedUntil,
         }, context.RequestAborted).ConfigureAwait(false);
 

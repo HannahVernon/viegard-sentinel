@@ -13,6 +13,9 @@ public sealed record AdminUser
 
     public required int FailedLoginCount { get; init; }
 
+    /// <summary>Consecutive second-factor failures; cleared only when a full login succeeds (not by a correct password).</summary>
+    public int SecondFactorFailedCount { get; init; }
+
     public DateTimeOffset? LockedUntil { get; init; }
 
     public required bool MustChangePassword { get; init; }

@@ -32,8 +32,10 @@ services:
       - ./secrets:/run/viegard/secrets:ro
     # No published ports: only containers on this compose network reach the
     # database.  When a satellite pipeline instance on another host needs
-    # access, publish 5432 bound to the LAN interface and firewall it to
-    # that host explicitly.
+    # access, publish 5432 bound to the LAN interface, enable server TLS
+    # (ssl=on) with hostssl-only pg_hba.conf lines for viegard_sat_ roles,
+    # and add the DOCKER-USER rule that restricts 5432 to the satellite IPs.
+    # All three are REQUIRED (docs/satellite-windows.md, docs/deployment.md).
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U viegard -d viegard" ]
       interval: 10s
@@ -98,6 +100,13 @@ services:
       # file viegard-db-password, never placed here.
       Viegard__Persistence__Provider: postgres
       Viegard__Database__Host: viegard-db
+      # TLS (D-0062): the compose service name is private to the compose
+      # network, so plaintext is permitted there and the unset default is
+      # Prefer.  Any other host defaults to VerifyFull and rejects Disable,
+      # Allow, and Prefer.  To encrypt this hop too, enable ssl on the
+      # postgres container and use Require, VerifyCA, or VerifyFull with
+      # Viegard__Database__RootCertificate.
+      Viegard__Database__SslMode: Disable
       Viegard__Database__Name: viegard
       Viegard__Database__Username: viegard
       # PostgreSQL schema that holds every Viegard object (created on
@@ -134,6 +143,13 @@ services:
       Viegard__Secrets__Directory: /run/viegard/secrets
       Viegard__Persistence__Provider: postgres
       Viegard__Database__Host: viegard-db
+      # TLS (D-0062): the compose service name is private to the compose
+      # network, so plaintext is permitted there and the unset default is
+      # Prefer.  Any other host defaults to VerifyFull and rejects Disable,
+      # Allow, and Prefer.  To encrypt this hop too, enable ssl on the
+      # postgres container and use Require, VerifyCA, or VerifyFull with
+      # Viegard__Database__RootCertificate.
+      Viegard__Database__SslMode: Disable
       Viegard__Database__Name: viegard
       Viegard__Database__Username: viegard
       Viegard__Database__Schema: viegard

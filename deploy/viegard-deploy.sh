@@ -407,6 +407,11 @@ Post-install checklist (edit deploy/docker-compose.yml, then
     section of docs/deployment.md).
  5. Run the backup restore drill (docs/deployment.md section 4) once the
     first dump appears in deploy/backups/postgres/.
+ 6. Windows satellites: PostgreSQL server TLS (ssl=on, hostssl-only
+    pg_hba.conf lines for viegard_sat_ roles) and the DOCKER-USER rule that
+    restricts 5432 to the satellite IPs are REQUIRED before publishing
+    5432; satellites connect with SslMode VerifyFull.  See
+    docs/satellite-windows.md and docs/deployment.md.
 ------------------------------------------------------------------------
 CHECK
 }

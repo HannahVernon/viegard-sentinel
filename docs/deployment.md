@@ -122,7 +122,7 @@ Every Viegard object lives in a dedicated PostgreSQL schema rather than `public`
 
 The schema is applied via the connection `search_path`, so the migrations and queue SQL are schema-agnostic.  Keeping application objects out of `public` means a `pg_dump --schema=viegard` captures exactly the application state, and other tooling added to the same database later cannot collide with Viegard tables.
 
-Satellite database roles created from the admin UI use the same configured schema.  Create or rotate those roles from `/configuration#satellites`; the generated password is displayed once and is not recoverable later.
+Satellite database roles created from the admin UI use the same configured schema.  Create or rotate those roles from `/configuration#satellites`; the generated password is displayed once and is not recoverable later.  Satellite roles receive explicit per-table grants only (D-0063); roles created before that change must be re-granted with **Re-apply grants** before their satellites are upgraded (see the Upgrade ordering section of [satellite-windows.md](satellite-windows.md)).
 
 Each admin and pipeline instance reports its running build to the `instance_registry` table at startup and on a heartbeat.  The `/queues` Instances table shows the short commit SHA as Version, with the full informational version in the cell title, plus the instance start age.  Pipeline instances with a configured satellite upgrade agent also report their upgrade target, which lets **Configuration** -> **Upgrades** offer the target before any command has been sent to that satellite.  Because the Docker build context excludes `.git`, the deploy script writes the clone HEAD to a `.build-commit` file before each build and the Dockerfiles pass it to the publish as `SourceRevisionId`; a build started outside the script reports an unstamped version instead of a commit.  Registry rows not reported for 24 hours are deleted automatically by the admin service at startup and hourly, so stopped or renamed instances disappear from the Instances table after a day.
 
@@ -379,6 +379,33 @@ Notes:
 - `172.16.0.0/12` includes Docker's own container networks; allowing it means containers on this host can send syslog too.  Decide deliberately.
 - The admin port needs no rule here: it binds to `127.0.0.1` on the host and is not reachable through the Docker forward path.
 - Host services that are not Docker-published (e.g., SSH) hit `INPUT` normally; ufw or plain nftables work fine for those.
+
+## Firewalling and securing PostgreSQL for satellites
+
+PostgreSQL has no published port by default.  When Windows satellites need it (D-0025), three controls are **required** before `5432/tcp` is published; none is optional:
+
+1. **Firewall.**  Docker bypasses the host firewall for published ports, so restrict `5432/tcp` in the `DOCKER-USER` chain to the satellite addresses (and any administration workstations), with the drop rule last:
+
+   ```bash
+   sudo iptables -I DOCKER-USER 1 -p tcp --dport 5432 -s 192.0.2.21 -j RETURN
+   sudo iptables -I DOCKER-USER 2 -p tcp --dport 5432 -s 192.0.2.22 -j RETURN
+   sudo iptables -I DOCKER-USER 3 -p tcp --dport 5432 -j DROP
+   sudo netfilter-persistent save
+   ```
+
+2. **Server TLS.**  Set `ssl = on` with `ssl_cert_file` and `ssl_key_file` on the PostgreSQL server, using a certificate whose name matches what the satellites connect to.  Satellites connect with `SslMode` `VerifyFull` (D-0062).
+3. **`hostssl`-only `pg_hba.conf` lines for satellite roles.**  Allow each `viegard_sat_` role with `hostssl ... scram-sha-256` from its own address and add a `hostnossl ... reject` line for the same role.  Do not add `host` (any-transport) lines for satellite roles.
+
+The full procedure, the `pg_hba.conf` lines, and the satellite-side installer options are in [satellite-windows.md](satellite-windows.md).
+
+### Database connection TLS settings
+
+Setting | Default | Meaning
+--------|---------|--------
+`Viegard__Database__SslMode` | unset | One of `Disable`, `Allow`, `Prefer`, `Require`, `VerifyCA`, `VerifyFull`.  When unset: `Prefer` for loopback hosts and the compose service name `viegard-db`, otherwise `VerifyFull`.  `Disable`, `Allow`, and `Prefer` are rejected at startup for any other host.
+`Viegard__Database__RootCertificate` | unset | Path to a PEM root certificate used to validate the server certificate.  Requires `VerifyCA` or `VerifyFull`.
+
+The default Docker Compose example sets `Viegard__Database__SslMode: Disable` on the pipeline and admin containers, because they reach the `viegard-db` container over the private compose network and the traffic does not leave the host.  If you point the pipeline or admin at a database on another host, remove that line (or choose `VerifyFull`), enable server TLS, and set `Viegard__Database__RootCertificate` when the server certificate does not chain to a root the container trusts.  The unset default fails closed: a remote host without TLS or a matching certificate cannot connect.
 
 ## Operational notes
 

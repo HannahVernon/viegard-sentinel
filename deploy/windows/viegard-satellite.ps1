@@ -44,6 +44,12 @@ The PostgreSQL password as a SecureString.  It is written only to the local secr
 .PARAMETER PostgresSchema
 The PostgreSQL schema containing Viegard objects.
 
+.PARAMETER PostgresSslMode
+TLS mode for the PostgreSQL connection: Require, VerifyCA, or VerifyFull (default).  VerifyFull needs a server certificate whose name matches PostgresHost.
+
+.PARAMETER PostgresRootCertificate
+Optional path of a PEM root certificate that signed the PostgreSQL server certificate.  Requires VerifyCA or VerifyFull.
+
 .PARAMETER InstanceId
 The required unique Viegard host instance id for this MDaemon host.
 
@@ -104,6 +110,11 @@ param(
     [securestring]$PostgresPassword,
 
     [string]$PostgresSchema = "viegard",
+
+    [ValidateSet("Require", "VerifyCA", "VerifyFull")]
+    [string]$PostgresSslMode = "VerifyFull",
+
+    [string]$PostgresRootCertificate,
 
     [string]$InstanceId,
 
@@ -1448,6 +1459,7 @@ function New-SatelliteConfigurationJson {
                 Username = $InstallerConfig.PostgresUsername
                 Schema = $InstallerConfig.PostgresSchema
                 PasswordSecretName = $script:DatabasePasswordSecretName
+                SslMode = $InstallerConfig.PostgresSslMode
                 AutoMigrate = $false
                 # Satellite database roles carry CONNECTION LIMIT 16; cap the
                 # Npgsql pool well inside it, leaving headroom for the
@@ -1456,6 +1468,10 @@ function New-SatelliteConfigurationJson {
             }
             Sources = $sourcesConfiguration
         }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($InstallerConfig.PostgresRootCertificate)) {
+        $configuration.Viegard.Database.RootCertificate = $InstallerConfig.PostgresRootCertificate
     }
 
     return ($configuration | ConvertTo-Json -Depth 20)
@@ -2247,6 +2263,22 @@ function Get-InstallConfiguration {
         $databaseUsername = Read-TextValue -Prompt "PostgreSQL username"
     }
 
+    # TLS is required for satellite connections (D-0062).  VerifyFull needs a
+    # server certificate whose name matches PostgresHost and that chains to a
+    # root trusted by this host or supplied through PostgresRootCertificate.
+    $databaseRootCertificate = $null
+    if (Test-ParameterProvided -Name "PostgresRootCertificate") {
+        if ([string]::IsNullOrWhiteSpace($PostgresRootCertificate) -or -not (Test-Path -LiteralPath $PostgresRootCertificate -PathType Leaf)) {
+            Stop-WithMessage "PostgresRootCertificate must be the path of an existing PEM root certificate file."
+        }
+
+        if ($PostgresSslMode -eq "Require") {
+            Stop-WithMessage "PostgresRootCertificate requires PostgresSslMode VerifyCA or VerifyFull."
+        }
+
+        $databaseRootCertificate = (Resolve-Path -LiteralPath $PostgresRootCertificate).ProviderPath
+    }
+
     $databasePassword = $null
     if (Test-Path -LiteralPath $passwordFile -PathType Leaf) {
         Write-InfoLine "Existing database password secret will be kept: $passwordFile"
@@ -2310,6 +2342,8 @@ function Get-InstallConfiguration {
         PostgresDatabase = $databaseName
         PostgresUsername = $databaseUsername
         PostgresSchema = $databaseSchema
+        PostgresSslMode = $PostgresSslMode
+        PostgresRootCertificate = $databaseRootCertificate
         PostgresPassword = $databasePassword
         InstanceId = $hostInstanceId
         HostUpgradeTarget = $upgradeTarget

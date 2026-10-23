@@ -13,6 +13,7 @@ namespace Viegard.Application.Doh;
 public static class DohCanaryProbe
 {
     public const string DnsMessageMediaType = "application/dns-message";
+    public const int MaxResponseBytes = 16 * 1024;
     private const ushort DnsTypeTxt = 16;
     private const ushort DnsClassIn = 1;
 
@@ -20,7 +21,12 @@ public static class DohCanaryProbe
     /// Probes <paramref name="address"/> over HTTPS at the configured DoH path.
     /// Certificate validation is delegated to the supplied <paramref name="client"/>
     /// (probing by IP means the presented certificate will not match the IP, so the
-    /// probe client is configured to tolerate that; the canary token is public).
+    /// probe client is configured to tolerate that; the canary token is public and
+    /// the response is discarded after the token check, which is the only reason
+    /// skipping validation is acceptable).  Destinations that are not publicly
+    /// routable (see <see cref="DohProbeDestination"/>) are refused without a request,
+    /// at most <see cref="MaxResponseBytes"/> of the body are read, and the client must
+    /// not follow redirects.
     /// </summary>
     /// <remarks>
     /// A resolver probed by IP often rejects the default POST-over-HTTP/2 request
@@ -43,6 +49,11 @@ public static class DohCanaryProbe
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(client);
+
+        if (!DohProbeDestination.IsAllowed(address, null))
+        {
+            return new DohProbeOutcome(DohProbeStatus.Refused, null, false);
+        }
 
         if (!TryBuildTxtQuery(canaryFqdn, out var query, out _))
         {
@@ -143,7 +154,7 @@ public static class DohCanaryProbe
             }
 
             using var response = await client
-                .SendAsync(request, HttpCompletionOption.ResponseContentRead, timeoutCts.Token)
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token)
                 .ConfigureAwait(false);
 
             var httpStatus = (int)response.StatusCode;
@@ -153,7 +164,7 @@ public static class DohCanaryProbe
             }
 
             var mediaType = response.Content.Headers.ContentType?.MediaType;
-            var body = await response.Content.ReadAsByteArrayAsync(timeoutCts.Token).ConfigureAwait(false);
+            var body = await ReadCappedAsync(response.Content, timeoutCts.Token).ConfigureAwait(false);
             var isDnsMessage = string.Equals(mediaType, DnsMessageMediaType, StringComparison.OrdinalIgnoreCase);
             var tokenMatched = ContainsToken(body, expectedToken);
 
@@ -173,6 +184,27 @@ public static class DohCanaryProbe
         {
             return new DohProbeOutcome(DohProbeStatus.Refused, null, false);
         }
+    }
+
+    // The body is discarded after the token check, so a truncated read is enough:
+    // a DNS answer carrying a short token fits well inside the cap.
+    private static async Task<byte[]> ReadCappedAsync(HttpContent content, CancellationToken cancellationToken)
+    {
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        var buffer = new byte[MaxResponseBytes];
+        var total = 0;
+        while (total < buffer.Length)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(total), cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+        }
+
+        return buffer.AsSpan(0, total).ToArray();
     }
 
     // Reports which non-confirming outcome is most informative for the router

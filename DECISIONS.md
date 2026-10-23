@@ -593,3 +593,11 @@ Decisions are never rewritten.  If a later change invalidates an earlier decisio
 - **Alternatives considered:** pinning the default to a commit SHA (rejected: cannot be verified here); changing the shared `HttpClient` (rejected: the Ollama provider also uses it and may legitimately use http).
 - **Consequences:** Existing stored feed settings with an http URL now fail validation and must be changed to https.  Oversized or slow responses fail the fetch cycle without touching stored content.
 - **Approval:** Implementation detail chosen while remediating pen-test findings at the project owner's request.
+
+## D-0082: DoH canary probe destination and response limits
+
+- **Date:** 2026-10-23
+- **Decision:** The probe client keeps certificate validation disabled, because it probes by IP and the response is discarded after a public-token check, but the probe no longer contacts arbitrary feed-supplied destinations.  `DohProbeDestination.IsAllowed` refuses non-IP values, CIDRs, loopback, unspecified, RFC 1918, link-local, CGNAT, multicast, IPv6 link-local, unique-local and multicast addresses, and anything in `ProtectedAddressList`; `DohProbeWorker` filters targets with it and `DohCanaryProbe.ProbeAsync` refuses them without sending a request.  The probe client sets `AllowAutoRedirect=false` and the body read is capped at 16 KiB (`DohCanaryProbe.MaxResponseBytes`).
+- **Alternatives considered:** pinning probe certificates (rejected: no key is known for a resolver reached by IP); removing the probe (rejected: it feeds the operator-visible confirmation state).
+- **Consequences:** A poisoned feed cannot make the probe send requests to internal services.  Skipped addresses are not probed and keep no probe result row.  A feed address inside the protected list is also filtered from reconciliation (D-0080).
+- **Approval:** Implementation detail chosen while remediating pen-test findings at the project owner's request.

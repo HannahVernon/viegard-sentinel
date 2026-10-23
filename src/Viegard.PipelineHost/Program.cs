@@ -420,6 +420,7 @@ if (configuredRoles.Contains(RoleNames.Actions, StringComparer.OrdinalIgnoreCase
     builder.Services.AddHostedService<JetPackReconciliationWorker>();
     builder.Services.AddSingleton(new DohProbeHttpClient(new HttpClient(new HttpClientHandler
     {
+        AllowAutoRedirect = false,
         ServerCertificateCustomValidationCallback = static (_, _, _, _) => true,
     })));
     builder.Services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, DohBlocklistSettingsRefreshWorker>());

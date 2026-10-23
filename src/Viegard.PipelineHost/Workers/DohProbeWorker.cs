@@ -6,8 +6,9 @@ namespace Viegard.PipelineHost.Workers;
 /// <summary>
 /// Wraps the dedicated HTTPS client used for canary DoH probes.  Because probes
 /// target resolvers by IP, the presented certificate will not match the IP, so
-/// this client tolerates certificate mismatches.  The canary token is public, so
-/// no secret is exposed by the relaxed validation.
+/// this client tolerates certificate mismatches.  The canary token is public and
+/// <see cref="DohCanaryProbe"/> discards the response after the token check, so
+/// no secret is exposed or trusted.  Redirects are disabled.
 /// </summary>
 public sealed class DohProbeHttpClient(HttpClient client)
 {
@@ -25,6 +26,7 @@ public sealed class DohProbeWorker(
     IDohProbeResultStore probeResults,
     IDohProbeSummaryStore probeSummaries,
     DohProbeHttpClient probeClient,
+    Viegard.Application.Policy.ProtectedAddressList protectedList,
     IDohProbeTrigger probeTrigger,
     IOptions<DohBlocklistOptions> options,
     TimeProvider timeProvider,
@@ -73,7 +75,15 @@ public sealed class DohProbeWorker(
         var probeTargets = desired
             .Where(item => !item.Address.Contains('/', StringComparison.Ordinal))
             .Select(item => item.Address)
+            .Where(address => DohProbeDestination.IsAllowed(address, protectedList))
             .ToList();
+        var skipped = desired.Count(item => !item.Address.Contains('/', StringComparison.Ordinal)) - probeTargets.Count;
+        if (skipped > 0)
+        {
+            logger.LogWarning(
+                "DoH probe skipped {Skipped} feed address(es) that are loopback, private, link-local, CGNAT, multicast, or protected.",
+                skipped);
+        }
 
         var confirmed = 0;
         var failed = 0;

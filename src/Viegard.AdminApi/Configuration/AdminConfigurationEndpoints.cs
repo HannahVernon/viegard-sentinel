@@ -855,7 +855,7 @@ public static class AdminConfigurationEndpoints
         string passwordCiphertext;
         try
         {
-            passwordCiphertext = protector.Protect(router.Id, password!);
+            passwordCiphertext = protector.Protect(router, password!);
         }
         catch (RouterCredentialProtectionException ex)
         {
@@ -910,12 +910,22 @@ public static class AdminConfigurationEndpoints
             return Redirect(RouterEditPath(id), error: error);
         }
 
+        var credentialTargetChanged = !string.Equals(before.BaseUrl, router.BaseUrl, StringComparison.Ordinal)
+            || !string.Equals(before.Username, router.Username, StringComparison.Ordinal)
+            || before.TransportMode != router.TransportMode;
+        if (password is null && credentialTargetChanged)
+        {
+            return Redirect(
+                RouterEditPath(id),
+                error: "Changing the base URL, username, or transport mode requires re-entering the router password, because the stored credential is bound to those values.");
+        }
+
         string? passwordCiphertext = null;
         if (password is not null)
         {
             try
             {
-                passwordCiphertext = protector.Protect(router.Id, password);
+                passwordCiphertext = protector.Protect(router, password);
             }
             catch (RouterCredentialProtectionException ex)
             {

@@ -291,6 +291,22 @@ public sealed class AdminConfigurationEndpointsTests
     }
 
     [Fact]
+    public async Task Update_router_changing_base_url_without_password_is_rejected()
+    {
+        var fixture = await EndpointFixture.CreateAsync(freshStepUp: true);
+        var created = await fixture.Routers.CreateAsync(Router("router-a"), "cipher-existing");
+        var repointed = created.Router! with { BaseUrl = "http://198.51.100.77" };
+        fixture.Context.Request.Form = RouterUpdateForm(repointed, password: "");
+
+        var result = await fixture.InvokeUpdateRouterAsync();
+        var location = await ExecuteRedirectAsync(result, fixture.Context);
+
+        Assert.Contains("requires%20re-entering%20the%20router%20password", location, StringComparison.Ordinal);
+        var stored = await fixture.Routers.GetAsync(created.Router!.Id);
+        Assert.Equal(created.Router.BaseUrl, stored!.BaseUrl);
+    }
+
+    [Fact]
     public async Task Request_host_upgrade_requires_step_up_before_mutating()
     {
         var fixture = await EndpointFixture.CreateAsync(freshStepUp: false);
@@ -1963,12 +1979,14 @@ public sealed class AdminConfigurationEndpointsTests
 
     private sealed class PlainRouterCredentialProtector : IRouterCredentialProtector
     {
-        public string Protect(Guid routerId, string password) =>
-            $"protected:{routerId:N}:{password}";
+        public string Protect(MikroTikRouter router, string password) =>
+            $"protected:{router.Id:N}:{router.BaseUrl}:{router.Username}:{router.TransportMode}:{password}";
 
-        public string Unprotect(Guid routerId, string ciphertext)
+        public bool IsLegacyFormat(string ciphertext) => false;
+
+        public string Unprotect(MikroTikRouter router, string ciphertext)
         {
-            var prefix = $"protected:{routerId:N}:";
+            var prefix = $"protected:{router.Id:N}:{router.BaseUrl}:{router.Username}:{router.TransportMode}:";
             if (!ciphertext.StartsWith(prefix, StringComparison.Ordinal))
             {
                 throw new RouterCredentialProtectionException("Router credential ciphertext could not be authenticated for this router.");

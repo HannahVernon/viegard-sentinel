@@ -333,6 +333,7 @@ switch (persistenceProvider)
 builder.Services.AddHostedService<AdminInstanceRegistrationService>();
 builder.Services.AddHostedService<AdminLocalModelAdvisorRefreshWorker>();
 builder.Services.AddHostedService<AdminSessionSecurityRefreshWorker>();
+builder.Services.AddHostedService<Viegard.AdminApi.Configuration.RouterCredentialReprotectService>();
 
 var app = builder.Build();
 

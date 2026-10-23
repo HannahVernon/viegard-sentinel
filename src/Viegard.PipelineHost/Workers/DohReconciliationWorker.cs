@@ -248,7 +248,7 @@ public sealed class DohReconciliationWorker(
         byte[] authBytes = [];
         try
         {
-            var password = credentialProtector.Unprotect(savedRouter.Id, ciphertext);
+            var password = credentialProtector.Unprotect(savedRouter, ciphertext);
             authBytes = Encoding.UTF8.GetBytes($"{savedRouter.Username}:{password}");
             string[] sensitiveValues = [savedRouter.Username, password];
 

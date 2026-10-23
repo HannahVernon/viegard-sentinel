@@ -39,7 +39,7 @@ public sealed class RouterConnectivityTester(IRouterCredentialProtector protecto
         byte[] authBytes = [];
         try
         {
-            var password = protector.Unprotect(normalized.Id, passwordCiphertext);
+            var password = protector.Unprotect(normalized, passwordCiphertext);
             authBytes = Encoding.UTF8.GetBytes($"{normalized.Username}:{password}");
             using var request = new HttpRequestMessage(
                 HttpMethod.Get,

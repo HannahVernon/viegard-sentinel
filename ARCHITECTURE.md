@@ -230,7 +230,7 @@ Interface | Metaphor | Contract summary
 `IActiveBanStore` | Roost | PostgreSQL-owned desired state for active MikroTik bans.  One row per canonical IP records expiry, decision id, and action id; the actions-role reconciler converges routers to this table.
 `ISatelliteRoleStore` | Roost | Lists, creates, rotates, and revokes per-satellite PostgreSQL roles behind the admin UI.  Role names use the enforced `viegard_sat_` prefix; generated passwords are shown once and are never audited.
 `IMikroTikRouterStore` | Roost | Lists, creates, updates, enables, disables, and deletes UI-managed MikroTik router registry entries.  Per-router passwords are stored only as AES-256-GCM ciphertext and are never returned on router records.
-`IRouterCredentialProtector` | Roost | Encrypts and decrypts per-router credentials with AES-256-GCM using `viegard-router-credentials-key`; router id AAD prevents ciphertext transplant between rows.
+`IRouterCredentialProtector` | Roost | Encrypts and decrypts per-router credentials with AES-256-GCM using `viegard-router-credentials-key`; the AAD binds router id, normalized base URL, username, and transport mode (D-0070), so ciphertext cannot be transplanted between rows or kept after a row is repointed.  Legacy id-only ciphertext is read and upgraded at admin startup.
 `IHostUpgradeCommandStore` | Roost | Fixed-verb host upgrade request port with per-target single-flight, 10-minute cooldown, recent history, atomic claim, and completion status.
 `ISecretProvider` | Roost | Named secret retrieval; file-mounted (prod) and user-secrets (dev) implementations
 `IHealthContributor` | - | Per-component health surfaced by both hosts

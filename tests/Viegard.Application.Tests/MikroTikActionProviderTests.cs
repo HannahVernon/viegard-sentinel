@@ -530,9 +530,11 @@ internal sealed class RecordingCredentialProtector : IRouterCredentialProtector
 {
     public int UnprotectCalls { get; private set; }
 
-    public string Protect(Guid routerId, string password) => password;
+    public string Protect(MikroTikRouter router, string password) => password;
 
-    public string Unprotect(Guid routerId, string ciphertext)
+    public bool IsLegacyFormat(string ciphertext) => false;
+
+    public string Unprotect(MikroTikRouter router, string ciphertext)
     {
         UnprotectCalls++;
         return ciphertext;

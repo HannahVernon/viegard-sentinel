@@ -142,54 +142,119 @@ public sealed class MikroTikRouterValidationTests
 
 public sealed class AesGcmRouterCredentialProtectorTests
 {
+    private static readonly byte[] TestKey = RandomNumberGenerator.GetBytes(32);
+
     [Fact]
     public void Round_trip_returns_original_password_and_randomizes_ciphertext()
     {
         var protector = Protector();
-        var routerId = ViegardId.New();
+        var router = Router();
 
-        var first = protector.Protect(routerId, "router-secret");
-        var second = protector.Protect(routerId, "router-secret");
+        var first = protector.Protect(router, "router-secret");
+        var second = protector.Protect(router, "router-secret");
 
         Assert.NotEqual(first, second);
-        Assert.Equal("router-secret", protector.Unprotect(routerId, first));
-        Assert.Equal("router-secret", protector.Unprotect(routerId, second));
+        Assert.False(protector.IsLegacyFormat(first));
+        Assert.Equal("router-secret", protector.Unprotect(router, first));
+        Assert.Equal("router-secret", protector.Unprotect(router, second));
     }
 
     [Fact]
     public void Tampered_payload_is_rejected()
     {
         var protector = Protector();
-        var routerId = ViegardId.New();
-        var payload = Convert.FromBase64String(protector.Protect(routerId, "router-secret"));
+        var router = Router();
+        var payload = Convert.FromBase64String(protector.Protect(router, "router-secret"));
         payload[^1] ^= 0x01;
 
         var ex = Assert.Throws<RouterCredentialProtectionException>(() =>
-            protector.Unprotect(routerId, Convert.ToBase64String(payload)));
+            protector.Unprotect(router, Convert.ToBase64String(payload)));
         Assert.Contains("could not be authenticated", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Wrong_router_id_aad_is_rejected()
+    public void Wrong_router_id_is_rejected()
     {
         var protector = Protector();
-        var ciphertext = protector.Protect(ViegardId.New(), "router-secret");
+        var ciphertext = protector.Protect(Router(), "router-secret");
 
         var ex = Assert.Throws<RouterCredentialProtectionException>(() =>
-            protector.Unprotect(ViegardId.New(), ciphertext));
+            protector.Unprotect(Router(), ciphertext));
         Assert.Contains("could not be authenticated", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("baseUrl")]
+    [InlineData("username")]
+    [InlineData("transport")]
+    public void Changing_a_bound_field_fails_closed_with_a_non_secret_error(string field)
+    {
+        var protector = Protector();
+        var router = Router();
+        var ciphertext = protector.Protect(router, "router-secret");
+        var changed = field switch
+        {
+            "baseUrl" => router with { BaseUrl = "http://198.51.100.9" },
+            "username" => router with { Username = "someone-else" },
+            _ => router with { TransportMode = MikroTikRouterTransportMode.HttpsTrustAny, BaseUrl = "https://192.0.2.10" },
+        };
+
+        var ex = Assert.Throws<RouterCredentialProtectionException>(() => protector.Unprotect(changed, ciphertext));
+        Assert.Contains("could not be authenticated", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("router-secret", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("router-secret", protector.Unprotect(router, ciphertext));
+    }
+
+    [Fact]
+    public void Equivalent_base_url_spellings_use_the_same_binding()
+    {
+        var protector = Protector();
+        var router = Router();
+        var ciphertext = protector.Protect(router, "router-secret");
+
+        Assert.Equal("router-secret", protector.Unprotect(router with { BaseUrl = " " + router.BaseUrl + " " }, ciphertext));
+    }
+
+    [Fact]
+    public void Legacy_id_only_ciphertext_is_still_readable_and_reported_as_legacy()
+    {
+        var protector = Protector();
+        var router = Router();
+        var legacy = LegacyCiphertext(router.Id, "router-secret");
+
+        Assert.True(protector.IsLegacyFormat(legacy));
+        Assert.Equal("router-secret", protector.Unprotect(router, legacy));
+        Assert.Throws<RouterCredentialProtectionException>(() => protector.Unprotect(Router(), legacy));
+    }
+
+    [Fact]
+    public async Task Reprotector_upgrades_legacy_rows_once_and_keeps_the_password()
+    {
+        var protector = Protector();
+        var store = new InMemoryMikroTikRouterStore();
+        var router = Router();
+        var saved = await store.CreateAsync(router, LegacyCiphertext(router.Id, "router-secret"));
+
+        var first = await RouterCredentialReprotector.RunAsync(store, protector);
+        var second = await RouterCredentialReprotector.RunAsync(store, protector);
+
+        var stored = await store.GetCredentialCiphertextAsync(router.Id);
+        Assert.Equal(1, first.Reprotected);
+        Assert.Equal(0, second.Reprotected);
+        Assert.False(protector.IsLegacyFormat(stored!));
+        Assert.Equal("router-secret", protector.Unprotect(saved.Router!, stored!));
     }
 
     [Fact]
     public void Unsupported_version_byte_is_rejected()
     {
         var protector = Protector();
-        var routerId = ViegardId.New();
-        var payload = Convert.FromBase64String(protector.Protect(routerId, "router-secret"));
-        payload[0] = 0x02;
+        var router = Router();
+        var payload = Convert.FromBase64String(protector.Protect(router, "router-secret"));
+        payload[0] = 0x7F;
 
         var ex = Assert.Throws<RouterCredentialProtectionException>(() =>
-            protector.Unprotect(routerId, Convert.ToBase64String(payload)));
+            protector.Unprotect(router, Convert.ToBase64String(payload)));
         Assert.Contains("version", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -201,14 +266,42 @@ public sealed class AesGcmRouterCredentialProtectorTests
         var protector = Protector(keyValue);
 
         var ex = Assert.Throws<RouterCredentialProtectionException>(() =>
-            protector.Protect(ViegardId.New(), "router-secret"));
+            protector.Protect(Router(), "router-secret"));
         Assert.Contains(AesGcmRouterCredentialProtector.SecretName, ex.Message, StringComparison.Ordinal);
         Assert.Contains("exactly 32 random bytes", ex.Message, StringComparison.Ordinal);
     }
 
-    private static IRouterCredentialProtector Protector(string? keyValue = null)
+    private static MikroTikRouter Router() => new()
     {
-        var key = keyValue ?? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        Id = ViegardId.New(),
+        Name = "border-1",
+        BaseUrl = "http://192.0.2.1",
+        TransportMode = MikroTikRouterTransportMode.PlainHttp,
+        Username = "viegard",
+        Enabled = true,
+        CreatedAt = DateTimeOffset.UnixEpoch,
+        UpdatedAt = DateTimeOffset.UnixEpoch,
+        UpdatedBy = "test",
+        RowVersion = 1,
+    };
+
+    private static string LegacyCiphertext(Guid routerId, string password)
+    {
+        var nonce = RandomNumberGenerator.GetBytes(12);
+        var plaintext = System.Text.Encoding.UTF8.GetBytes(password);
+        var encrypted = new byte[plaintext.Length];
+        var tag = new byte[16];
+        using (var aes = new AesGcm(TestKey, 16))
+        {
+            aes.Encrypt(nonce, plaintext, encrypted, tag, System.Text.Encoding.UTF8.GetBytes(routerId.ToString("N")));
+        }
+
+        return Convert.ToBase64String([0x01, .. nonce, .. encrypted, .. tag]);
+    }
+
+    private static AesGcmRouterCredentialProtector Protector(string? keyValue = null)
+    {
+        var key = keyValue ?? Convert.ToBase64String(TestKey);
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -221,7 +314,6 @@ public sealed class AesGcmRouterCredentialProtectorTests
         return new AesGcmRouterCredentialProtector(new ConfigurationSecretProvider(configuration));
     }
 }
-
 public sealed class InMemoryMikroTikRouterStoreTests
 {
     [Fact]

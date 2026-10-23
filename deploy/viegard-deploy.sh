@@ -802,6 +802,25 @@ validate_agent_deploy_dir() {
     [ -f "$deploy_dir/viegard-host-agent.sh" ] || die "viegard-host-agent.sh not found in agent DEPLOY_DIR: $deploy_dir"
 }
 
+# The unit sets ProtectHome=yes (D-0091), which hides /home, /root and
+# /run/user.  A deployment root under one of those needs a drop-in that turns
+# it off; otherwise the drop-in is removed so a moved deployment is re-protected.
+configure_agent_home_protection() {
+    local deploy_dir="$1" dropin_dir=/etc/systemd/system/viegard-host-agent.service.d
+    case "$deploy_dir:$DIR" in
+        /home/*|/root/*|/run/user/*|*:/home/*|*:/root/*|*:/run/user/*)
+            warn "Deployment path is under /home, /root or /run/user; disabling ProtectHome for the agent via a drop-in.  Prefer a root under /opt."
+            mkdir -p "$dropin_dir"
+            printf '[Service]\nProtectHome=no\n' > "$dropin_dir/10-protect-home.conf"
+            chmod 644 "$dropin_dir/10-protect-home.conf"
+            ;;
+        *)
+            rm -f "$dropin_dir/10-protect-home.conf"
+            rmdir "$dropin_dir" 2>/dev/null || true
+            ;;
+    esac
+}
+
 cmd_install_agent() {
     require_root
     local default_deploy_dir deploy_dir target schema poll_seconds conf tmp_conf unit_src unit_dest
@@ -836,6 +855,7 @@ cmd_install_agent() {
 
     cp "$unit_src" "$unit_dest"
     chmod 644 "$unit_dest"
+    configure_agent_home_protection "$deploy_dir"
     chmod 755 "$deploy_dir/viegard-host-agent.sh"
     systemctl daemon-reload
     systemctl enable viegard-host-agent.service >/dev/null

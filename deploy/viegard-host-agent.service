@@ -10,5 +10,46 @@ ExecStart=/bin/bash -c 'exec "$DEPLOY_DIR/viegard-host-agent.sh"'
 Restart=on-failure
 RestartSec=10s
 
+# Sandboxing (D-0091).  The agent runs as root because it runs docker compose
+# and viegard-deploy.sh, so these directives limit what a compromise of the
+# agent or of a script it runs can reach on the host.  Docker access is
+# unchanged: the docker CLI talks to /run/docker.sock and the daemon, not this
+# unit, performs the privileged container work.
+
+# A child process (git, docker, ssh-keygen) cannot gain privileges through
+# setuid binaries or file capabilities.  The agent never needs to.
+NoNewPrivileges=yes
+
+# Private /tmp and /var/tmp, so scratch files from the script and from docker
+# build tooling are not visible to or tamperable by other host processes.
+PrivateTmp=yes
+
+# Makes /home, /root and /run/user unreachable.  The default deployment root is
+# /opt/viegard-sentinel, so nothing the upgrade needs lives there.  The docker
+# CLI would otherwise keep its client state in /root/.docker, so it is pointed
+# at a private state directory instead.  install-agent writes a drop-in that
+# sets ProtectHome=no when the deploy directory is under /home.
+ProtectHome=yes
+StateDirectory=viegard-host-agent
+Environment=DOCKER_CONFIG=/var/lib/viegard-host-agent/docker
+
+# /proc/sys, /sys and the cgroup tree become read-only, and kernel modules
+# cannot be loaded.  The docker CLI only talks to the daemon over its socket.
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+# Blocks creating setuid or setgid files, which the upgrade never does.
+RestrictSUIDSGID=yes
+
+# Blocks changing the execution domain (personality), which nothing here uses.
+LockPersonality=yes
+
+# Deliberately not restricted.  The unit does not create namespaces itself
+# (the docker daemon does), but docker build and compose helpers may call
+# unshare, and a restriction here would be a silent, hard-to-diagnose failure.
+# Stated explicitly so a future reader does not "fix" it.
+RestrictNamespaces=no
+
 [Install]
 WantedBy=multi-user.target

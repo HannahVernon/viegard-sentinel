@@ -80,6 +80,29 @@ POLL_SECONDS=30
 
 Do not store database credentials in this file.  The agent runs `psql` through the `viegard-db` container with `docker compose exec`, so it uses the local database container context rather than a separate password.  If your deployment root is not `/opt/viegard-sentinel`, pass `--dir <root>` or `--agent-deploy-dir <root>/deploy` to `install-agent`.
 
+### Host agent sandboxing
+
+The agent runs as root because it runs `docker compose` and `viegard-deploy.sh`.  `deploy/viegard-host-agent.service` therefore applies systemd sandboxing (D-0091) that limits what a compromise of the agent, or of code it builds, can reach without removing Docker access:
+
+Directive | Effect and reason
+----------|------------------
+`NoNewPrivileges=yes` | Child processes cannot gain privileges through setuid binaries or file capabilities.  The agent already runs as root.
+`PrivateTmp=yes` | Private `/tmp` and `/var/tmp` for the agent and its children.
+`ProtectHome=yes` | `/home`, `/root` and `/run/user` are inaccessible.  The default deployment root is under `/opt`.  Because the docker CLI keeps client state in `$HOME/.docker`, the unit sets `DOCKER_CONFIG=/var/lib/viegard-host-agent/docker` (created through `StateDirectory=`).  If the deployment root is under `/home`, `/root` or `/run/user`, `install-agent` writes a drop-in `/etc/systemd/system/viegard-host-agent.service.d/10-protect-home.conf` that sets `ProtectHome=no`; a root under `/opt` removes it.
+`ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectControlGroups=yes` | `/proc/sys`, `/sys` and the cgroup tree are read-only and kernel modules cannot be loaded.  The docker CLI only uses the daemon's socket.
+`RestrictSUIDSGID=yes` | The agent and its children cannot create setuid or setgid files.
+`LockPersonality=yes` | The execution domain cannot be changed.
+
+Directives deliberately omitted:
+
+- `RestrictNamespaces`: set to `no` and left that way.  Docker build and compose helpers may need to create namespaces, and a restriction fails in ways that are hard to diagnose.
+- `ProtectSystem=strict` (or `full`): the deploy script writes `.build-commit` and `.deployed-commit`, runs `git` in the clone, edits `deploy/.env` and the generated compose file, and `ensure_router_credentials_key_secret` creates and chowns a secret file.  Because the deployment root is configurable, a correct `ReadWritePaths=` list cannot be shipped in a fixed unit.  A site with a fixed root can add `ProtectSystem=strict` and `ReadWritePaths=` in a drop-in after testing.
+- `PrivateDevices`, `PrivateNetwork`, `IPAddressDeny=`, `RestrictAddressFamilies=`: the agent needs the Docker socket and, for `git fetch`, network access; address-family limits would need testing against the Docker CLI and `ssh-keygen` on each host.
+- `MemoryDenyWriteExecute`, `SystemCallFilter=`: not tried; the Docker CLI is a Go binary and a syscall allow-list needs per-host testing.
+- `User=`: not applicable; the agent needs root for the Docker socket and for chown of secrets.
+
+These directives were validated with `systemd-analyze verify` only.  They have not been run against a live Docker host; after `install-agent`, confirm with `systemctl status viegard-host-agent` and a test upgrade request, and check `journalctl -u viegard-host-agent` for permission errors.  Running `systemd-analyze security viegard-host-agent` shows the remaining exposure score.
+
 Operators request a host upgrade from **Configuration** -> **Upgrades** after step-up verification.  The page lists known targets from `vm`, registered satellite upgrade agents, and command history, and it accepts a validated new target for a newly configured satellite.  It shows recent command history across all targets, status, and the captured tail of the script output with terminal color sequences removed.  The command table refreshes itself in place on the operator's configured status-refresh interval, so a running upgrade's status, start and finish times, and output detail appear without a manual page reload.  While the VM upgrade runs, the admin UI may briefly disconnect because its own container is rebuilt and restarted; the refresher tolerates this and resumes on the next tick.  If no agent is installed or running for the chosen target, the command stays Pending; the UI flags Pending requests older than a few minutes so the operator can check the service.
 
 Requests are single-flight per target: a new request is rejected while an existing command for that target is Pending or Running.  After any finished command, the store enforces a 10-minute cooldown before accepting another request for the same target.  These checks are enforced in the command store, not only in the UI.

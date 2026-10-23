@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Viegard.Actions.MikroTik;
 using Viegard.Application.Audit;
 using Viegard.Application.Configuration;
+using Viegard.Application.Feeds;
 using Viegard.Application.Policy;
 using Viegard.Domain;
 using Viegard.Domain.Audit;
@@ -21,6 +22,8 @@ public sealed class JetPackReconciliationWorker(
     IOptions<ActionWorkerOptions> options,
     IOptions<JetPackFeedOptions> feedOptions,
     IOptions<PolicyOptions> policyOptions,
+    ProtectedAddressList protectedList,
+    IOptions<FeedGuardOptions> guardOptions,
     PolicyPostureSource postureSource,
     IMikroTikRouterHttpClientFactory httpClientFactory,
     IAuditLedger auditLedger,
@@ -65,10 +68,31 @@ public sealed class JetPackReconciliationWorker(
             return JetPackReconciliationCycleResult.CreateDisabled(now, settings.AddressListName);
         }
 
-        var desired = (await desiredStore.ListAsync(cancellationToken).ConfigureAwait(false))
+        var guards = guardOptions.Value;
+        var stored = await desiredStore.ListAsync(cancellationToken).ConfigureAwait(false);
+        var filtered = FeedAddressGuard.Filter(stored.Select(address => address.Address), protectedList, guards);
+        if (filtered.Rejected.Count > 0)
+        {
+            logger.LogWarning(
+                "JetPack reconciliation skipped {RejectedCount} feed entries that failed the protected-range or prefix guard. {Summary}",
+                filtered.Rejected.Count,
+                filtered.SummarizeRejections());
+        }
+
+        var accepted = filtered.Accepted.ToHashSet(StringComparer.Ordinal);
+        var desired = stored
+            .Where(address => accepted.Contains(address.Address))
             .OrderBy(address => address.Address, StringComparer.Ordinal)
             .ToList();
         var desiredMap = desired.ToDictionary(address => address.Address, StringComparer.Ordinal);
+        var guardWarnings = new List<string>();
+        string? capacityBlock = null;
+        if (desired.Count > guards.JetPackMaxEntries)
+        {
+            capacityBlock = $"JetPack desired set of {desired.Count} entries exceeds the limit of {guards.JetPackMaxEntries}; no change applied.";
+            guardWarnings.Add(capacityBlock);
+        }
+
         var routers = (await routerStore.ListAsync(cancellationToken).ConfigureAwait(false))
             .Where(router => router.Enabled)
             .OrderBy(router => router.Name, StringComparer.Ordinal)
@@ -77,6 +101,12 @@ public sealed class JetPackReconciliationWorker(
         var results = new List<JetPackReconciliationRouterResult>(routers.Count);
         foreach (var router in routers)
         {
+            if (capacityBlock is not null)
+            {
+                results.Add(JetPackReconciliationRouterResult.Skip(router.Id, SafeRouterName(router.Name), capacityBlock));
+                continue;
+            }
+
             try
             {
                 var routerResult = await ConvergeRouterAsync(
@@ -84,6 +114,8 @@ public sealed class JetPackReconciliationWorker(
                     settings.AddressListName,
                     desiredMap,
                     posture.DryRun,
+                    guards,
+                    guardWarnings,
                     cancellationToken).ConfigureAwait(false);
                 if (routerResult.Skipped)
                 {
@@ -111,6 +143,19 @@ public sealed class JetPackReconciliationWorker(
         }
 
         var cycle = new JetPackReconciliationCycleResult(now, settings.AddressListName, posture.DryRun, false, results);
+        if (guardWarnings.Count > 0)
+        {
+            logger.LogWarning("JetPack reconciliation guard blocked a refresh. {Warnings}", string.Join(" ", guardWarnings));
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = now,
+                Stage = PipelineStage.Action,
+                Summary = $"WARNING: JetPack reconciliation guard blocked {guardWarnings.Count} refresh(es); operator review required.",
+                DetailJson = JsonSerializer.Serialize(new { settings.AddressListName, Warnings = guardWarnings }, Json),
+            }, cancellationToken).ConfigureAwait(false);
+        }
+
         if (!cycle.Changed)
         {
             logger.LogDebug(
@@ -172,6 +217,8 @@ public sealed class JetPackReconciliationWorker(
         string addressListName,
         IReadOnlyDictionary<string, JetPackDesiredAddress> desired,
         bool dryRun,
+        FeedGuardOptions guards,
+        List<string> guardWarnings,
         CancellationToken cancellationToken)
     {
         var savedRouter = MikroTikRouterValidator.NormalizeForSave(router);
@@ -222,6 +269,13 @@ public sealed class JetPackReconciliationWorker(
             var extraneous = actual
                 .Where(entry => entry.CanonicalAddress is null || !desired.ContainsKey(entry.CanonicalAddress))
                 .ToList();
+
+            var ratioBlock = FeedAddressGuard.EvaluateChangeRatio(actual.Count, missing.Count + extraneous.Count, guards);
+            if (ratioBlock is not null)
+            {
+                guardWarnings.Add($"Router {SafeRouterName(savedRouter.Name)}: {ratioBlock}");
+                return JetPackReconciliationRouterResult.Skip(savedRouter.Id, savedRouter.Name, ratioBlock);
+            }
 
             if (dryRun)
             {

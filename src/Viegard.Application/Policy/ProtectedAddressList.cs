@@ -41,6 +41,33 @@ public sealed class ProtectedAddressList
         return _ranges.Any(range => range.Contains(address));
     }
 
+    /// <summary>
+    /// Returns true when an address or CIDR shares any address with a protected
+    /// range: the candidate sits inside a protected network, or is a broader
+    /// network that contains one.  Unparseable input is treated as overlapping
+    /// (fail closed).
+    /// </summary>
+    public bool OverlapsProtected(string? addressOrCidr)
+    {
+        if (string.IsNullOrWhiteSpace(addressOrCidr))
+        {
+            return true;
+        }
+
+        var text = addressOrCidr.Trim();
+        if (!text.Contains('/'))
+        {
+            return IsProtected(text);
+        }
+
+        if (!TryParseCidr(text, out var candidate, out _))
+        {
+            return true;
+        }
+
+        return _ranges.Any(range => range.Overlaps(candidate));
+    }
+
     internal static bool TryParseCidr(string? cidr, out string? failure) =>
         TryParseCidr(cidr, out _, out failure);
 
@@ -104,6 +131,35 @@ public sealed class ProtectedAddressList
 
     private readonly record struct CidrRange(IPAddress Network, int PrefixLength)
     {
+        public bool Overlaps(CidrRange other)
+        {
+            var left = Network.GetAddressBytes();
+            var right = other.Network.GetAddressBytes();
+            if (left.Length != right.Length)
+            {
+                return false;
+            }
+
+            var shared = Math.Min(PrefixLength, other.PrefixLength);
+            var fullBytes = shared / 8;
+            for (var i = 0; i < fullBytes; i++)
+            {
+                if (left[i] != right[i])
+                {
+                    return false;
+                }
+            }
+
+            var remainingBits = shared % 8;
+            if (remainingBits == 0)
+            {
+                return true;
+            }
+
+            var mask = (byte)(0xFF << (8 - remainingBits));
+            return (left[fullBytes] & mask) == (right[fullBytes] & mask);
+        }
+
         public bool Contains(IPAddress address)
         {
             var candidateBytes = address.GetAddressBytes();

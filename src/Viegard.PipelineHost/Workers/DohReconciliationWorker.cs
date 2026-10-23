@@ -7,6 +7,7 @@ using Viegard.Actions.MikroTik;
 using Viegard.Application.Audit;
 using Viegard.Application.Configuration;
 using Viegard.Application.Doh;
+using Viegard.Application.Feeds;
 using Viegard.Application.Policy;
 using Viegard.Domain;
 using Viegard.Domain.Audit;
@@ -32,6 +33,8 @@ public sealed class DohReconciliationWorker(
     IOptions<ActionWorkerOptions> options,
     IOptions<DohBlocklistOptions> dohOptions,
     IOptions<PolicyOptions> policyOptions,
+    ProtectedAddressList protectedList,
+    IOptions<FeedGuardOptions> guardOptions,
     PolicyPostureSource postureSource,
     IMikroTikRouterHttpClientFactory httpClientFactory,
     IAuditLedger auditLedger,
@@ -79,9 +82,30 @@ public sealed class DohReconciliationWorker(
 
         var dryRun = posture.DryRun || !settings.ApplyToRouters;
 
-        var desired = (await desiredStore.ListAsync(cancellationToken).ConfigureAwait(false))
+        var guards = guardOptions.Value;
+        var stored = await desiredStore.ListAsync(cancellationToken).ConfigureAwait(false);
+        var filtered = FeedAddressGuard.Filter(stored.Select(address => address.Address), protectedList, guards);
+        if (filtered.Rejected.Count > 0)
+        {
+            logger.LogWarning(
+                "DoH reconciliation skipped {RejectedCount} feed entries that failed the protected-range or prefix guard. {Summary}",
+                filtered.Rejected.Count,
+                filtered.SummarizeRejections());
+        }
+
+        var accepted = filtered.Accepted.ToHashSet(StringComparer.Ordinal);
+        var desired = stored
+            .Where(address => accepted.Contains(address.Address))
             .OrderBy(address => address.Address, StringComparer.Ordinal)
             .ToList();
+        var guardWarnings = new List<string>();
+        string? capacityBlock = null;
+        if (desired.Count > guards.DohMaxEntries)
+        {
+            capacityBlock = $"DoH desired set of {desired.Count} entries exceeds the limit of {guards.DohMaxEntries}; no change applied.";
+            guardWarnings.Add(capacityBlock);
+        }
+
         var probeResults = (await probeResultStore.ListAsync(cancellationToken).ConfigureAwait(false))
             .ToDictionary(result => result.Address, StringComparer.Ordinal);
         var desiredComments = desired.ToDictionary(
@@ -97,6 +121,12 @@ public sealed class DohReconciliationWorker(
         var results = new List<DohReconciliationRouterResult>(routers.Count);
         foreach (var router in routers)
         {
+            if (capacityBlock is not null)
+            {
+                results.Add(DohReconciliationRouterResult.Skip(router.Id, SafeRouterName(router.Name), capacityBlock));
+                continue;
+            }
+
             try
             {
                 var routerResult = await ConvergeRouterAsync(
@@ -104,6 +134,8 @@ public sealed class DohReconciliationWorker(
                     settings.AddressListName,
                     desiredComments,
                     dryRun,
+                    guards,
+                    guardWarnings,
                     cancellationToken).ConfigureAwait(false);
                 if (routerResult.Skipped)
                 {
@@ -155,6 +187,20 @@ public sealed class DohReconciliationWorker(
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             logger.LogWarning(ex, "DoH reconciliation could not persist the latest proposal snapshot.");
+        }
+
+        if (guardWarnings.Count > 0)
+        {
+            logger.LogWarning("DoH reconciliation guard blocked a refresh. {Warnings}", string.Join(" ", guardWarnings));
+            await auditLedger.AppendAsync(new AuditRecord
+            {
+                Id = ViegardId.New(),
+                Timestamp = now,
+                Stage = PipelineStage.Action,
+                SourceId = "doh-reconciliation",
+                Summary = $"WARNING: DoH reconciliation guard blocked {guardWarnings.Count} refresh(es); operator review required.",
+                DetailJson = JsonSerializer.Serialize(new { settings.AddressListName, Warnings = guardWarnings }, Json),
+            }, cancellationToken).ConfigureAwait(false);
         }
 
         if (!cycle.HasChanges)
@@ -235,6 +281,8 @@ public sealed class DohReconciliationWorker(
         string addressListName,
         IReadOnlyDictionary<string, string> desiredComments,
         bool dryRun,
+        FeedGuardOptions guards,
+        List<string> guardWarnings,
         CancellationToken cancellationToken)
     {
         var savedRouter = MikroTikRouterValidator.NormalizeForSave(router);
@@ -282,6 +330,13 @@ public sealed class DohReconciliationWorker(
             var extraneous = actual
                 .Where(entry => entry.CanonicalAddress is null || !desiredComments.ContainsKey(entry.CanonicalAddress))
                 .ToList();
+
+            var ratioBlock = FeedAddressGuard.EvaluateChangeRatio(actual.Count, missing.Count + extraneous.Count, guards);
+            if (ratioBlock is not null)
+            {
+                guardWarnings.Add($"Router {SafeRouterName(savedRouter.Name)}: {ratioBlock}");
+                return DohReconciliationRouterResult.Skip(savedRouter.Id, savedRouter.Name, ratioBlock);
+            }
 
             if (dryRun)
             {

@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Viegard.Application.Configuration;
+using Viegard.Application.Feeds;
 using Viegard.Application.Policy;
 using Viegard.Domain.Audit;
 using Viegard.Persistence.InMemory;
@@ -94,6 +95,8 @@ public sealed class JetPackReconciliationWorkerTests
                     ManualApprovalMode = true,
                 },
             }),
+            new ProtectedAddressList(new PolicyOptions().ProtectedCidrs),
+            Options.Create(new FeedGuardOptions()),
             new PolicyPostureSource(),
             fixture.Http,
             audit,
@@ -120,6 +123,47 @@ public sealed class JetPackReconciliationWorkerTests
         Assert.Equal("122.248.245.244/32", Assert.Single(routerResult.Added));
         Assert.Equal("198.51.100.7", Assert.Single(routerResult.Removed));
         Assert.Empty(audit.Snapshot());
+    }
+
+    [Fact]
+    public async Task Reconciler_skips_protected_and_overly_broad_entries()
+    {
+        var fixture = new ProviderFixture();
+        var audit = new InMemoryAuditLedger();
+        var router = await fixture.AddRouterAsync("router-a");
+        var settings = await SeedSettingsAsync(enabled: true);
+        var desired = new InMemoryJetPackDesiredAddressStore();
+        await desired.ReplaceSnapshotAsync(
+            ["122.248.245.244/32", "192.168.1.0/24", "100.0.0.0/4", "8.0.0.0/8"],
+            fixture.Time.GetUtcNow());
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, "[]"));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.Created, "{}"));
+
+        var result = await Worker(fixture, settings, desired, audit).RunCycleAsync();
+
+        Assert.Equal(["GET", "PUT"], fixture.Http.Requests.Select(request => request.Method).ToArray());
+        Assert.Equal("122.248.245.244/32", Assert.Single(Assert.Single(result.Routers).Added));
+    }
+
+    [Fact]
+    public async Task Reconciler_blocks_refresh_that_changes_too_much_of_the_existing_list()
+    {
+        var fixture = new ProviderFixture();
+        var audit = new InMemoryAuditLedger();
+        var router = await fixture.AddRouterAsync("router-a");
+        var settings = await SeedSettingsAsync(enabled: true);
+        var desired = new InMemoryJetPackDesiredAddressStore();
+        var existing = string.Join(
+            ",",
+            Enumerable.Range(1, 30).Select(i => $$"""{".id":"*{{i}}","list":"jetpack_servers","address":"203.0.113.{{i}}"}"""));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, $"[{existing}]"));
+
+        var result = await Worker(fixture, settings, desired, audit).RunCycleAsync();
+
+        Assert.False(result.Changed);
+        Assert.Single(fixture.Http.Requests);
+        Assert.True(Assert.Single(result.Routers).Skipped);
+        Assert.StartsWith("WARNING", Assert.Single(audit.Snapshot()).Summary, StringComparison.Ordinal);
     }
 
     private static async Task<IJetPackFeedSettingsStore> SeedSettingsAsync(bool enabled)

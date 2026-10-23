@@ -56,6 +56,11 @@ builder.Services
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<Viegard.Application.Doh.DohBlocklistOptions>, Viegard.Application.Doh.DohBlocklistOptionsValidator>();
 builder.Services
+    .AddOptions<Viegard.Application.Feeds.FeedGuardOptions>()
+    .Bind(builder.Configuration.GetSection(Viegard.Application.Feeds.FeedGuardOptions.SectionName))
+    .ValidateOnStart();
+builder.Services.AddSingleton<IValidateOptions<Viegard.Application.Feeds.FeedGuardOptions>, Viegard.Application.Feeds.FeedGuardOptionsValidator>();
+builder.Services
     .AddOptions<LocalModelAdvisorOptions>()
     .Bind(builder.Configuration.GetSection(LocalModelAdvisorOptions.SectionName))
     .ValidateOnStart();

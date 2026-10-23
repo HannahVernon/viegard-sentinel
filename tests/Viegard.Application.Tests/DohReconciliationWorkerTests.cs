@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Viegard.Application.Configuration;
 using Viegard.Application.Doh;
+using Viegard.Application.Feeds;
 using Viegard.Application.Policy;
 using Viegard.Persistence.InMemory;
 using Viegard.PipelineHost.Configuration;
@@ -136,6 +137,50 @@ public sealed class DohReconciliationWorkerTests
         Assert.Empty(audit.Snapshot());
     }
 
+    [Fact]
+    public async Task Reconciler_skips_protected_overlapping_and_overly_broad_entries()
+    {
+        var fixture = new ProviderFixture();
+        var audit = new InMemoryAuditLedger();
+        var router = await fixture.AddRouterAsync("router-a");
+        var settings = await SeedSettingsAsync(enabled: true, applyToRouters: true);
+        var desired = new InMemoryDohDesiredAddressStore();
+        await desired.ReplaceSnapshotAsync(
+            ["1.1.1.1", "10.1.2.3", "172.0.0.0/8", "8.0.0.0/8", "0.0.0.0/0"],
+            fixture.Time.GetUtcNow());
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, "[]"));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.Created, "{}"));
+
+        var result = await Worker(fixture, settings, desired, new InMemoryDohProbeResultStore(), audit).RunCycleAsync();
+
+        Assert.Equal(["GET", "PUT"], fixture.Http.Requests.Select(request => request.Method).ToArray());
+        Assert.Equal("1.1.1.1", Assert.Single(Assert.Single(result.Routers).Added));
+    }
+
+    [Fact]
+    public async Task Reconciler_blocks_refresh_that_changes_too_much_of_the_existing_list()
+    {
+        var fixture = new ProviderFixture();
+        var audit = new InMemoryAuditLedger();
+        var router = await fixture.AddRouterAsync("router-a");
+        var settings = await SeedSettingsAsync(enabled: true, applyToRouters: true);
+        var desired = new InMemoryDohDesiredAddressStore();
+        var existing = string.Join(
+            ",",
+            Enumerable.Range(1, 30).Select(i => $$"""{".id":"*{{i}}","list":"{{ListName}}","address":"203.0.113.{{i}}"}"""));
+        fixture.Http.Enqueue(router.Id, JsonResponse(HttpStatusCode.OK, $"[{existing}]"));
+
+        var result = await Worker(fixture, settings, desired, new InMemoryDohProbeResultStore(), audit).RunCycleAsync();
+
+        Assert.False(result.Changed);
+        Assert.Single(fixture.Http.Requests);
+        var routerResult = Assert.Single(result.Routers);
+        Assert.True(routerResult.Skipped);
+        Assert.Contains("change-ratio guard", routerResult.Detail, StringComparison.Ordinal);
+        var record = Assert.Single(audit.Snapshot());
+        Assert.StartsWith("WARNING", record.Summary, StringComparison.Ordinal);
+    }
+
     private static DohReconciliationWorker Worker(
         ProviderFixture fixture,
         IDohBlocklistSettingsStore settings,
@@ -161,6 +206,8 @@ public sealed class DohReconciliationWorkerTests
                     ManualApprovalMode = true,
                 },
             }),
+            new ProtectedAddressList(new PolicyOptions().ProtectedCidrs),
+            Options.Create(new FeedGuardOptions()),
             new PolicyPostureSource(),
             fixture.Http,
             audit,

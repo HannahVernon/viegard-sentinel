@@ -85,6 +85,37 @@ public sealed class AdminAppPasswordEndpointsTests
     }
 
     [Fact]
+    public async Task Create_stores_normalized_allowed_networks_and_audits_them()
+    {
+        var fixture = await FixtureAsync(freshStepUp: true);
+        fixture.Context.Request.Form = Form(("name", "ci"), ("allowedNetworks", " 198.51.100.0/24, 192.0.2.10 "));
+
+        var outcome = await fixture.ExecuteAsync(await fixture.InvokeCreateAsync());
+
+        Assert.True(string.IsNullOrEmpty(outcome.Error));
+        var stored = Assert.Single(await fixture.AppPasswords.ListForUserAsync(fixture.User.Id));
+        Assert.Equal(new[] { "198.51.100.0/24", "192.0.2.10" }, stored.AllowedSourceNetworks);
+        Assert.Contains(fixture.AuditLedger.Records, record =>
+            record.DetailJson?.Contains("198.51.100.0/24", StringComparison.Ordinal) == true);
+    }
+
+    [Theory]
+    [InlineData("198.51.100.0/33")]
+    [InlineData("300.1.1.1")]
+    [InlineData("198.51.100.0/24, nonsense")]
+    [InlineData("10.0.0.0/8/8")]
+    public async Task Create_rejects_malformed_allowed_networks(string networks)
+    {
+        var fixture = await FixtureAsync(freshStepUp: true);
+        fixture.Context.Request.Form = Form(("name", "ci"), ("allowedNetworks", networks));
+
+        var outcome = await fixture.ExecuteAsync(await fixture.InvokeCreateAsync());
+
+        Assert.Contains("Allowed network", outcome.Error);
+        Assert.Empty(await fixture.AppPasswords.ListForUserAsync(fixture.User.Id));
+    }
+
+    [Fact]
     public async Task Revoke_requires_step_up_and_valid_id()
     {
         var gated = await FixtureAsync(freshStepUp: false);

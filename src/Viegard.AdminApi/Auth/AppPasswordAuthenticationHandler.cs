@@ -4,7 +4,9 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 using Viegard.Application.Auth;
 using Viegard.Application.Logging;
+using Viegard.Application.Net;
 using Viegard.Application.Stores;
+using Viegard.Domain.Admin;
 
 namespace Viegard.AdminApi.Auth;
 
@@ -73,6 +75,11 @@ public sealed class AppPasswordAuthenticationHandler(
             return Fail(appPassword.RevokedAt is not null ? "revoked token" : "expired token");
         }
 
+        if (!IsSourceAllowed(appPassword))
+        {
+            return Fail("source address not allowed for token");
+        }
+
         var user = await users.GetByIdAsync(appPassword.UserId, Context.RequestAborted).ConfigureAwait(false);
         if (user is null || user.LockedUntil > now || user.MustChangePassword || !user.TotpEnrolled)
         {
@@ -96,6 +103,34 @@ public sealed class AppPasswordAuthenticationHandler(
         ], Scheme.Name);
         return AuthenticateResult.Success(
             new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name));
+    }
+
+    /// <summary>
+    /// Enforces the optional per-token source networks against the connection's remote address, which the
+    /// forwarded-headers middleware has already resolved.  A missing address or an unreadable stored entry
+    /// fails closed.
+    /// </summary>
+    private bool IsSourceAllowed(AppPassword appPassword)
+    {
+        if (appPassword.AllowedSourceNetworks.Count == 0)
+        {
+            return true;
+        }
+
+        var remote = Context.Connection.RemoteIpAddress;
+        if (remote is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return new CidrSet(appPassword.AllowedSourceNetworks).Contains(remote);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     private AuthenticateResult Fail(string reason)

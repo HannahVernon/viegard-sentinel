@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Viegard.Application.Net;
 using Viegard.Application.Stores;
 using Viegard.Domain.Admin;
 using Viegard.Persistence.Postgres.Model;
@@ -69,6 +70,7 @@ public sealed class PostgresAppPasswordStore(IDbContextFactory<ViegardDbContext>
         ExpiresAt = appPassword.ExpiresAt?.ToUniversalTime(),
         LastUsedAt = appPassword.LastUsedAt?.ToUniversalTime(),
         RevokedAt = appPassword.RevokedAt?.ToUniversalTime(),
+        AllowedSourceNetworks = AppPasswordNetworks.Join(appPassword.AllowedSourceNetworks),
     };
 
     private static AppPassword ToDomain(AppPasswordRow row) => new()
@@ -82,5 +84,6 @@ public sealed class PostgresAppPasswordStore(IDbContextFactory<ViegardDbContext>
         ExpiresAt = row.ExpiresAt,
         LastUsedAt = row.LastUsedAt,
         RevokedAt = row.RevokedAt,
+        AllowedSourceNetworks = AppPasswordNetworks.Split(row.AllowedSourceNetworks),
     };
 }

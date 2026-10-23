@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
@@ -55,6 +56,43 @@ public sealed class AppPasswordAuthenticationHandlerTests
     }
 
     [Fact]
+    public async Task Token_without_networks_authenticates_from_any_address()
+    {
+        var harness = await HarnessAsync();
+
+        Assert.True((await harness.AuthenticateAsync("Bearer " + harness.Token, "203.0.113.9")).Succeeded);
+        Assert.True((await harness.AuthenticateAsync("Bearer " + harness.Token)).Succeeded);
+    }
+
+    [Theory]
+    [InlineData("198.51.100.20", true)]
+    [InlineData("192.0.2.77", true)]
+    [InlineData("::ffff:192.0.2.77", true)]
+    [InlineData("203.0.113.9", false)]
+    [InlineData("2001:db8::1", false)]
+    [InlineData(null, false)]
+    public async Task Token_with_networks_is_enforced_against_the_remote_address(string? remote, bool allowed)
+    {
+        var harness = await HarnessAsync(allowedNetworks: ["198.51.100.20", "192.0.2.0/24"]);
+
+        var result = await harness.AuthenticateAsync("Bearer " + harness.Token, remote);
+
+        Assert.Equal(allowed, result.Succeeded);
+        if (!allowed)
+        {
+            Assert.NotNull(result.Failure);
+        }
+    }
+
+    [Fact]
+    public async Task Token_with_unreadable_stored_network_fails_closed()
+    {
+        var harness = await HarnessAsync(allowedNetworks: ["not-a-network"]);
+
+        Assert.False((await harness.AuthenticateAsync("Bearer " + harness.Token, "192.0.2.1")).Succeeded);
+    }
+
+    [Fact]
     public async Task Revoked_token_fails()
     {
         var harness = await HarnessAsync();
@@ -102,9 +140,14 @@ public sealed class AppPasswordAuthenticationHandlerTests
         AppPassword AppPassword,
         string Token)
     {
-        public async Task<AuthenticateResult> AuthenticateAsync(string? authorizationHeader)
+        public async Task<AuthenticateResult> AuthenticateAsync(string? authorizationHeader, string? remoteAddress = null)
         {
             var context = new DefaultHttpContext();
+            if (remoteAddress is not null)
+            {
+                context.Connection.RemoteIpAddress = IPAddress.Parse(remoteAddress);
+            }
+
             if (authorizationHeader is not null)
             {
                 context.Request.Headers.Authorization = authorizationHeader;
@@ -124,7 +167,8 @@ public sealed class AppPasswordAuthenticationHandlerTests
         DateTimeOffset? expiresAt = null,
         DateTimeOffset? lockedUntil = null,
         bool mustChangePassword = false,
-        bool totpEnrolled = true)
+        bool totpEnrolled = true,
+        string[]? allowedNetworks = null)
     {
         var now = DateTimeOffset.UtcNow;
         var users = new InMemoryAdminUserStore();
@@ -153,6 +197,7 @@ public sealed class AppPasswordAuthenticationHandlerTests
             SecretHash = generated.SecretHash,
             CreatedAt = now,
             ExpiresAt = expiresAt ?? now.AddDays(90),
+            AllowedSourceNetworks = allowedNetworks ?? [],
         };
         await store.CreateAsync(appPassword);
 

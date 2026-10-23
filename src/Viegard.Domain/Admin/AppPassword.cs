@@ -33,6 +33,9 @@ public sealed record AppPassword
 
     public DateTimeOffset? RevokedAt { get; init; }
 
+    /// <summary>Optional source addresses or CIDR ranges allowed to use this token; empty means unrestricted.</summary>
+    public IReadOnlyList<string> AllowedSourceNetworks { get; init; } = [];
+
     public bool IsUsable(DateTimeOffset now) =>
         RevokedAt is null && (ExpiresAt is null || ExpiresAt > now);
 }

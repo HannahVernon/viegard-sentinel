@@ -660,6 +660,7 @@ public sealed partial class ViegardDbContext(DbContextOptions<ViegardDbContext> 
             entity.Property(e => e.Name).HasMaxLength(128);
             entity.Property(e => e.LookupKey).HasMaxLength(16);
             entity.Property(e => e.SecretHash).HasMaxLength(64);
+            entity.Property(e => e.AllowedSourceNetworks).HasMaxLength(1024);
             entity.HasOne<AdminUserRow>().WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 

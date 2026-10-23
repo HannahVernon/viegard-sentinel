@@ -728,6 +728,7 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
         Guid appPasswordId,
         string name,
         DateTimeOffset expiresAt,
+        IReadOnlyList<string> allowedSourceNetworks,
         CancellationToken cancellationToken = default)
     {
         try
@@ -737,7 +738,9 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
                 Id = ViegardId.New(),
                 Timestamp = DateTimeOffset.UtcNow,
                 Stage = PipelineStage.Admin,
-                Summary = $"Admin config write by {username}: created read-only app password '{name}'.",
+                Summary = allowedSourceNetworks.Count == 0
+                    ? $"Admin config write by {username}: created read-only app password '{name}'."
+                    : $"Admin config write by {username}: created read-only app password '{name}' restricted to {allowedSourceNetworks.Count} source network(s).",
                 SourceId = "admin:account",
                 DetailJson = JsonSerializer.Serialize(new
                 {
@@ -746,6 +749,7 @@ public sealed class AdminConfigAuditor(IAuditLedger auditLedger, ILogger<AdminCo
                     AppPasswordId = appPasswordId,
                     Name = name,
                     ExpiresAt = expiresAt,
+                    AllowedSourceNetworks = allowedSourceNetworks,
                 }, JsonOptions),
             }, cancellationToken).ConfigureAwait(false);
         }

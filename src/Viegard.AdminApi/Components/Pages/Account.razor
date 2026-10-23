@@ -1,5 +1,6 @@
 @page "/account"
 @attribute [Authorize]
+@using Viegard.Application.Net
 @inject IHttpContextAccessor HttpContextAccessor
 @inject IAdminUserStore Users
 @inject IAdminSessionStore Sessions
@@ -239,6 +240,7 @@
                             <th>Name</th>
                             <th>Created</th>
                             <th>Expires</th>
+                            <th>Allowed networks</th>
                             <th>Last used</th>
                             <th>Status</th>
                             <th>Action</th>
@@ -251,6 +253,7 @@
                                 <td>@appPassword.Name</td>
                                 <td>@Display.Format(appPassword.CreatedAt)</td>
                                 <td>@(appPassword.ExpiresAt is null ? "never" : Display.Format(appPassword.ExpiresAt.Value))</td>
+                                <td>@(appPassword.AllowedSourceNetworks.Count == 0 ? "any" : string.Join(", ", appPassword.AllowedSourceNetworks))</td>
                                 <td>@(appPassword.LastUsedAt is null ? "never" : Display.Format(appPassword.LastUsedAt.Value))</td>
                                 <td>
                                     @if (appPassword.RevokedAt is not null)
@@ -293,6 +296,10 @@
                     <label>
                         Name
                         <input name="name" autocomplete="off" required maxlength="@AdminAppPasswordEndpoints.MaxNameLength" placeholder="copilot-cli" />
+                    </label>
+                    <label>
+                        Allowed networks (optional)
+                        <input name="allowedNetworks" autocomplete="off" maxlength="@AppPasswordNetworks.MaxStoredLength" placeholder="192.0.2.10, 198.51.100.0/24" />
                     </label>
                     <button type="submit">Create app password</button>
                 </form>

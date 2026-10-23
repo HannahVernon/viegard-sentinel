@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Antiforgery;
 using Viegard.Application.Auth;
+using Viegard.Application.Net;
 using Viegard.Application.Stores;
 using Viegard.Domain;
 using Viegard.Domain.Admin;
@@ -58,6 +59,11 @@ public static class AdminAppPasswordEndpoints
             return Redirect(error: $"App password name is required and must be at most {MaxNameLength} characters.");
         }
 
+        if (!AppPasswordNetworks.TryParse(form["allowedNetworks"].ToString(), out var allowedNetworks, out var networkError))
+        {
+            return Redirect(error: networkError);
+        }
+
         var now = DateTimeOffset.UtcNow;
         var generated = AppPasswordTokenFormat.Generate();
         var appPassword = new AppPassword
@@ -69,6 +75,7 @@ public static class AdminAppPasswordEndpoints
             SecretHash = generated.SecretHash,
             CreatedAt = now,
             ExpiresAt = now + authOptions.Value.AppPasswordLifetime,
+            AllowedSourceNetworks = allowedNetworks,
         };
         await appPasswords.CreateAsync(appPassword, context.RequestAborted).ConfigureAwait(false);
         await configAuditor.RecordAppPasswordCreatedAsync(
@@ -76,6 +83,7 @@ public static class AdminAppPasswordEndpoints
             appPassword.Id,
             name,
             appPassword.ExpiresAt.Value,
+            allowedNetworks,
             context.RequestAborted).ConfigureAwait(false);
         newAppPasswordCookie.Write(context, generated.Token);
         return Redirect(status: $"App password '{name}' created.  Copy it now: it is shown once and never again.");

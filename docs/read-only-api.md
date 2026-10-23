@@ -19,6 +19,28 @@ subject to the same source-address allowlist as the rest of the admin
 interface, and tokens expire after the configured lifetime (90 days by
 default) or on revocation from the account page.
 
+### Restricting a token to source networks
+
+The create form has an optional **Allowed networks** field.  Enter up to 16 IP
+addresses or CIDR ranges separated by commas, spaces, or semicolons, for
+example 192.0.2.10, 198.51.100.0/24 or 2001:db8::/32.  A malformed entry,
+such as a prefix length out of range, is rejected and no token is created.
+
+When a token has allowed networks, the request is authenticated only if the
+connection's remote address falls inside one of them.  The address is the one
+resolved by the admin service's forwarded-headers configuration: behind a
+trusted reverse proxy it is the client address taken from the forwarded
+header, and otherwise it is the direct peer address.  A missing address, an
+address outside every range, or a stored entry that cannot be read is
+rejected (fail closed), and the rejection is logged with the reason
+source address not allowed for token.  IPv4-mapped IPv6 addresses are
+compared as IPv4.
+
+Tokens created without allowed networks accept any source that passes the
+admin allowlist, as before.  The networks are fixed at creation and shown on
+the account page; to change them, revoke the token and create a new one.
+Creation is audited, and the audit record lists the networks.
+
 ## Endpoints
 
 Path | Returns

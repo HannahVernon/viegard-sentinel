@@ -1007,6 +1007,8 @@ public sealed class AppPasswordRow
     public DateTimeOffset? LastUsedAt { get; set; }
 
     public DateTimeOffset? RevokedAt { get; set; }
+
+    public string AllowedSourceNetworks { get; set; } = string.Empty;
 }
 
 public sealed class AdminSessionRow
